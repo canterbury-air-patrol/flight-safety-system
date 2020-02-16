@@ -4,6 +4,7 @@ ECPG?=ecpg
 
 all: fss-server fss-client
 
+CFLAGS=-Wall -Werror -fPIC -std=c99 -g2
 CXXFLAGS=-Wall -Werror -fPIC -std=c++11 -g2
 
 PC_LIST=jsoncpp libecpg
@@ -42,4 +43,4 @@ libfss.so: $(LIBFSS_OBJS)
 
 
 clean:
-	rm -f fss-server libfss.so $(SERVER_OBJS) $(CLIENT_OBJS) $(LIBFSS_OBJS)
+	rm -f fss-server fss-client libfss.so $(SERVER_OBJS) $(CLIENT_OBJS) $(LIBFSS_OBJS)

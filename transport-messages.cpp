@@ -127,8 +127,8 @@ fss_message_position_report::packData(buf_len &bl)
 {
     uint64_t ts = htonll(this->getTimeStamp());
     /* Convert the lat/long to fixed decimal for transport */
-    int32_t lat = htonl((int32_t) this->getLatitude() / 0.000001);
-    int32_t lng = htonl((int32_t) this->getLongitude() / 0.000001);
+    int32_t lat = htonl((int32_t) (this->getLatitude() / 0.000001));
+    int32_t lng = htonl((int32_t) (this->getLongitude() / 0.000001));
     uint32_t alt = htonl(this->getAltitude());
     bl.addData((char *)&ts, sizeof(uint64_t));
     bl.addData((char *)&lat, sizeof(int32_t));
@@ -157,8 +157,8 @@ fss_message_position_report::unpackData(buf_len &bl)
         this->altitude = ntohl(*(uint32_t *)(data + offset));
         offset += sizeof(uint32_t);
     }
-    this->latitude = lat * 0.000001;
-    this->longitude = lng * 0.000001;
+    this->latitude = ((double)lat) * 0.000001;
+    this->longitude = ((double)lng) * 0.000001;
 }
 
 void

@@ -13,6 +13,8 @@
 
 #include <errno.h>
 
+#include <sys/time.h>
+
 #include "transport.hpp"
 
 fss::fss(std::string name)
@@ -89,7 +91,7 @@ fss_connection::processMessages()
         }
         if (this->handler != NULL)
         {
-            this->handler(this, msg);
+            this->handler->processMessage(msg);
             delete msg;
         }
         else
@@ -130,6 +132,7 @@ fss_connection::sendMsg(fss_message *msg)
     return this->sendMsg(bl);
 }
 
+#ifdef DEBUG
 static void
 print_bl(buf_len &bl)
 {
@@ -141,6 +144,7 @@ print_bl(buf_len &bl)
     }
     printf("\n");
 }
+#endif
 
 bool
 fss_connection::sendMsg(buf_len &bl)
@@ -148,7 +152,9 @@ fss_connection::sendMsg(buf_len &bl)
     size_t sent = 0;
     size_t to_send = bl.getLength();
     const char *data = bl.getData();
+#ifdef DEBUG
     print_bl(bl);
+#endif
     while (sent < to_send)
     {
         ssize_t transfered = send(this->fd, data + sent, to_send - sent, 0);
@@ -161,22 +167,19 @@ fss_connection::sendMsg(buf_len &bl)
     return true;
 }
 
-void fss_connection::setHandler(fss_message_cb cb)
+void fss_connection::setHandler(fss_message_cb *cb)
 {
-    bool catchup = (this->handler == NULL);
     this->handler = cb;
-    if (catchup)
+    while(!this->messages.empty())
     {
-        while(!this->messages.empty())
-        {
-            fss_message *msg = this->messages.front();
-            this->messages.pop();
-            cb(this, msg);
-            delete msg;
-        }
+        fss_message *msg = this->messages.front();
+        this->messages.pop();
+        cb->processMessage(msg);
+        delete msg;
     }
 }
 
+#ifdef DEBUG
 /* Run inet_ntop on a sockaddr_storage object */
 static const char *
 inet_ntop_stor(struct sockaddr_storage *src, char *dst, size_t dstlen, uint16_t *port)
@@ -196,6 +199,7 @@ inet_ntop_stor(struct sockaddr_storage *src, char *dst, size_t dstlen, uint16_t 
     }
     return NULL;
 }
+#endif
 
 fss_message *
 fss_connection::recvMsg()
@@ -228,8 +232,10 @@ fss_connection::recvMsg()
         if (received == total_length)
         {
             buf_len bl(data, data_length);
+#ifdef DEBUG
             printf("Message reads: \n");
             print_bl(bl);
+#endif
             msg = fss_message::decode(bl);
         }
         else
@@ -238,7 +244,7 @@ fss_connection::recvMsg()
             free (data);
         }
     }
-    else if(received == 0)
+    else if(received == 0 || (received < 0 || errno == EBADF))
     {
         /* Connection was closed */
         msg = new fss_message_closed();
@@ -274,10 +280,12 @@ fss_listen::processMessages()
             }
             continue;
         }
+#ifdef DEBUG
         char addr_str[INET6_ADDRSTRLEN];
         uint16_t port;
         inet_ntop_stor(&sa, addr_str, INET6_ADDRSTRLEN, &port);
         std::cout << "New client from " << addr_str << ":" << port << " as " << fd << std::endl;
+#endif
         if (this->cb != NULL)
         {
             fss_connection *conn = new fss_connection(fd);
@@ -313,4 +321,12 @@ fss_listen::startListening()
     }
     this->recv_thread = std::thread(listen_thread, this);
     return true;
+}
+
+uint64_t
+flight_safety_system::fss_current_timestamp()
+{
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return tv.tv_sec * 1000 + (tv.tv_usec / 1000);
 }

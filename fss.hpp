@@ -20,7 +20,6 @@ class fss_connection;
 class fss_listen;
 class fss_message;
 
-typedef bool (*fss_message_cb)(fss_connection *conn, fss_message *message);
 typedef bool (*fss_connect_cb)(fss_connection *conn);
 
 typedef enum {
@@ -94,12 +93,19 @@ public:
     }
 };
 
+class fss_message_cb {
+protected:
+    fss_connection *conn;
+public:
+    virtual void processMessage(fss_message *message) = 0;
+};
+
 class fss_connection {
 private:
 protected:
     int fd;
     uint64_t last_msg_id;
-    fss_message_cb handler;
+    fss_message_cb *handler;
     std::queue<fss_message *> messages;
     std::thread recv_thread;
     fss_message *recvMsg();
@@ -107,7 +113,7 @@ public:
     fss_connection();
     fss_connection(int fd);
     virtual ~fss_connection();
-    void setHandler(fss_message_cb cb);
+    void setHandler(fss_message_cb *cb);
     bool connect_to(std::string address, uint16_t port);
     uint64_t getMessageId();
     bool sendMsg(fss_message *msg);
@@ -219,7 +225,7 @@ protected:
     virtual void unpackData(buf_len &bl);
     virtual void packData(buf_len &bl);
 public:
-    fss_message_system_status(uint64_t id, uint8_t bat_remaining_percent, uint8_t mah_used) : fss_message(id, message_type_system_status), bat_percent(bat_remaining_percent), mah_used(mah_used) {};
+    fss_message_system_status(uint64_t id, uint8_t bat_remaining_percent, uint32_t mah_used) : fss_message(id, message_type_system_status), bat_percent(bat_remaining_percent), mah_used(mah_used) {};
     fss_message_system_status(uint64_t id, buf_len &bl) : fss_message(id, message_type_system_status) { this->unpackData(bl); };
     virtual uint8_t getBatRemaining() { return this->bat_percent; };
     virtual uint32_t getBatMAHUsed() { return this->mah_used; };
@@ -301,6 +307,7 @@ public:
     std::string getName() { return this->name; };
 };
 
+uint64_t fss_current_timestamp();
 }
 
 #endif
