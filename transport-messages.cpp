@@ -1,0 +1,339 @@
+#include "fss-internal.hpp"
+
+#include <arpa/inet.h>
+#if __APPLE__
+/* Apple already has these defines */
+#else
+#include <endian.h>
+#define ntohll(x) be64toh(x)
+#define htonll(x) htobe64(x)
+#endif
+
+size_t
+fss_message::headerLength()
+{
+    return sizeof(uint16_t) + sizeof(uint16_t) + sizeof(uint64_t);
+}
+
+void
+fss_message::createHeader(buf_len &bl)
+{
+    /* Make space for length, type, id */
+    size_t length = this->headerLength();
+    char *data = (char *)malloc(length);
+    memset(data, '0', length);
+    /* Set the type */
+    *(uint16_t *)(data + sizeof(uint16_t)) = htons(this->getType());
+    /* Set the id */
+    *(uint64_t *)(data + sizeof(uint16_t) + sizeof(uint16_t)) = htonll(this->getId());
+    bl.addData(data, length);
+    free(data);
+}
+
+void
+fss_message::updateSize(buf_len &bl)
+{
+    uint16_t length = bl.getLength();
+    if (length > sizeof(uint16_t))
+    {
+        /* Set the length */
+        if (length % sizeof(uint64_t) != 0)
+        {
+            uint64_t blank = 0;
+            bl.addData((char *)&blank, sizeof(uint64_t) - (length % sizeof(uint64_t)));
+        }
+        *(uint16_t *)(bl.getData()) = htons(length);
+    }
+}
+
+buf_len
+fss_message::getPacked()
+{
+    buf_len bl;
+
+    this->createHeader(bl);
+
+    this->packData(bl);
+    
+    this->updateSize(bl);
+    
+    return bl;
+}
+
+void
+fss_message_closed::packData(buf_len &bl)
+{
+}
+
+void
+fss_message_closed::unpackData(buf_len &bl)
+{
+}
+
+void
+fss_message_identity::packData(buf_len &bl)
+{
+    bl.addData(this->name.c_str(), this->name.length());
+}
+
+void
+fss_message_identity::unpackData(buf_len &bl)
+{
+    size_t offset = this->headerLength();
+    char *data = bl.getData();
+    size_t length = bl.getLength();
+    char *name = (char *)calloc(1, (length - offset) + 1);
+    memcpy(name, data + offset, length - offset);
+    name[length - offset] = '\0';
+    this->name = std::string(name);
+    free (name);
+}
+
+void
+fss_message_rtt_request::packData(buf_len &bl)
+{
+}
+
+void
+fss_message_rtt_request::unpackData(buf_len &bl)
+{
+}
+
+void
+fss_message_rtt_response::packData(buf_len &bl)
+{
+    uint64_t data = htonll(this->request_id);
+    bl.addData((char *)&data, sizeof(uint64_t));
+}
+
+void
+fss_message_rtt_response::unpackData(buf_len &bl)
+{
+    size_t offset = this->headerLength();
+    char *data = bl.getData();
+    size_t length = bl.getLength();
+    if (length - offset == sizeof(uint64_t))
+    {
+        this->request_id = ntohll(*(uint64_t *)(data + offset));
+    }
+    else
+    {
+        this->request_id = 0;
+    }
+}
+
+void
+fss_message_position_report::packData(buf_len &bl)
+{
+    uint64_t ts = htonll(this->getTimeStamp());
+    /* Convert the lat/long to fixed decimal for transport */
+    int32_t lat = htonl((int32_t) this->getLatitude() / 0.000001);
+    int32_t lng = htonl((int32_t) this->getLongitude() / 0.000001);
+    uint32_t alt = htonl(this->getAltitude());
+    bl.addData((char *)&ts, sizeof(uint64_t));
+    bl.addData((char *)&lat, sizeof(int32_t));
+    bl.addData((char *)&lng, sizeof(int32_t));
+    bl.addData((char *)&alt, sizeof(uint32_t));
+}
+
+void
+fss_message_position_report::unpackData(buf_len &bl)
+{
+    size_t offset = this->headerLength();
+    char *data = bl.getData();
+    size_t length = bl.getLength();
+    int32_t lat = 0;
+    int32_t lng = 0;
+    this->altitude = 0;
+    this->timestamp = 0;
+    if (length - offset == (sizeof(uint64_t) + sizeof(int32_t) + sizeof(int32_t) + sizeof(uint32_t)))
+    {
+        this->timestamp = ntohll(*(uint64_t *)(data + offset));
+        offset += sizeof(uint64_t);
+        lat = ntohl(*(int32_t *)(data + offset));
+        offset += sizeof(int32_t);
+        lng = ntohl(*(int32_t *)(data + offset));
+        offset += sizeof(int32_t);
+        this->altitude = ntohl(*(uint32_t *)(data + offset));
+        offset += sizeof(uint32_t);
+    }
+    this->latitude = lat * 0.000001;
+    this->longitude = lng * 0.000001;
+}
+
+void
+fss_message_system_status::packData(buf_len &bl)
+{
+    uint8_t bat_percent = this->getBatRemaining();
+    uint32_t mah_used = htonl(this->getBatMAHUsed());
+    bl.addData((char *)&bat_percent, sizeof(uint8_t));
+    bl.addData((char *)&mah_used, sizeof(uint32_t));
+}
+
+void
+fss_message_system_status::unpackData(buf_len &bl)
+{
+    size_t offset = this->headerLength();
+    char *data = bl.getData();
+    size_t length = bl.getLength();
+    this->bat_percent = 0;
+    this->mah_used = 0;
+    if (length - offset == (sizeof(uint8_t) + sizeof(uint32_t)))
+    {
+        this->bat_percent = *(uint8_t *)(data + offset);
+        offset += sizeof(uint8_t);
+        this->mah_used = ntohl(*(uint32_t *)(data + offset));
+    }
+}
+
+void
+fss_message_search_status::packData(buf_len &bl)
+{
+    uint64_t search_id = htonll(this->getSearchId());
+    uint64_t point_completed = htonll(this->getSearchCompleted());
+    uint64_t points_total = htonll(this->getSearchTotal());
+    bl.addData((char *)&search_id, sizeof(uint64_t));
+    bl.addData((char *)&point_completed, sizeof(uint64_t));
+    bl.addData((char *)&points_total, sizeof(uint64_t));
+}
+
+void
+fss_message_search_status::unpackData(buf_len &bl)
+{
+    size_t offset = this->headerLength();
+    char *data = bl.getData();
+    size_t length = bl.getLength();
+    this->search_id = 0;
+    this->point_completed = 0;
+    this->points_total = 0;
+    if (length - offset == (sizeof(uint64_t) + sizeof(uint64_t) + sizeof(uint64_t)))
+    {
+        this->search_id = ntohll(*(uint64_t *)(data + offset));
+        offset += sizeof(uint64_t);
+        this->point_completed = ntohll(*(uint64_t *)(data + offset));
+        offset += sizeof(uint64_t);
+        this->points_total = ntohll(*(uint64_t *)(data + offset));
+    }
+}
+
+void
+fss_message_asset_command::packData(buf_len &bl)
+{
+    uint64_t ts = htonll(this->getTimeStamp());
+    /* Convert the lat/long to fixed decimal for transport */
+    int32_t lat = htonl((int32_t) this->getLatitude() / 0.000001);
+    int32_t lng = htonl((int32_t) this->getLongitude() / 0.000001);
+    uint32_t alt = htonl(this->getAltitude());
+    uint8_t cmd = (uint8_t) this->getCommand();
+    bl.addData((char *)&ts, sizeof(uint64_t));
+    bl.addData((char *)&lat, sizeof(int32_t));
+    bl.addData((char *)&lng, sizeof(int32_t));
+    bl.addData((char *)&alt, sizeof(uint32_t));
+    bl.addData((char *)&cmd, sizeof(uint8_t));
+}
+
+void
+fss_message_asset_command::unpackData(buf_len &bl)
+{
+    size_t offset = this->headerLength();
+    char *data = bl.getData();
+    size_t length = bl.getLength();
+    int32_t lat = 0;
+    int32_t lng = 0;
+    this->altitude = 0;
+    this->timestamp = 0;
+    if (length - offset == (sizeof(uint64_t) + sizeof(int32_t) + sizeof(int32_t) + sizeof(uint32_t) + sizeof(uint8_t)))
+    {
+        this->timestamp = ntohll(*(uint64_t *)(data + offset));
+        offset += sizeof(uint64_t);
+        lat = ntohl(*(int32_t *)(data + offset));
+        offset += sizeof(int32_t);
+        lng = ntohl(*(int32_t *)(data + offset));
+        offset += sizeof(int32_t);
+        this->altitude = ntohl(*(uint32_t *)(data + offset));
+        offset += sizeof(uint32_t);
+        this->command = (fss_asset_command) *(uint8_t *)(data + offset);
+    }
+    this->latitude = lat * 0.000001;
+    this->longitude = lng * 0.000001;
+}
+
+void
+fss_message_smm_settings::packData(buf_len &bl)
+{
+    
+}
+
+void
+fss_message_smm_settings::unpackData(buf_len &bl)
+{
+    
+}
+
+void
+fss_message_server_list::packData(buf_len &bl)
+{
+    
+}
+
+void
+fss_message_server_list::unpackData(buf_len &bl)
+{
+    
+}
+
+
+buf_len
+fss_message_rtt_request::getPacked()
+{
+    buf_len bl;
+    this->createHeader(bl);
+    this->updateSize(bl);
+    return bl;
+}
+
+fss_message *
+fss_message::decode(buf_len &bl)
+{
+    fss_message *msg = NULL;
+    char *data = bl.getData();
+    fss_message_type type = (fss_message_type) ntohs(*(uint16_t *)(data + sizeof(uint16_t)));
+    uint64_t msg_id = ntohll (*(uint64_t *)(data + sizeof(uint16_t) + sizeof(uint16_t)));
+
+
+    switch (type)
+    {
+        case message_type_unknown:
+        case message_type_closed:
+            break;
+        case message_type_identity:
+            msg = new fss_message_identity(msg_id, bl);
+            break;
+        case message_type_rtt_request:
+            msg = new fss_message_rtt_request(msg_id, bl);
+            break;
+        case message_type_rtt_response:
+            msg = new fss_message_rtt_response(msg_id, bl);
+            break;
+        case message_type_position_report:
+            msg = new fss_message_position_report(msg_id, bl);
+            break;
+        case message_type_system_status:
+            msg = new fss_message_system_status(msg_id, bl);
+            break;
+        case message_type_search_status:
+            msg = new fss_message_search_status(msg_id, bl);
+            break;
+        case message_type_command:
+            msg = new fss_message_asset_command(msg_id, bl);
+            break;
+        case message_type_server_list:
+            msg = new fss_message_server_list(msg_id, bl);
+            break;
+        case message_type_smm_settings:
+            msg = new fss_message_smm_settings(msg_id, bl);
+            break;
+    }
+    
+    return msg;
+}
