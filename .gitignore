@@ -1,2 +1,5 @@
 *.o
 *.json
+fss-client
+fss-server
+libfss.so
