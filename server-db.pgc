@@ -79,7 +79,7 @@ void db_position_create_entry(unsigned long long asset_id_arg, double latitude, 
     unsigned long long asset_id = asset_id_arg;
     double lat = latitude;
     double lng = longitude;
-    unsigned int alt = altitude;
+    int alt = altitude;
     EXEC SQL END DECLARE SECTION;
 
     EXEC SQL INSERT INTO assets_assetposition (asset_id, position, altitude, timestamp) VALUES (:asset_id, ST_SetSRID(ST_MakePoint(:lng, :lat), 4326), :alt, NOW());

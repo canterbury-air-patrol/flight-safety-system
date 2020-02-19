@@ -6,7 +6,10 @@
 #include <list>
 #include <csignal>
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Weffc++"
 #include <json/json.h>
+#pragma GCC diagnostic pop
 
 #include <unistd.h>
 
@@ -38,9 +41,9 @@ int main(int argc, char *argv[])
     }
     Json::Value config;
     configfile >> config;
-    
+
     fss connection = fss(config["name"].asString());
-    
+
     for (unsigned int idx = 0; idx < config["servers"].size(); idx++)
     {
         fss_connection *conn = connection.connect(config["servers"][idx]["address"].asString(), config["servers"][idx]["port"].asInt());

@@ -4,8 +4,10 @@ ECPG?=ecpg
 
 all: fss-server fss-client
 
-CFLAGS=-Wall -Werror -fPIC -std=c99 -g2
-CXXFLAGS=-Wall -Werror -fPIC -std=c++11 -g2
+WARNFLAGS=-Werror -Wall -Wshadow -Wcast-align -Wunused -Wmisleading-indentation -Wduplicated-cond -Wduplicated-branches -Wlogical-op -Wnull-dereference -Wdouble-promotion -Wformat=2 -pedantic
+WARNCXXFLAGS=${WARNFLAGS} -Wnon-virtual-dtor -Woverloaded-virtual -Wpedantic -Wuseless-cast -Weffc++
+CFLAGS=${WARNFLAGS} -fPIC -std=c99 -g2
+CXXFLAGS=${WARNCXXFLAGS} -fPIC -std=c++11 -g2
 
 PC_LIST=jsoncpp libecpg
 
@@ -41,6 +43,8 @@ fss-client: libfss.so $(CLIENT_OBJS)
 libfss.so: $(LIBFSS_OBJS)
 	$(CXX) -shared -o $(@) $(LIBFSS_OBJS)
 
+check-cppcheck:
+	cppcheck *.cpp --enable=all
 
 clean:
 	rm -f fss-server fss-client libfss.so $(SERVER_OBJS) $(CLIENT_OBJS) $(LIBFSS_OBJS)

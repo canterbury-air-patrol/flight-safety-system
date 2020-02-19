@@ -16,7 +16,7 @@ fss_message::headerLength()
 }
 
 void
-fss_message::createHeader(buf_len &bl)
+fss_message::createHeader(buf_len *bl)
 {
     /* Make space for length, type, id */
     size_t length = this->headerLength();
@@ -26,92 +26,92 @@ fss_message::createHeader(buf_len &bl)
     *(uint16_t *)(data + sizeof(uint16_t)) = htons(this->getType());
     /* Set the id */
     *(uint64_t *)(data + sizeof(uint16_t) + sizeof(uint16_t)) = htonll(this->getId());
-    bl.addData(data, length);
+    bl->addData(data, length);
     free(data);
 }
 
 void
-fss_message::updateSize(buf_len &bl)
+fss_message::updateSize(buf_len *bl)
 {
-    uint16_t length = bl.getLength();
+    uint16_t length = bl->getLength();
     if (length > sizeof(uint16_t))
     {
         /* Set the length */
         if (length % sizeof(uint64_t) != 0)
         {
             uint64_t blank = 0;
-            bl.addData((char *)&blank, sizeof(uint64_t) - (length % sizeof(uint64_t)));
+            bl->addData((char *)&blank, sizeof(uint64_t) - (length % sizeof(uint64_t)));
         }
-        *(uint16_t *)(bl.getData()) = htons(length);
+        *(uint16_t *)(bl->getData()) = htons(length);
     }
 }
 
-buf_len
+buf_len *
 fss_message::getPacked()
 {
-    buf_len bl;
+    buf_len *bl = new buf_len();
 
     this->createHeader(bl);
 
     this->packData(bl);
-    
+
     this->updateSize(bl);
-    
+
     return bl;
 }
 
 void
-fss_message_closed::packData(buf_len &bl)
+fss_message_closed::packData(buf_len *bl)
 {
 }
 
 void
-fss_message_closed::unpackData(buf_len &bl)
+fss_message_closed::unpackData(buf_len *bl)
 {
 }
 
 void
-fss_message_identity::packData(buf_len &bl)
+fss_message_identity::packData(buf_len *bl)
 {
-    bl.addData(this->name.c_str(), this->name.length());
+    bl->addData(this->name.c_str(), this->name.length());
 }
 
 void
-fss_message_identity::unpackData(buf_len &bl)
+fss_message_identity::unpackData(buf_len *bl)
 {
     size_t offset = this->headerLength();
-    char *data = bl.getData();
-    size_t length = bl.getLength();
-    char *name = (char *)calloc(1, (length - offset) + 1);
-    memcpy(name, data + offset, length - offset);
-    name[length - offset] = '\0';
-    this->name = std::string(name);
-    free (name);
+    char *data = bl->getData();
+    size_t length = bl->getLength();
+    char *name_n = (char *)calloc(1, (length - offset) + 1);
+    memcpy(name_n, data + offset, length - offset);
+    name_n[length - offset] = '\0';
+    this->name = std::string(name_n);
+    free (name_n);
 }
 
 void
-fss_message_rtt_request::packData(buf_len &bl)
+fss_message_rtt_request::packData(buf_len *bl)
 {
 }
 
 void
-fss_message_rtt_request::unpackData(buf_len &bl)
+fss_message_rtt_request::unpackData(buf_len *bl)
 {
 }
 
 void
-fss_message_rtt_response::packData(buf_len &bl)
+fss_message_rtt_response::packData(buf_len *bl)
 {
     uint64_t data = htonll(this->request_id);
-    bl.addData((char *)&data, sizeof(uint64_t));
+    bl->addData((char *)&data, sizeof(uint64_t));
 }
 
 void
-fss_message_rtt_response::unpackData(buf_len &bl)
+fss_message_rtt_response::unpackData(buf_len *bl)
 {
     size_t offset = this->headerLength();
-    char *data = bl.getData();
-    size_t length = bl.getLength();
+    char *data = bl->getData();
+    size_t length = bl->getLength();
     if (length - offset == sizeof(uint64_t))
     {
         this->request_id = ntohll(*(uint64_t *)(data + offset));
@@ -123,25 +123,25 @@ fss_message_rtt_response::unpackData(buf_len &bl)
 }
 
 void
-fss_message_position_report::packData(buf_len &bl)
+fss_message_position_report::packData(buf_len *bl)
 {
     uint64_t ts = htonll(this->getTimeStamp());
     /* Convert the lat/long to fixed decimal for transport */
     int32_t lat = htonl((int32_t) (this->getLatitude() / 0.000001));
     int32_t lng = htonl((int32_t) (this->getLongitude() / 0.000001));
     uint32_t alt = htonl(this->getAltitude());
-    bl.addData((char *)&ts, sizeof(uint64_t));
-    bl.addData((char *)&lat, sizeof(int32_t));
-    bl.addData((char *)&lng, sizeof(int32_t));
-    bl.addData((char *)&alt, sizeof(uint32_t));
+    bl->addData((char *)&ts, sizeof(uint64_t));
+    bl->addData((char *)&lat, sizeof(int32_t));
+    bl->addData((char *)&lng, sizeof(int32_t));
+    bl->addData((char *)&alt, sizeof(uint32_t));
 }
 
 void
-fss_message_position_report::unpackData(buf_len &bl)
+fss_message_position_report::unpackData(buf_len *bl)
 {
     size_t offset = this->headerLength();
-    char *data = bl.getData();
-    size_t length = bl.getLength();
+    char *data = bl->getData();
+    size_t length = bl->getLength();
     int32_t lat = 0;
     int32_t lng = 0;
     this->altitude = 0;
@@ -155,27 +155,26 @@ fss_message_position_report::unpackData(buf_len &bl)
         lng = ntohl(*(int32_t *)(data + offset));
         offset += sizeof(int32_t);
         this->altitude = ntohl(*(uint32_t *)(data + offset));
-        offset += sizeof(uint32_t);
     }
     this->latitude = ((double)lat) * 0.000001;
     this->longitude = ((double)lng) * 0.000001;
 }
 
 void
-fss_message_system_status::packData(buf_len &bl)
+fss_message_system_status::packData(buf_len *bl)
 {
-    uint8_t bat_percent = this->getBatRemaining();
-    uint32_t mah_used = htonl(this->getBatMAHUsed());
-    bl.addData((char *)&bat_percent, sizeof(uint8_t));
-    bl.addData((char *)&mah_used, sizeof(uint32_t));
+    uint8_t bat_percent_n = this->getBatRemaining();
+    uint32_t mah_used_n = htonl(this->getBatMAHUsed());
+    bl->addData((char *)&bat_percent_n, sizeof(uint8_t));
+    bl->addData((char *)&mah_used_n, sizeof(uint32_t));
 }
 
 void
-fss_message_system_status::unpackData(buf_len &bl)
+fss_message_system_status::unpackData(buf_len *bl)
 {
     size_t offset = this->headerLength();
-    char *data = bl.getData();
-    size_t length = bl.getLength();
+    char *data = bl->getData();
+    size_t length = bl->getLength();
     this->bat_percent = 0;
     this->mah_used = 0;
     if (length - offset == (sizeof(uint8_t) + sizeof(uint32_t)))
@@ -187,22 +186,22 @@ fss_message_system_status::unpackData(buf_len &bl)
 }
 
 void
-fss_message_search_status::packData(buf_len &bl)
+fss_message_search_status::packData(buf_len *bl)
 {
-    uint64_t search_id = htonll(this->getSearchId());
-    uint64_t point_completed = htonll(this->getSearchCompleted());
-    uint64_t points_total = htonll(this->getSearchTotal());
-    bl.addData((char *)&search_id, sizeof(uint64_t));
-    bl.addData((char *)&point_completed, sizeof(uint64_t));
-    bl.addData((char *)&points_total, sizeof(uint64_t));
+    uint64_t search_id_n = htonll(this->getSearchId());
+    uint64_t point_completed_n = htonll(this->getSearchCompleted());
+    uint64_t points_total_n = htonll(this->getSearchTotal());
+    bl->addData((char *)&search_id_n, sizeof(uint64_t));
+    bl->addData((char *)&point_completed_n, sizeof(uint64_t));
+    bl->addData((char *)&points_total_n, sizeof(uint64_t));
 }
 
 void
-fss_message_search_status::unpackData(buf_len &bl)
+fss_message_search_status::unpackData(buf_len *bl)
 {
     size_t offset = this->headerLength();
-    char *data = bl.getData();
-    size_t length = bl.getLength();
+    char *data = bl->getData();
+    size_t length = bl->getLength();
     this->search_id = 0;
     this->point_completed = 0;
     this->points_total = 0;
@@ -217,27 +216,27 @@ fss_message_search_status::unpackData(buf_len &bl)
 }
 
 void
-fss_message_asset_command::packData(buf_len &bl)
+fss_message_asset_command::packData(buf_len *bl)
 {
     uint64_t ts = htonll(this->getTimeStamp());
     /* Convert the lat/long to fixed decimal for transport */
-    int32_t lat = htonl((int32_t) this->getLatitude() / 0.000001);
-    int32_t lng = htonl((int32_t) this->getLongitude() / 0.000001);
+    int32_t lat = htonl((int32_t) (this->getLatitude() / 0.000001));
+    int32_t lng = htonl((int32_t) (this->getLongitude() / 0.000001));
     uint32_t alt = htonl(this->getAltitude());
     uint8_t cmd = (uint8_t) this->getCommand();
-    bl.addData((char *)&ts, sizeof(uint64_t));
-    bl.addData((char *)&lat, sizeof(int32_t));
-    bl.addData((char *)&lng, sizeof(int32_t));
-    bl.addData((char *)&alt, sizeof(uint32_t));
-    bl.addData((char *)&cmd, sizeof(uint8_t));
+    bl->addData((char *)&ts, sizeof(uint64_t));
+    bl->addData((char *)&lat, sizeof(int32_t));
+    bl->addData((char *)&lng, sizeof(int32_t));
+    bl->addData((char *)&alt, sizeof(uint32_t));
+    bl->addData((char *)&cmd, sizeof(uint8_t));
 }
 
 void
-fss_message_asset_command::unpackData(buf_len &bl)
+fss_message_asset_command::unpackData(buf_len *bl)
 {
     size_t offset = this->headerLength();
-    char *data = bl.getData();
-    size_t length = bl.getLength();
+    char *data = bl->getData();
+    size_t length = bl->getLength();
     int32_t lat = 0;
     int32_t lng = 0;
     this->altitude = 0;
@@ -259,44 +258,35 @@ fss_message_asset_command::unpackData(buf_len &bl)
 }
 
 void
-fss_message_smm_settings::packData(buf_len &bl)
+fss_message_smm_settings::packData(buf_len *bl)
 {
-    
+
 }
 
 void
-fss_message_smm_settings::unpackData(buf_len &bl)
+fss_message_smm_settings::unpackData(buf_len *bl)
 {
-    
+
 }
 
 void
-fss_message_server_list::packData(buf_len &bl)
+fss_message_server_list::packData(buf_len *bl)
 {
-    
+
 }
 
 void
-fss_message_server_list::unpackData(buf_len &bl)
+fss_message_server_list::unpackData(buf_len *bl)
 {
-    
+
 }
 
-
-buf_len
-fss_message_rtt_request::getPacked()
-{
-    buf_len bl;
-    this->createHeader(bl);
-    this->updateSize(bl);
-    return bl;
-}
 
 fss_message *
-fss_message::decode(buf_len &bl)
+fss_message::decode(buf_len *bl)
 {
     fss_message *msg = NULL;
-    char *data = bl.getData();
+    char *data = bl->getData();
     fss_message_type type = (fss_message_type) ntohs(*(uint16_t *)(data + sizeof(uint16_t)));
     uint64_t msg_id = ntohll (*(uint64_t *)(data + sizeof(uint16_t) + sizeof(uint16_t)));
 

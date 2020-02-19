@@ -20,7 +20,7 @@ private:
     uint64_t timestamp;
     uint64_t reqid;
 public:
-    fss_client_rtt(uint64_t id);
+    explicit fss_client_rtt(uint64_t id);
     uint64_t getTimeStamp() { return this->timestamp; };
     uint64_t getRequestId() { return this->reqid; };
 };
@@ -31,9 +31,9 @@ private:
     std::string name;
     std::list<fss_client_rtt *> outstanding_rtt_requests;
 public:
-    fss_client(fss_connection *conn);
+    explicit fss_client(fss_connection *conn);
     virtual ~fss_client();
-    virtual void processMessage(fss_message *message);
+    virtual void processMessage(fss_message *message) override;
 };
 
 }

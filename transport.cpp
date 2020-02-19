@@ -17,11 +17,6 @@
 
 #include "transport.hpp"
 
-fss::fss(std::string name)
-{
-    this->name = name;
-}
-
 fss_connection *fss::connect(std::string address, uint16_t port)
 {
     fss_connection *conn = new fss_connection();
@@ -42,19 +37,8 @@ recv_msg_thread(fss_connection *conn)
     conn->processMessages();
 }
 
-fss_connection::fss_connection()
+fss_connection::fss_connection(int t_fd) : fd(t_fd), last_msg_id(0), handler(NULL), messages(), recv_thread(std::thread(recv_msg_thread, this))
 {
-    this->fd = socket(PF_INET6, SOCK_STREAM, IPPROTO_TCP);
-    this->handler = NULL;
-    this->last_msg_id = 0;
-}
-
-fss_connection::fss_connection(int fd)
-{
-    this->fd = fd;
-    this->handler = NULL;
-    this->last_msg_id = 0;
-    this->recv_thread = std::thread(recv_msg_thread, this);
 }
 
 fss_connection::~fss_connection()
@@ -101,7 +85,7 @@ fss_connection::processMessages()
     }
 }
 
-bool fss_connection::connect_to(std::string address, uint16_t port)
+bool fss_connection::connect_to(const std::string &address, uint16_t port)
 {
     struct sockaddr_storage remote;
     if (!convert_str_to_sa (address, port, &remote))
@@ -124,20 +108,26 @@ bool fss_connection::connect_to(std::string address, uint16_t port)
 bool
 fss_connection::sendMsg(fss_message *msg)
 {
-    buf_len bl = msg->getPacked();
-    if (!bl.isValid())
+    buf_len *bl = msg->getPacked();
+#ifdef DEBUG
+    std::cout << "Sending message (len=" << bl->getLength() << ") to " << this->fd << std::endl;
+#endif
+    if (!bl->isValid())
     {
+	delete bl;
         return false;
     }
-    return this->sendMsg(bl);
+    bool ret = this->sendMsg(bl);
+    delete bl;
+    return ret;
 }
 
 #ifdef DEBUG
 static void
-print_bl(buf_len &bl)
+print_bl(buf_len *bl)
 {
-    char *data = bl.getData();
-    size_t len = bl.getLength();
+    char *data = bl->getData();
+    size_t len = bl->getLength();
     for(size_t o = 0; o < len; o++)
     {
         printf("0x%04zx: 0x%02x '%1c'\n", o, data[o], data[o]);
@@ -147,11 +137,11 @@ print_bl(buf_len &bl)
 #endif
 
 bool
-fss_connection::sendMsg(buf_len &bl)
+fss_connection::sendMsg(buf_len *bl)
 {
     size_t sent = 0;
-    size_t to_send = bl.getLength();
-    const char *data = bl.getData();
+    size_t to_send = bl->getLength();
+    const char *data = bl->getData();
 #ifdef DEBUG
     print_bl(bl);
 #endif
@@ -231,12 +221,13 @@ fss_connection::recvMsg()
         }
         if (received == total_length)
         {
-            buf_len bl(data, data_length);
+            buf_len *bl = new buf_len(data, data_length);
 #ifdef DEBUG
             printf("Message reads: \n");
             print_bl(bl);
 #endif
             msg = fss_message::decode(bl);
+            delete bl;
         }
         else
         {
@@ -269,9 +260,9 @@ fss_listen::processMessages()
     while (1)
     {
         struct sockaddr_storage sa = {};
-        socklen_t sa_len = sizeof(sizeof(sockaddr_storage));
-        int fd = accept(this->fd, (struct sockaddr *)&sa, &sa_len);
-        if (fd < 0)
+        socklen_t sa_len = sizeof(sockaddr_storage);
+        int newfd = accept(this->fd, (struct sockaddr *)&sa, &sa_len);
+        if (newfd < 0)
         {
             perror("Failed to accept: ");
             if (errno == EBADF)
@@ -282,13 +273,13 @@ fss_listen::processMessages()
         }
 #ifdef DEBUG
         char addr_str[INET6_ADDRSTRLEN];
-        uint16_t port;
-        inet_ntop_stor(&sa, addr_str, INET6_ADDRSTRLEN, &port);
-        std::cout << "New client from " << addr_str << ":" << port << " as " << fd << std::endl;
+        uint16_t client_port;
+        inet_ntop_stor(&sa, addr_str, INET6_ADDRSTRLEN, &client_port);
+        std::cout << "New client from " << addr_str << ":" << client_port << " as " << fd << std::endl;
 #endif
         if (this->cb != NULL)
         {
-            fss_connection *conn = new fss_connection(fd);
+            fss_connection *conn = new fss_connection(newfd);
             if(!this->cb(conn))
             {
                 delete conn;
@@ -297,7 +288,7 @@ fss_listen::processMessages()
         else
         {
             /* Thanks for your call, unfortunately we don't know how to deal with it */
-            close(fd);
+            close(newfd);
         }
     }
 }

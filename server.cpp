@@ -6,7 +6,10 @@
 #include <csignal>
 #include <list>
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Weffc++"
 #include <json/json.h>
+#pragma GCC diagnostic pop
 
 #include <unistd.h>
 
@@ -15,10 +18,8 @@ db_connection *dbc = NULL;
 std::list<fss_client *> clients;
 std::queue<fss_client *> remove_clients;
 
-fss_client::fss_client(fss_connection *conn)
+fss_client::fss_client(fss_connection *t_conn) : fss_message_cb(t_conn), identified(false), name(), outstanding_rtt_requests()
 {
-    this->conn = conn;
-    this->identified = false;
     conn->setHandler(this);
 }
 
