@@ -4,8 +4,12 @@ ECPG?=ecpg
 
 all: fss-server fss-client
 
-WARNFLAGS=-Werror -Wall -Wshadow -Wcast-align -Wunused -Wmisleading-indentation -Wduplicated-cond -Wduplicated-branches -Wlogical-op -Wnull-dereference -Wdouble-promotion -Wformat=2 -pedantic
-WARNCXXFLAGS=${WARNFLAGS} -Wnon-virtual-dtor -Woverloaded-virtual -Wpedantic -Wuseless-cast -Weffc++
+WARNFLAGS=-Werror -Wall -Wshadow -Wunused -Wnull-dereference -Wformat=2 -pedantic
+WARNCXXFLAGS=${WARNFLAGS} -Wnon-virtual-dtor -Woverloaded-virtual -Wpedantic -Weffc++
+ifeq (($REAL_GCC),1)
+WARNFLAGS+=-Wduplicated-cond -Wduplicated-branches -Wmisleading-indentation -Wlogical-op 
+WARNCXXFLAGS+=-Wuseless-cast
+endif
 CFLAGS=${WARNFLAGS} -fPIC -std=c99 -g2
 CXXFLAGS=${WARNCXXFLAGS} -fPIC -std=c++11 -g2
 
