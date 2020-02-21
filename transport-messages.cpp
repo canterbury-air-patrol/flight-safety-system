@@ -258,27 +258,85 @@ fss_message_asset_command::unpackData(buf_len *bl)
 }
 
 void
+packString(buf_len *bl, std::string val)
+{
+    uint16_t len = htons(val.length());
+    bl->addData((char *)&len, sizeof(uint16_t));
+    bl->addData(val.c_str(), val.length());
+    /* align to 4-byte boundary (will add 1 to 4 bytes on '\0') */
+    uint32_t empty = 0;
+    bl->addData((char *)&empty, sizeof(uint32_t) - (bl->getLength() % sizeof(uint64_t)));
+}
+
+void
 fss_message_smm_settings::packData(buf_len *bl)
 {
-
+    packString(bl, this->getServerURL());
+    packString(bl, this->getUsername());
+    packString(bl, this->getPassword());
 }
 
 void
 fss_message_smm_settings::unpackData(buf_len *bl)
 {
+    size_t offset = this->headerLength();
+    char *data = bl->getData();
+    size_t length = bl->getLength();
+    if (length - offset >= sizeof(uint16_t))
+    {
+        uint16_t len = ntohs(*(uint16_t *)(data + offset));
+        offset += sizeof(uint16_t);
+        this->server_url = std::string((char *)(data + offset));
+        offset += len + (sizeof(uint32_t) - len % sizeof(uint32_t));
+    }
+    if (length - offset >= sizeof(uint16_t))
+    {
+        uint16_t len = ntohs(*(uint16_t *)data + offset);
+        offset += sizeof(uint16_t);
+        this->username = std::string((char *)(data + offset));
+        offset += len + (sizeof(uint32_t) - len % sizeof(uint32_t));
+    }
+    if (length - offset >= sizeof(uint16_t))
+    {
+        uint16_t len = ntohs(*(uint16_t *)data + offset);
+        offset += sizeof(uint16_t);
+        this->password = std::string((char *)(data + offset));
+        offset += len + (sizeof(uint32_t) - len % sizeof(uint32_t));
+    }
+}
 
+void
+packServer(buf_len *bl, std::pair<std::string, uint16_t> server)
+{
+    uint16_t port = htons(server.second);
+    bl->addData((char *)&port, sizeof(port));
+    packString(bl, server.first);
 }
 
 void
 fss_message_server_list::packData(buf_len *bl)
 {
-
+    for(auto server : this->servers)
+    {
+        packServer(bl, server);
+    }
 }
 
 void
 fss_message_server_list::unpackData(buf_len *bl)
 {
-
+    size_t offset = this->headerLength();
+    char *data = bl->getData();
+    size_t length = bl->getLength();
+    while (length - offset >= (sizeof(uint16_t) + sizeof(uint16_t)))
+    {
+        uint16_t port = ntohs(*(uint16_t *)(data + offset));
+        offset += sizeof(uint16_t);
+        uint16_t len = ntohs(*(uint16_t *)(data + offset));
+        offset += sizeof(uint16_t);
+        this->servers.push_back(std::make_pair(std::string((char *)(data + offset)), port));
+        offset += len + (sizeof(uint32_t) - len % sizeof(uint32_t));
+    }
 }
 
 
