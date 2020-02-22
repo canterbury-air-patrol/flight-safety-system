@@ -83,3 +83,18 @@ db_connection::asset_get_smm_settings(std::string asset_name)
     }
     return nullptr;
 }
+
+std::list<fss_server_details *>
+db_connection::get_active_fss_servers()
+{
+    std::list<fss_server_details *> res;
+    struct fss_server_s **servers = db_active_fss_servers_get();
+    if (servers)
+    {
+        for(size_t i = 0; servers[i] != NULL; i++)
+        {
+            res.push_back(new fss_server_details(servers[i]->address, servers[i]->port));
+        }
+    }
+    return res;
+}

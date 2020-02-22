@@ -136,6 +136,40 @@ db_asset_smm_settings_get(unsigned long long asset_id_arg)
     return settings;
 }
 
+struct fss_server_s **
+db_active_fss_servers_get(void)
+{
+    size_t len = 0;
+    struct fss_server_s **res = (struct fss_server_s **)malloc(sizeof(struct fss_server *) * (len + 1));
+    res[len] = NULL;
+
+    EXEC SQL BEGIN DECLARE SECTION;
+    char server_address[256];
+    int server_port;
+    EXEC SQL END DECLARE SECTION;
+
+    EXEC SQL SET AUTOCOMMIT TO OFF;
+    EXEC SQL DECLARE cur1 CURSOR FOR SELECT address, client_port FROM config_serverconfig WHERE active = TRUE;
+    EXEC SQL OPEN cur1;
+
+    EXEC SQL WHENEVER NOT FOUND DO BREAK;
+    while (1)
+    {
+        EXEC SQL FETCH FROM cur1 INTO :server_address, :server_port;
+        struct fss_server_s *s = (struct fss_server_s *)malloc(sizeof(struct fss_server_s));
+        s->address = strdup(server_address);
+        s->port = server_port;
+        res[len] = s;
+        len++;
+        res = (struct fss_server_s **)realloc(res, sizeof(struct fss_server *) * (len + 1));
+        res[len] = NULL;
+    }
+
+    EXEC SQL CLOSE cur1;
+    EXEC SQL SET AUTOCOMMIT TO ON;
+
+    return res;
+}
 
 void db_disconnect()
 {

@@ -126,7 +126,7 @@ fss_connection::sendMsg(fss_message *msg)
 static void
 print_bl(buf_len *bl)
 {
-    char *data = bl->getData();
+    unsigned char *data = (unsigned char *)bl->getData();
     size_t len = bl->getLength();
     for(size_t o = 0; o < len; o++)
     {

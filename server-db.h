@@ -15,3 +15,11 @@ struct smm_settings_s {
 
 struct smm_settings_s *
 db_asset_smm_settings_get(unsigned long long asset_id_arg);
+
+struct fss_server_s {
+    char *address;
+    int port;
+};
+
+struct fss_server_s **
+db_active_fss_servers_get(void);

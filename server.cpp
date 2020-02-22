@@ -57,7 +57,7 @@ fss_client::processMessage(fss_message *msg)
         {
             this->name = ((fss_message_identity *)msg)->getName();
             this->identified = true;
-            // send SMM config and servers list
+            /* send SMM config and servers list */
             smm_settings *smm = dbc->asset_get_smm_settings(this->name);
             if (smm != nullptr)
             {
@@ -66,6 +66,16 @@ fss_client::processMessage(fss_message *msg)
                 delete settings_msg;
             }
             delete smm;
+            /* Send all the known fss servers */
+            std::list<fss_server_details *> known_servers = dbc->get_active_fss_servers();
+            fss_message_server_list *server_list = new fss_message_server_list(this->conn->getMessageId());
+            for (auto server_details : known_servers)
+            {
+                server_list->addServer(server_details->getAddress(),server_details->getPort());
+                delete server_details;
+            }
+            this->conn->sendMsg(server_list);
+            delete server_list;
         }
     }
     else

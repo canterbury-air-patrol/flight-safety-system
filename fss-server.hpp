@@ -16,6 +16,17 @@ public:
     std::string getPassword() { return this->password; };
 };
 
+class fss_server_details
+{
+private:
+    std::string address;
+    uint16_t port;
+public:
+    fss_server_details(std::string t_address, uint16_t t_port) : address(t_address), port(t_port) {};
+    std::string getAddress() { return this->address; };
+    uint16_t getPort() { return this->port; };
+};
+
 class db_connection {
 private:
 public:
@@ -27,6 +38,7 @@ public:
     void asset_add_search_status(std::string asset_name, uint64_t search_id, uint64_t search_completed, uint64_t search_total);
     void asset_add_position(std::string asset_name, double latitude, double longitude, uint16_t altitude);
     smm_settings *asset_get_smm_settings(std::string asset_name);
+    std::list<fss_server_details *> get_active_fss_servers();
 };
 
 class fss_client_rtt {
