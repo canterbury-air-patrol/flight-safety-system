@@ -4,15 +4,29 @@
 #include <list>
 
 namespace  flight_safety_system {
+class smm_settings {
+private:
+    std::string address;
+    std::string username;
+    std::string password;
+public:
+    smm_settings(const std::string &t_address, const std::string &t_username, const std::string &t_password) : address(t_address), username(t_username), password(t_password) {};
+    std::string getAddress() { return this->address; };
+    std::string getUsername() { return this->username; };
+    std::string getPassword() { return this->password; };
+};
+
 class db_connection {
 private:
 public:
     db_connection(std::string host, std::string user, std::string pass, std::string db);
     ~db_connection();
+    bool check_asset(std::string asset_name);
     void asset_add_rtt(std::string asset_name, uint64_t rtt);
     void asset_add_status(std::string asset_name, uint8_t bat_percent, uint32_t bat_mah_used);
     void asset_add_search_status(std::string asset_name, uint64_t search_id, uint64_t search_completed, uint64_t search_total);
     void asset_add_position(std::string asset_name, double latitude, double longitude, uint16_t altitude);
+    smm_settings *asset_get_smm_settings(std::string asset_name);
 };
 
 class fss_client_rtt {

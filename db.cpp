@@ -17,6 +17,13 @@ db_connection::~db_connection()
     db_disconnect();
 }
 
+bool
+db_connection::check_asset(std::string asset_name)
+{
+    uint64_t asset_id = db_get_asset_id(asset_name.c_str());
+    return asset_id != 0;
+}
+
 void
 db_connection::asset_add_rtt(std::string asset_name, uint64_t delta)
 {
@@ -55,4 +62,24 @@ db_connection::asset_add_position(std::string asset_name, double latitude, doubl
     {
         db_position_create_entry(asset_id, latitude, longitude, altitude);
     }
+}
+
+smm_settings *
+db_connection::asset_get_smm_settings(std::string asset_name)
+{
+    uint64_t asset_id = db_get_asset_id(asset_name.c_str());
+    if (asset_id != 0)
+    {
+        struct smm_settings_s *settings = db_asset_smm_settings_get(asset_id);
+        if (settings)
+        {
+            smm_settings *res = new smm_settings(std::string(settings->address), std::string(settings->username), std::string(settings->password));
+            free (settings->address);
+            free (settings->username);
+            free (settings->password);
+            free (settings);
+            return res;
+        }
+    }
+    return nullptr;
 }

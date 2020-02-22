@@ -85,6 +85,58 @@ void db_position_create_entry(unsigned long long asset_id_arg, double latitude, 
     EXEC SQL INSERT INTO assets_assetposition (asset_id, position, altitude, timestamp) VALUES (:asset_id, ST_SetSRID(ST_MakePoint(:lng, :lat), 4326), :alt, NOW());
 }
 
+char *
+convert_to_http(const char *address, int port, bool https)
+{
+    bool default_port = false;
+    if (https)
+    {
+        default_port = (port == 443);
+    }
+    else
+    {
+        default_port = (port == 80);
+    }
+    char *result = NULL;
+    if (default_port)
+    {
+        asprintf(&result, "%s://%s/", https ? "https" : "http", address);
+    }
+    else
+    {
+        asprintf(&result, "%s://%s:%i/", https ? "https" : "http", address, port);
+    }
+    return result;
+}
+
+struct smm_settings_s *
+db_asset_smm_settings_get(unsigned long long asset_id_arg)
+{
+    EXEC SQL BEGIN DECLARE SECTION;
+    unsigned long long asset_id = asset_id_arg;
+    char server_address[256];
+    int server_port;
+    bool server_https;
+    char smm_login[51];
+    char smm_password[256];
+    int success = 0;
+    EXEC SQL END DECLARE SECTION;
+
+    EXEC SQL SELECT 1, SMM.address, SMM.port, SMM.https, A.smm_login, A.smm_password A INTO :success, :server_address, :server_port, :server_https, :smm_login, :smm_password FROM config_assetconfig AS A, config_smmconfig AS SMM WHERE A.asset_id = :asset_id AND A.smm_id = SMM.id;
+
+
+    struct smm_settings_s *settings = NULL;
+    if (success == 1)
+    {
+        settings = malloc(sizeof(struct smm_settings_s));
+        settings->address = convert_to_http(server_address, server_port, server_https);
+        settings->username = strdup(smm_login);
+        settings->password = strdup(smm_password);
+    }
+    return settings;
+}
+
+
 void db_disconnect()
 {
     EXEC SQL DISCONNECT ALL;

@@ -125,6 +125,7 @@ public:
         return *this;
     }
     virtual void processMessage(fss_message *message) = 0;
+    virtual fss_connection *getConnection() { return this->conn; };
 };
 
 class fss_connection {

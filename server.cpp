@@ -57,6 +57,15 @@ fss_client::processMessage(fss_message *msg)
         {
             this->name = ((fss_message_identity *)msg)->getName();
             this->identified = true;
+            // send SMM config and servers list
+            smm_settings *smm = dbc->asset_get_smm_settings(this->name);
+            if (smm != nullptr)
+            {
+                fss_message_smm_settings *settings_msg = new fss_message_smm_settings(this->conn->getMessageId(), smm->getAddress(), smm->getUsername(), smm->getPassword());
+                this->conn->sendMsg(settings_msg);
+                delete settings_msg;
+            }
+            delete smm;
         }
     }
     else
