@@ -138,6 +138,7 @@ protected:
     std::thread recv_thread;
     fss_message *recvMsg();
     uint64_t getMessageId();
+    virtual bool sendMsg(buf_len *bl);
     fss_connection& operator=(const fss_connection& other) { return *this; };
     fss_connection(const fss_connection &from) : fd(-1), last_msg_id(0), handler(nullptr), messages(), recv_thread() {};
 public:
@@ -147,7 +148,6 @@ public:
     void setHandler(fss_message_cb *cb);
     bool connect_to(const std::string &address, uint16_t port);
     bool sendMsg(fss_message *msg);
-    bool sendMsg(buf_len *bl);
     fss_message *getMsg();
     virtual void processMessages();
 };
