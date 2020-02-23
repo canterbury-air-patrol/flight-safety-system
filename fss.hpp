@@ -7,6 +7,7 @@
 #include <vector>
 #include <cmath>
 #include <thread>
+#include <mutex>
 
 #include <iostream>
 
@@ -138,11 +139,12 @@ protected:
     std::thread recv_thread;
     fss_message *recvMsg();
     uint64_t getMessageId();
+    std::mutex send_lock;
     virtual bool sendMsg(buf_len *bl);
     fss_connection& operator=(const fss_connection& other) { return *this; };
-    fss_connection(const fss_connection &from) : fd(-1), last_msg_id(0), handler(nullptr), messages(), recv_thread() {};
+    fss_connection(const fss_connection &from) : fd(-1), last_msg_id(0), handler(nullptr), messages(), recv_thread(), send_lock() {};
 public:
-    fss_connection() : fd(socket(PF_INET6, SOCK_STREAM, IPPROTO_TCP)), last_msg_id(0), handler(nullptr), messages(), recv_thread() {};
+    fss_connection() : fd(socket(PF_INET6, SOCK_STREAM, IPPROTO_TCP)), last_msg_id(0), handler(nullptr), messages(), recv_thread(), send_lock() {};
     explicit fss_connection(int fd);
     virtual ~fss_connection();
     void setHandler(fss_message_cb *cb);

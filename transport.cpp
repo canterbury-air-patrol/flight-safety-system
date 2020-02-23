@@ -37,7 +37,7 @@ recv_msg_thread(fss_connection *conn)
     conn->processMessages();
 }
 
-fss_connection::fss_connection(int t_fd) : fd(t_fd), last_msg_id(0), handler(NULL), messages(), recv_thread(std::thread(recv_msg_thread, this))
+fss_connection::fss_connection(int t_fd) : fd(t_fd), last_msg_id(0), handler(NULL), messages(), recv_thread(std::thread(recv_msg_thread, this)), send_lock()
 {
 }
 
@@ -108,6 +108,7 @@ bool fss_connection::connect_to(const std::string &address, uint16_t port)
 bool
 fss_connection::sendMsg(fss_message *msg)
 {
+    this->send_lock.lock();
     msg->setId(this->getMessageId());
     buf_len *bl = msg->getPacked();
 #ifdef DEBUG
@@ -120,6 +121,7 @@ fss_connection::sendMsg(fss_message *msg)
     }
     bool ret = this->sendMsg(bl);
     delete bl;
+    this->send_lock.unlock();
     return ret;
 }
 
