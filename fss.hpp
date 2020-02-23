@@ -137,6 +137,7 @@ protected:
     std::queue<fss_message *> messages;
     std::thread recv_thread;
     fss_message *recvMsg();
+    uint64_t getMessageId();
     fss_connection& operator=(const fss_connection& other) { return *this; };
     fss_connection(const fss_connection &from) : fd(-1), last_msg_id(0), handler(nullptr), messages(), recv_thread() {};
 public:
@@ -145,7 +146,6 @@ public:
     virtual ~fss_connection();
     void setHandler(fss_message_cb *cb);
     bool connect_to(const std::string &address, uint16_t port);
-    uint64_t getMessageId();
     bool sendMsg(fss_message *msg);
     bool sendMsg(buf_len *bl);
     fss_message *getMsg();
@@ -173,8 +173,10 @@ protected:
     virtual void unpackData(buf_len *bl) = 0;
     virtual void packData(buf_len *bl) = 0;
 public:
+    explicit fss_message(fss_message_type t_type) : id(0), type(t_type) {};
     fss_message(uint64_t t_id, fss_message_type t_type) : id(t_id), type(t_type) {};
     virtual ~fss_message() {};
+    void setId(uint64_t t_id) { this->id = t_id; };
     uint64_t getId() { return this->id; };
     fss_message_type getType() { return this->type; };
     virtual double getLatitude() { return NAN; };
@@ -192,7 +194,7 @@ protected:
     virtual void unpackData(buf_len *bl) override;
     virtual void packData(buf_len *bl) override;
 public:
-    fss_message_closed() : fss_message(0, message_type_closed) {};
+    fss_message_closed() : fss_message(message_type_closed) {};
 };
 
 class fss_message_identity : public fss_message {
@@ -202,7 +204,7 @@ protected:
     virtual void unpackData(buf_len *bl) override;
     virtual void packData(buf_len *bl) override;
 public:
-    fss_message_identity(uint64_t t_id, const std::string &t_name) : fss_message(t_id, message_type_identity), name(t_name) {};
+    fss_message_identity(const std::string &t_name) : fss_message(message_type_identity), name(t_name) {};
     fss_message_identity(uint64_t t_id, buf_len *bl) : fss_message(t_id, message_type_identity), name() { this->unpackData(bl); };
     virtual std::string getName() { return this->name; };
 };
@@ -212,7 +214,7 @@ protected:
     virtual void unpackData(buf_len *bl) override;
     virtual void packData(buf_len *bl) override;
 public:
-    explicit fss_message_rtt_request(uint64_t t_id) : fss_message(t_id, message_type_rtt_request) {};
+    fss_message_rtt_request() : fss_message(message_type_rtt_request) {};
     fss_message_rtt_request(uint64_t t_id, buf_len *bl) : fss_message(t_id, message_type_rtt_request) {};
 };
 
@@ -223,7 +225,7 @@ protected:
     virtual void unpackData(buf_len *bl) override;
     virtual void packData(buf_len *bl) override;
 public:
-    fss_message_rtt_response(uint64_t t_id, uint64_t t_request_id) : fss_message(t_id, message_type_rtt_response), request_id(t_request_id) {};
+    explicit fss_message_rtt_response(uint64_t t_request_id) : fss_message(message_type_rtt_response), request_id(t_request_id) {};
     fss_message_rtt_response(uint64_t t_id, buf_len *bl) : fss_message(t_id, message_type_rtt_response), request_id(0) { this->unpackData(bl); };
     virtual uint64_t getRequestId() { return this->request_id; };
 };
@@ -238,7 +240,7 @@ protected:
     virtual void unpackData(buf_len *bl) override;
     virtual void packData(buf_len *bl) override;
 public:
-    fss_message_position_report(uint64_t t_id, double t_latitude, double t_longitude, uint32_t t_altitude, uint64_t t_timestamp) : fss_message(t_id, message_type_position_report), latitude(t_latitude), longitude(t_longitude), altitude(t_altitude), timestamp(t_timestamp) {};
+    fss_message_position_report(double t_latitude, double t_longitude, uint32_t t_altitude, uint64_t t_timestamp) : fss_message(message_type_position_report), latitude(t_latitude), longitude(t_longitude), altitude(t_altitude), timestamp(t_timestamp) {};
     fss_message_position_report(uint64_t t_id, buf_len *bl) : fss_message(t_id, message_type_position_report), latitude(NAN), longitude(NAN), altitude(0), timestamp(0) { this->unpackData(bl); };
     virtual double getLatitude() override { return this->latitude; };
     virtual double getLongitude() override { return this->longitude; };
@@ -254,7 +256,7 @@ protected:
     virtual void unpackData(buf_len *bl) override;
     virtual void packData(buf_len *bl) override;
 public:
-    fss_message_system_status(uint64_t t_id, uint8_t bat_remaining_percent, uint32_t bat_mah_used) : fss_message(t_id, message_type_system_status), bat_percent(bat_remaining_percent), mah_used(bat_mah_used) {};
+    fss_message_system_status(uint8_t bat_remaining_percent, uint32_t bat_mah_used) : fss_message(message_type_system_status), bat_percent(bat_remaining_percent), mah_used(bat_mah_used) {};
     fss_message_system_status(uint64_t t_id, buf_len *bl) : fss_message(t_id, message_type_system_status), bat_percent(0), mah_used(0) { this->unpackData(bl); };
     virtual uint8_t getBatRemaining() { return this->bat_percent; };
     virtual uint32_t getBatMAHUsed() { return this->mah_used; };
@@ -269,7 +271,7 @@ protected:
     virtual void unpackData(buf_len *bl) override;
     virtual void packData(buf_len *bl) override;
 public:
-    fss_message_search_status(uint64_t t_id, uint64_t t_search_id, uint64_t last_point_completed, uint64_t total_search_points) : fss_message(t_id, message_type_search_status), search_id(t_search_id), point_completed(last_point_completed), points_total(total_search_points) {};
+    fss_message_search_status(uint64_t t_search_id, uint64_t last_point_completed, uint64_t total_search_points) : fss_message(message_type_search_status), search_id(t_search_id), point_completed(last_point_completed), points_total(total_search_points) {};
     fss_message_search_status(uint64_t t_id, buf_len *bl) : fss_message(t_id, message_type_search_status), search_id(0), point_completed(0), points_total(0) { this->unpackData(bl); };
     virtual uint64_t getSearchId() { return this->search_id; };
     virtual uint64_t getSearchCompleted() { return this->point_completed; };
@@ -287,9 +289,9 @@ protected:
     virtual void unpackData(buf_len *bl) override;
     virtual void packData(buf_len *bl) override;
 public:
-    fss_message_asset_command(uint64_t t_id, fss_asset_command t_command, uint64_t t_timestamp) : fss_message(t_id, message_type_command), command(t_command), latitude(NAN), longitude(NAN), altitude(0), timestamp(0) {};
-    fss_message_asset_command(uint64_t t_id, fss_asset_command t_command, uint64_t t_timestamp, double t_latitude, double t_longitude) : fss_message(t_id, message_type_command), command(t_command), latitude(t_latitude), longitude(t_longitude), altitude(0), timestamp(0) {};
-    fss_message_asset_command(uint64_t t_id, fss_asset_command t_command, uint64_t t_timestamp, uint32_t t_altitude) : fss_message(t_id, message_type_command), command(t_command), latitude(NAN), longitude(NAN), altitude(t_altitude), timestamp(0) {};
+    fss_message_asset_command(fss_asset_command t_command, uint64_t t_timestamp) : fss_message(message_type_command), command(t_command), latitude(NAN), longitude(NAN), altitude(0), timestamp(0) {};
+    fss_message_asset_command(fss_asset_command t_command, uint64_t t_timestamp, double t_latitude, double t_longitude) : fss_message(message_type_command), command(t_command), latitude(t_latitude), longitude(t_longitude), altitude(0), timestamp(0) {};
+    fss_message_asset_command(fss_asset_command t_command, uint64_t t_timestamp, uint32_t t_altitude) : fss_message(message_type_command), command(t_command), latitude(NAN), longitude(NAN), altitude(t_altitude), timestamp(0) {};
     fss_message_asset_command(uint64_t t_id, buf_len *bl) : fss_message(t_id, message_type_command), command(asset_command_unknown), latitude(NAN), longitude(NAN), altitude(0), timestamp(0) { this->unpackData(bl); };
     virtual fss_asset_command getCommand() { return this->command; };
     virtual double getLatitude() override { return this->latitude; };
@@ -307,7 +309,7 @@ protected:
     virtual void unpackData(buf_len *bl) override;
     virtual void packData(buf_len *bl) override;
 public:
-    fss_message_smm_settings(uint64_t t_id, const std::string &t_server_url, const std::string &t_username, const std::string &t_password) : fss_message(t_id, message_type_smm_settings), server_url(t_server_url), username(t_username), password(t_password) {};
+    fss_message_smm_settings(const std::string &t_server_url, const std::string &t_username, const std::string &t_password) : fss_message(message_type_smm_settings), server_url(t_server_url), username(t_username), password(t_password) {};
     fss_message_smm_settings(uint64_t t_id, buf_len *bl) : fss_message(t_id, message_type_smm_settings), server_url(), username(), password() { this->unpackData(bl); };
     virtual std::string getServerURL() { return this->server_url; };
     virtual std::string getUsername() { return this->username; };
@@ -321,7 +323,7 @@ protected:
     virtual void unpackData(buf_len *bl) override;
     virtual void packData(buf_len *bl) override;
 public:
-    explicit fss_message_server_list(uint64_t t_id) : fss_message(t_id, message_type_server_list), servers() {};
+    fss_message_server_list() : fss_message(message_type_server_list), servers() {};
     fss_message_server_list(uint64_t t_id, buf_len *bl) : fss_message(t_id, message_type_server_list), servers() { this->unpackData(bl); };
     virtual void addServer(std::string server, uint16_t port) { this->servers.push_back(std::pair<std::string, uint16_t>(server, port)); };
     virtual std::vector<std::pair<std::string, uint16_t>> getServers() { return this->servers; };

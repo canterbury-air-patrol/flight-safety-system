@@ -61,14 +61,14 @@ fss_client::processMessage(fss_message *msg)
             smm_settings *smm = dbc->asset_get_smm_settings(this->name);
             if (smm != nullptr)
             {
-                fss_message_smm_settings *settings_msg = new fss_message_smm_settings(this->conn->getMessageId(), smm->getAddress(), smm->getUsername(), smm->getPassword());
+                fss_message_smm_settings *settings_msg = new fss_message_smm_settings(smm->getAddress(), smm->getUsername(), smm->getPassword());
                 this->conn->sendMsg(settings_msg);
                 delete settings_msg;
             }
             delete smm;
             /* Send all the known fss servers */
             std::list<fss_server_details *> known_servers = dbc->get_active_fss_servers();
-            fss_message_server_list *server_list = new fss_message_server_list(this->conn->getMessageId());
+            fss_message_server_list *server_list = new fss_message_server_list();
             for (auto server_details : known_servers)
             {
                 server_list->addServer(server_details->getAddress(),server_details->getPort());
@@ -89,7 +89,7 @@ fss_client::processMessage(fss_message *msg)
             case message_type_rtt_request:
             {
                 /* Send a response */
-                fss_message_rtt_response *reply_msg = new fss_message_rtt_response(conn->getMessageId(), msg->getId());
+                fss_message_rtt_response *reply_msg = new fss_message_rtt_response(msg->getId());
                 conn->sendMsg(reply_msg);
                 delete reply_msg;
             }

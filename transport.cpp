@@ -25,7 +25,7 @@ fss_connection *fss::connect(std::string address, uint16_t port)
         delete conn;
         return NULL;
     }
-    fss_message *msg = new fss_message_identity(conn->getMessageId(), this->getName());
+    fss_message *msg = new fss_message_identity(this->getName());
     conn->sendMsg(msg);
     delete msg;
     return conn;
@@ -108,13 +108,14 @@ bool fss_connection::connect_to(const std::string &address, uint16_t port)
 bool
 fss_connection::sendMsg(fss_message *msg)
 {
+    msg->setId(this->getMessageId());
     buf_len *bl = msg->getPacked();
 #ifdef DEBUG
     std::cout << "Sending message (len=" << bl->getLength() << ") to " << this->fd << std::endl;
 #endif
     if (!bl->isValid())
     {
-	delete bl;
+        delete bl;
         return false;
     }
     bool ret = this->sendMsg(bl);

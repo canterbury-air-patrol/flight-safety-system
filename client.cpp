@@ -68,7 +68,7 @@ fss_server::processMessage(fss_message *msg)
             case message_type_rtt_request:
             {
                 /* Send a response */
-                fss_message_rtt_response *reply_msg = new fss_message_rtt_response(conn->getMessageId(), msg->getId());
+                fss_message_rtt_response *reply_msg = new fss_message_rtt_response(msg->getId());
                 conn->sendMsg(reply_msg);
                 delete reply_msg;
             }
@@ -142,18 +142,18 @@ int main(int argc, char *argv[])
     }
 
     /* Send each server some fake details */
+    fss_message_system_status *msg_status = new fss_message_system_status(75, 1000);
+    fss_message_search_status *msg_search = new fss_message_search_status(1, 23, 100);
+    fss_message_position_report *msg_pos = new fss_message_position_report(-43.5, 172.5, 300, fss_current_timestamp());
     for (auto server: servers)
     {
-        fss_message_system_status *msg_status = new fss_message_system_status(server->getConnection()->getMessageId(), 75, 1000);
-        fss_message_search_status *msg_search = new fss_message_search_status(server->getConnection()->getMessageId(), 1, 23, 100);
-        fss_message_position_report *msg_pos = new fss_message_position_report(server->getConnection()->getMessageId(), -43.5, 172.5, 300, fss_current_timestamp());
         server->getConnection()->sendMsg(msg_status);
         server->getConnection()->sendMsg(msg_search);
         server->getConnection()->sendMsg(msg_pos);
-        delete msg_status;
-        delete msg_search;
-        delete msg_pos;
     }
+    delete msg_status;
+    delete msg_search;
+    delete msg_pos;
     /* Connect to each server */
     /* Send reports:
        - Battery status
