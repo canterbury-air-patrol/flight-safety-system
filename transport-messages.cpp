@@ -112,7 +112,7 @@ fss_message_rtt_response::unpackData(buf_len *bl)
     size_t offset = this->headerLength();
     char *data = bl->getData();
     size_t length = bl->getLength();
-    if (length - offset == sizeof(uint64_t))
+    if (length - offset >= sizeof(uint64_t))
     {
         this->request_id = ntohll(*(uint64_t *)(data + offset));
     }
@@ -177,7 +177,7 @@ fss_message_system_status::unpackData(buf_len *bl)
     size_t length = bl->getLength();
     this->bat_percent = 0;
     this->mah_used = 0;
-    if (length - offset == (sizeof(uint8_t) + sizeof(uint32_t)))
+    if (length - offset >= (sizeof(uint8_t) + sizeof(uint32_t)))
     {
         this->bat_percent = *(uint8_t *)(data + offset);
         offset += sizeof(uint8_t);
@@ -205,7 +205,7 @@ fss_message_search_status::unpackData(buf_len *bl)
     this->search_id = 0;
     this->point_completed = 0;
     this->points_total = 0;
-    if (length - offset == (sizeof(uint64_t) + sizeof(uint64_t) + sizeof(uint64_t)))
+    if (length - offset >= (sizeof(uint64_t) + sizeof(uint64_t) + sizeof(uint64_t)))
     {
         this->search_id = ntohll(*(uint64_t *)(data + offset));
         offset += sizeof(uint64_t);
@@ -241,7 +241,7 @@ fss_message_asset_command::unpackData(buf_len *bl)
     int32_t lng = 0;
     this->altitude = 0;
     this->timestamp = 0;
-    if (length - offset == (sizeof(uint64_t) + sizeof(int32_t) + sizeof(int32_t) + sizeof(uint32_t) + sizeof(uint8_t)))
+    if (length - offset >= (sizeof(uint64_t) + sizeof(int32_t) + sizeof(int32_t) + sizeof(uint32_t) + sizeof(uint8_t)))
     {
         this->timestamp = ntohll(*(uint64_t *)(data + offset));
         offset += sizeof(uint64_t);
@@ -260,12 +260,13 @@ fss_message_asset_command::unpackData(buf_len *bl)
 void
 packString(buf_len *bl, std::string val)
 {
-    uint16_t len = htons(val.length());
+    size_t str_len = val.length();
+    uint16_t len = htons(str_len);
     bl->addData((char *)&len, sizeof(uint16_t));
-    bl->addData(val.c_str(), val.length());
-    /* align to 4-byte boundary (will add 1 to 4 bytes on '\0') */
-    uint32_t empty = 0;
-    bl->addData((char *)&empty, sizeof(uint32_t) - (bl->getLength() % sizeof(uint64_t)));
+    bl->addData(val.c_str(), str_len);
+    /* align to 8-byte boundary (will add 1 to 8 bytes on '\0') */
+    uint64_t empty = 0;
+    bl->addData((char *)&empty, sizeof(uint64_t) - (bl->getLength() % sizeof(uint64_t)));
 }
 
 void
@@ -287,18 +288,20 @@ fss_message_smm_settings::unpackData(buf_len *bl)
         uint16_t len = ntohs(*(uint16_t *)(data + offset));
         offset += sizeof(uint16_t);
         this->server_url = std::string((char *)(data + offset));
-        offset += len + (sizeof(uint32_t) - len % sizeof(uint32_t));
+        offset += len;
+        offset += (sizeof(uint64_t) - offset % sizeof(uint64_t));
     }
     if (length - offset >= sizeof(uint16_t))
     {
-        uint16_t len = ntohs(*(uint16_t *)data + offset);
+        uint16_t len = ntohs(*(uint16_t *)(data + offset));
         offset += sizeof(uint16_t);
         this->username = std::string((char *)(data + offset));
-        offset += len + (sizeof(uint32_t) - len % sizeof(uint32_t));
+        offset += len;
+        offset += (sizeof(uint64_t) - offset % sizeof(uint64_t));
     }
     if (length - offset >= sizeof(uint16_t))
     {
-        uint16_t len = ntohs(*(uint16_t *)data + offset);
+        uint16_t len = ntohs(*(uint16_t *)(data + offset));
         offset += sizeof(uint16_t);
         this->password = std::string((char *)(data + offset));
         offset += len + (sizeof(uint32_t) - len % sizeof(uint32_t));
@@ -335,10 +338,10 @@ fss_message_server_list::unpackData(buf_len *bl)
         uint16_t len = ntohs(*(uint16_t *)(data + offset));
         offset += sizeof(uint16_t);
         this->servers.push_back(std::make_pair(std::string((char *)(data + offset)), port));
-        offset += len + (sizeof(uint32_t) - len % sizeof(uint32_t));
+        offset += len;
+        offset += (sizeof(uint64_t) - offset % sizeof(uint64_t));
     }
 }
-
 
 fss_message *
 fss_message::decode(buf_len *bl)

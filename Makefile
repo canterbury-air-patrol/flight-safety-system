@@ -10,8 +10,8 @@ ifeq (($REAL_GCC),1)
 WARNFLAGS+=-Wduplicated-cond -Wduplicated-branches -Wmisleading-indentation -Wlogical-op 
 WARNCXXFLAGS+=-Wuseless-cast
 endif
-CFLAGS=${WARNFLAGS} -fPIC -std=c99 -g2
-CXXFLAGS=${WARNCXXFLAGS} -fPIC -std=c++11 -g2
+CFLAGS=${WARNFLAGS} -fPIC -std=c99 -g2 -ggdb -I.
+CXXFLAGS=${WARNCXXFLAGS} -fPIC -std=c++11 -g2 -ggdb -I.
 
 PC_LIST=jsoncpp libecpg
 
@@ -28,6 +28,9 @@ CLIENT_OBJS=$(CLIENT_SOURCE:.cpp=.o)
 
 LIBFSS_SOURCE=transport.cpp transport-helpers.cpp transport-messages.cpp
 LIBFSS_OBJS=$(LIBFSS_SOURCE:.cpp=.o)
+
+TESTSUITES_SOURCE=messages.cpp
+TESTSUITES=$(addprefix tests/,$(TESTSUITES_SOURCE:.cpp=.test))
 
 %.o: %.cpp $(INCLUDES)
 	$(CXX) -c -o $(@) $(<) $(CXXFLAGS) $(EXTRA_CXXFLAGS)
@@ -47,8 +50,14 @@ fss-client: libfss.so $(CLIENT_OBJS)
 libfss.so: $(LIBFSS_OBJS)
 	$(CXX) -shared -o $(@) $(LIBFSS_OBJS)
 
+tests/%.test: tests/%.cpp libfss.so
+	$(CXX) -o $(@) $(<) $(CXXFLAGS) -L. -lfss $(EXTRA_CXXFLAGS)
+
+test: $(TESTSUITES)
+	for t in $(TESTSUITES); do ./$$t; done
+
 check-cppcheck:
 	cppcheck *.cpp --enable=all
 
 clean:
-	rm -f fss-server fss-client libfss.so $(SERVER_OBJS) $(CLIENT_OBJS) $(LIBFSS_OBJS)
+	rm -f fss-server fss-client libfss.so $(SERVER_OBJS) $(CLIENT_OBJS) $(LIBFSS_OBJS) $(TESTSUITES)

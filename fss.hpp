@@ -291,9 +291,9 @@ protected:
     virtual void unpackData(buf_len *bl) override;
     virtual void packData(buf_len *bl) override;
 public:
-    fss_message_asset_command(fss_asset_command t_command, uint64_t t_timestamp) : fss_message(message_type_command), command(t_command), latitude(NAN), longitude(NAN), altitude(0), timestamp(0) {};
-    fss_message_asset_command(fss_asset_command t_command, uint64_t t_timestamp, double t_latitude, double t_longitude) : fss_message(message_type_command), command(t_command), latitude(t_latitude), longitude(t_longitude), altitude(0), timestamp(0) {};
-    fss_message_asset_command(fss_asset_command t_command, uint64_t t_timestamp, uint32_t t_altitude) : fss_message(message_type_command), command(t_command), latitude(NAN), longitude(NAN), altitude(t_altitude), timestamp(0) {};
+    fss_message_asset_command(fss_asset_command t_command, uint64_t t_timestamp) : fss_message(message_type_command), command(t_command), latitude(NAN), longitude(NAN), altitude(0), timestamp(t_timestamp) {};
+    fss_message_asset_command(fss_asset_command t_command, uint64_t t_timestamp, double t_latitude, double t_longitude) : fss_message(message_type_command), command(t_command), latitude(t_latitude), longitude(t_longitude), altitude(0), timestamp(t_timestamp) {};
+    fss_message_asset_command(fss_asset_command t_command, uint64_t t_timestamp, uint32_t t_altitude) : fss_message(message_type_command), command(t_command), latitude(NAN), longitude(NAN), altitude(t_altitude), timestamp(t_timestamp) {};
     fss_message_asset_command(uint64_t t_id, buf_len *bl) : fss_message(t_id, message_type_command), command(asset_command_unknown), latitude(NAN), longitude(NAN), altitude(0), timestamp(0) { this->unpackData(bl); };
     virtual fss_asset_command getCommand() { return this->command; };
     virtual double getLatitude() override { return this->latitude; };

@@ -3,3 +3,5 @@
 fss-client
 fss-server
 libfss.so
+tests/*.test
+*.dSYM
