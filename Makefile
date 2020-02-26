@@ -11,6 +11,9 @@ WARNFLAGS+=-Wduplicated-cond -Wduplicated-branches -Wmisleading-indentation -Wlo
 WARNCXXFLAGS+=-Wuseless-cast
 endif
 DEBUG_FLAGS?=-g2
+ifeq ($(DEBUG),1)
+DEBUG_FLAGS+=-DDEBUG
+endif
 CFLAGS=${WARNFLAGS} -fPIC -std=c99 -I. $(DEBUG_FLAGS)
 CXXFLAGS=${WARNCXXFLAGS} -fPIC -std=c++11 -I. $(DEBUG_FLAGS)
 

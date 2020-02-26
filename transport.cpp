@@ -17,6 +17,28 @@
 
 #include "transport.hpp"
 
+#ifdef DEBUG
+/* Run inet_ntop on a sockaddr_storage object */
+static const char *
+inet_ntop_stor(struct sockaddr_storage *src, char *dst, size_t dstlen, uint16_t *port)
+{
+    switch (src->ss_family)
+    {
+        case AF_INET:
+        {
+            *port = ntohs(((struct sockaddr_in *)src)->sin_port);
+            return inet_ntop (AF_INET, &((struct sockaddr_in *)src)->sin_addr, dst, dstlen);
+        } break;
+        case AF_INET6:
+        {
+            *port = ntohs(((struct sockaddr_in6 *)src)->sin6_port);
+            return inet_ntop (AF_INET6, &((struct sockaddr_in6 *)src)->sin6_addr, dst, dstlen);
+        } break;
+    }
+    return NULL;
+}
+#endif
+
 fss_connection *fss::connect(std::string address, uint16_t port)
 {
     fss_connection *conn = new fss_connection();
@@ -92,6 +114,18 @@ bool fss_connection::connect_to(const std::string &address, uint16_t port)
     {
         std::cerr << "Failed to convert '" << address << "' to a usable address\n";
         return false;
+    }
+
+#ifdef DEBUG
+        char addr_str[INET6_ADDRSTRLEN];
+        uint16_t client_port;
+        inet_ntop_stor(&remote, addr_str, INET6_ADDRSTRLEN, &client_port);
+        std::cout << "Trying to connect to " << address << " (" << addr_str << "):" << port << std::endl;
+#endif
+
+    if (this->fd == -1)
+    {
+        this->fd = socket(remote.ss_family == AF_INET ? PF_INET : PF_INET6, SOCK_STREAM, IPPROTO_TCP);
     }
 
     if (connect(this->fd, (struct sockaddr *)&remote, remote.ss_family == AF_INET ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6)) < 0)
@@ -171,28 +205,6 @@ void fss_connection::setHandler(fss_message_cb *cb)
         delete msg;
     }
 }
-
-#ifdef DEBUG
-/* Run inet_ntop on a sockaddr_storage object */
-static const char *
-inet_ntop_stor(struct sockaddr_storage *src, char *dst, size_t dstlen, uint16_t *port)
-{
-    switch (src->ss_family)
-    {
-        case AF_INET:
-        {
-            *port = ntohs(((struct sockaddr_in *)src)->sin_port);
-            return inet_ntop (AF_INET, &((struct sockaddr_in *)src)->sin_addr, dst, dstlen);
-        } break;
-        case AF_INET6:
-        {
-            *port = ntohs(((struct sockaddr_in6 *)src)->sin6_port);
-            return inet_ntop (AF_INET6, &((struct sockaddr_in6 *)src)->sin6_addr, dst, dstlen);
-        } break;
-    }
-    return NULL;
-}
-#endif
 
 fss_message *
 fss_connection::recvMsg()
@@ -299,6 +311,11 @@ fss_listen::processMessages()
 bool
 fss_listen::startListening()
 {
+    /* open the socket */
+    if (this->fd < 0)
+    {
+        this->fd = socket(PF_INET6, SOCK_STREAM, IPPROTO_TCP);
+    }
     struct sockaddr_in6 bind_addr;
     memset(&bind_addr, 0, sizeof (struct sockaddr_in6));
     bind_addr.sin6_family = AF_INET6;
