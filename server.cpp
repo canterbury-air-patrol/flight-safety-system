@@ -183,11 +183,22 @@ bool new_client_connect(fss_connection *conn)
     clients.push_back(new fss_client(conn));
     return true;
 }
+void cleanup_removable_clients()
+{
+    while(!remove_clients.empty())
+    {
+        fss_client *client = remove_clients.front();
+        remove_clients.pop();
+        delete client;
+    }
+}
 
 int main(int argc, char *argv[])
 {
     /* Watch out for sigint */
     signal (SIGINT, sigIntHandler);
+    /* Ignore sig pipe */
+    signal (SIGPIPE, SIG_IGN);
     /* Read config */
     std::ifstream configfile((argc > 1 ? std::string(argv[1]) : "/etc/fss/server.json"));
     if (!configfile.is_open())
@@ -220,12 +231,7 @@ int main(int argc, char *argv[])
     while (running)
     {
         sleep (1);
-        while(!remove_clients.empty())
-        {
-            fss_client *client = remove_clients.front();
-            remove_clients.pop();
-            delete client;
-        }
+        cleanup_removable_clients();
         /* Send RTT messages to all clients */
         fss_message_rtt_request *rtt_req = new fss_message_rtt_request();
         for(auto client: clients)
@@ -257,8 +263,16 @@ int main(int argc, char *argv[])
         counter++;
     }
     
-    delete dbc;
-    dbc = NULL;
     delete listen;
     listen = NULL;
+    /* Disconnect all the clients */
+    while (!clients.empty())
+    {
+        fss_client *client = clients.front();
+        clients.pop_front();
+        delete client;
+    }
+    cleanup_removable_clients();
+    delete dbc;
+    dbc = NULL;
 }
