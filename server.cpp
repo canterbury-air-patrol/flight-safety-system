@@ -38,6 +38,33 @@ fss_client::~fss_client()
 }
 
 void
+fss_client::sendMsg(fss_message *msg)
+{
+    this->conn->sendMsg(msg);
+}
+
+void
+fss_client::sendRTTRequest(fss_message_rtt_request *rtt_req)
+{
+    uint64_t ts = fss_current_timestamp();
+    this->conn->sendMsg(rtt_req);
+    this->outstanding_rtt_requests.push_back(new fss_client_rtt(ts, rtt_req->getId()));
+}
+
+void
+fss_client::sendSMMSettings()
+{
+    smm_settings *smm = dbc->asset_get_smm_settings(this->name);
+    if (smm != nullptr)
+    {
+        fss_message_smm_settings *settings_msg = new fss_message_smm_settings(smm->getAddress(), smm->getUsername(), smm->getPassword());
+        this->conn->sendMsg(settings_msg);
+        delete settings_msg;
+    }
+    delete smm;
+}
+
+void
 fss_client::processMessage(fss_message *msg)
 {
 #ifdef DEBUG
@@ -58,14 +85,7 @@ fss_client::processMessage(fss_message *msg)
             this->name = ((fss_message_identity *)msg)->getName();
             this->identified = true;
             /* send SMM config and servers list */
-            smm_settings *smm = dbc->asset_get_smm_settings(this->name);
-            if (smm != nullptr)
-            {
-                fss_message_smm_settings *settings_msg = new fss_message_smm_settings(smm->getAddress(), smm->getUsername(), smm->getPassword());
-                this->conn->sendMsg(settings_msg);
-                delete settings_msg;
-            }
-            delete smm;
+            this->sendSMMSettings();
             /* Send all the known fss servers */
             std::list<fss_server_details *> known_servers = dbc->get_active_fss_servers();
             fss_message_server_list *server_list = new fss_message_server_list();
@@ -109,6 +129,9 @@ fss_client::processMessage(fss_message *msg)
                 if (rtt_req)
                 {
                     this->outstanding_rtt_requests.remove(rtt_req);
+#ifdef DEBUG
+                    std::cout << "RTT for " << this->getName() << " is " << (current_ts - rtt_req->getTimeStamp()) << std::endl;
+#endif
                     dbc->asset_add_rtt(this->name, current_ts - rtt_req->getTimeStamp());
                     delete rtt_req;
                 }
@@ -193,6 +216,7 @@ int main(int argc, char *argv[])
        - Per client, send RTT message
      */
 
+    int counter = 0;
     while (running)
     {
         sleep (1);
@@ -202,6 +226,35 @@ int main(int argc, char *argv[])
             remove_clients.pop();
             delete client;
         }
+        /* Send RTT messages to all clients */
+        fss_message_rtt_request *rtt_req = new fss_message_rtt_request();
+        for(auto client: clients)
+        {
+            client->sendRTTRequest(rtt_req);
+        }
+        delete rtt_req;
+        /* Send Config settings to all clients */
+        if (counter == 30)
+        {
+            /* Send all the known fss servers */
+            std::list<fss_server_details *> known_servers = dbc->get_active_fss_servers();
+            fss_message_server_list *server_list = new fss_message_server_list();
+            for (auto server_details : known_servers)
+            {
+                server_list->addServer(server_details->getAddress(),server_details->getPort());
+                delete server_details;
+            }
+            for(auto client: clients)
+            {
+                client->sendMsg(server_list);
+            }
+            delete server_list;
+            for(auto client: clients)
+            {
+                client->sendSMMSettings();
+            }
+        }
+        counter++;
     }
     
     delete dbc;

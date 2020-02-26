@@ -10,8 +10,9 @@ ifeq (($REAL_GCC),1)
 WARNFLAGS+=-Wduplicated-cond -Wduplicated-branches -Wmisleading-indentation -Wlogical-op 
 WARNCXXFLAGS+=-Wuseless-cast
 endif
-CFLAGS=${WARNFLAGS} -fPIC -std=c99 -g2 -ggdb -I.
-CXXFLAGS=${WARNCXXFLAGS} -fPIC -std=c++11 -g2 -ggdb -I.
+DEBUG_FLAGS?=-g2
+CFLAGS=${WARNFLAGS} -fPIC -std=c99 -I. $(DEBUG_FLAGS)
+CXXFLAGS=${WARNCXXFLAGS} -fPIC -std=c++11 -I. $(DEBUG_FLAGS)
 
 PC_LIST=jsoncpp libecpg
 
