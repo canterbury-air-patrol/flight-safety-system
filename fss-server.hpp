@@ -2,6 +2,7 @@
 
 #include <string>
 #include <list>
+#include <mutex>
 
 namespace  flight_safety_system {
 class smm_settings {
@@ -29,6 +30,7 @@ public:
 
 class db_connection {
 private:
+    std::mutex db_lock;
 public:
     db_connection(std::string host, std::string user, std::string pass, std::string db);
     ~db_connection();

@@ -32,7 +32,7 @@ unsigned long long db_get_asset_id(const char *asset_name_arg)
 {
     EXEC SQL BEGIN DECLARE SECTION;
     const char *asset_name = asset_name_arg;
-    unsigned long long asset_id;
+    unsigned long long asset_id = 0;
     EXEC SQL END DECLARE SECTION;
 
     EXEC SQL SELECT id INTO :asset_id FROM assets_asset WHERE name = :asset_name;
