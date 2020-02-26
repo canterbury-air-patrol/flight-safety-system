@@ -16,21 +16,24 @@
 bool running = true;
 
 class fss_server: public fss_message_cb {
-private:
+protected:
     std::string address;
     uint16_t port;
+    uint64_t last_tried;
+    uint64_t retry_count;
 public:
     explicit fss_server(fss_connection *t_conn, std::string t_address, uint16_t t_port);
     virtual ~fss_server();
     virtual void processMessage(fss_message *message) override;
-    std::string getAddress() { return this->address; };
-    uint16_t getPort() { return this->port; };
+    virtual std::string getAddress() { return this->address; };
+    virtual uint16_t getPort() { return this->port; };
+    virtual bool reconnect();
 };
 
 std::list<fss_server *> servers;
 std::list<fss_server *> reconnect_servers;
 
-fss_server::fss_server(fss_connection *t_conn, std::string t_address, uint16_t t_port) : fss_message_cb(t_conn), address(t_address), port(t_port)
+fss_server::fss_server(fss_connection *t_conn, std::string t_address, uint16_t t_port) : fss_message_cb(t_conn), address(t_address), port(t_port), last_tried(0), retry_count(0)
 {
     conn->setHandler(this);
 }
@@ -44,6 +47,54 @@ fss_server::~fss_server()
     }
 }
 
+bool
+fss_server::reconnect()
+{
+    if (this->conn == nullptr)
+    {
+        uint64_t ts = fss_current_timestamp();
+        bool try_now = false;
+        uint64_t elapsed_time = ts - this->last_tried;
+        switch (this->retry_count)
+        {
+            case 0:
+                try_now = (elapsed_time > 1000);
+                break;
+            case 1:
+                try_now = (elapsed_time > 2000);
+                break;
+            case 2:
+                try_now = (elapsed_time > 4000);
+                break;
+            case 3:
+                try_now = (elapsed_time > 8000);
+                break;
+            case 4:
+                try_now = (elapsed_time > 15000);
+                break;
+            default:
+                try_now = (elapsed_time > 30000);
+                break;
+        }
+        if (try_now)
+        {
+            this->retry_count++;
+            this->last_tried = ts;
+            this->conn = new fss_connection();
+            if (!this->conn->connect_to(this->getAddress(), this->getPort()))
+            {
+                delete this->conn;
+                this->conn = nullptr;
+            }
+            else
+            {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 void
 fss_server::processMessage(fss_message *msg)
 {
@@ -55,6 +106,8 @@ fss_server::processMessage(fss_message *msg)
         /* Connection has been closed, schedule reconnection */
         servers.remove(this);
         reconnect_servers.push_back(this);
+        this->last_tried = 0;
+        this->retry_count = 0;
         return;
     }
     else
@@ -173,10 +226,32 @@ int main(int argc, char *argv[])
     while (running)
     {
         sleep (1);
+        std::list<fss_server *> reconnected;
+        for (auto server : reconnect_servers)
+        {
+            if(server->reconnect())
+            {
+                reconnected.push_back(server);
+            }
+        }
+        while(!reconnected.empty())
+        {
+            auto server = reconnected.front();
+            reconnected.pop_front();
+            reconnect_servers.remove(server);
+            servers.push_back(server);
+        }
     }
-    
-    for (auto conn : servers)
+    while (!reconnect_servers.empty())
     {
-        delete conn;
+        auto server = reconnect_servers.front();
+        reconnect_servers.pop_front();
+        delete server;
+    }
+    while (!servers.empty())
+    {
+        auto server = servers.front();
+        servers.pop_front();
+        delete server;
     }
 }
