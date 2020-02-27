@@ -14,6 +14,7 @@
 #include <unistd.h>
 
 bool running = true;
+std::string asset_name;
 
 class fss_server: public fss_message_cb {
 protected:
@@ -41,7 +42,7 @@ updateServers(fss_message_server_list *msg)
         bool exists = false;
         for(auto server: servers)
         {
-            if (server->getAddress() == server_entry.first && server->getPort() == server_entry.second)
+            if (server->getAddress().compare(server_entry.first) == 0 && server->getPort() == server_entry.second)
             {
                 exists = true;
                 break;
@@ -51,7 +52,7 @@ updateServers(fss_message_server_list *msg)
         {
             for(auto server: servers)
             {
-                if(server->getAddress() == server_entry.first && server->getPort() == server_entry.second)
+                if(server->getAddress().compare(server_entry.first) == 0 && server->getPort() == server_entry.second)
                 {
                     exists = true;
                     break;
@@ -61,7 +62,13 @@ updateServers(fss_message_server_list *msg)
         if (!exists)
         {
             fss_connection *conn = new fss_connection();
-            if (!conn->connect_to(server_entry.first, server_entry.second))
+            if (conn->connect_to(server_entry.first, server_entry.second))
+            {
+                fss_message_identity *ident_msg = new fss_message_identity(asset_name);
+                conn->sendMsg(ident_msg);
+                delete ident_msg;
+            }
+            else
             {
                 delete conn;
                 conn = nullptr;
@@ -138,6 +145,9 @@ fss_server::reconnect()
             else
             {
                 conn->setHandler(this);
+                fss_message_identity *ident_msg = new fss_message_identity(asset_name);
+                conn->sendMsg(ident_msg);
+                delete ident_msg;
                 return true;
             }
         }
@@ -232,7 +242,8 @@ int main(int argc, char *argv[])
     Json::Value config;
     configfile >> config;
 
-    fss connection = fss(config["name"].asString());
+    asset_name = config["name"].asString();
+    fss connection = fss(asset_name);
 
     for (unsigned int idx = 0; idx < config["servers"].size(); idx++)
     {
@@ -244,19 +255,6 @@ int main(int argc, char *argv[])
         servers.push_back(new fss_server(conn, config["servers"][idx]["address"].asString(), config["servers"][idx]["port"].asInt()));
     }
 
-    /* Send each server some fake details */
-    fss_message_system_status *msg_status = new fss_message_system_status(75, 1000);
-    fss_message_search_status *msg_search = new fss_message_search_status(1, 23, 100);
-    fss_message_position_report *msg_pos = new fss_message_position_report(-43.5, 172.5, 300, fss_current_timestamp());
-    for (auto server: servers)
-    {
-        server->getConnection()->sendMsg(msg_status);
-        server->getConnection()->sendMsg(msg_search);
-        server->getConnection()->sendMsg(msg_pos);
-    }
-    delete msg_status;
-    delete msg_search;
-    delete msg_pos;
     /* Connect to each server */
     /* Send reports:
        - Battery status
@@ -273,6 +271,7 @@ int main(int argc, char *argv[])
        - Server reset
      */
     
+    int counter = 0;
     while (running)
     {
         sleep (1);
@@ -290,6 +289,23 @@ int main(int argc, char *argv[])
             reconnected.pop_front();
             reconnect_servers.remove(server);
             servers.push_back(server);
+        }
+        counter++;
+        if (counter % 5 == 0)
+        {
+            /* Send each server some fake details */
+            fss_message_system_status *msg_status = new fss_message_system_status(75, 1000);
+            fss_message_search_status *msg_search = new fss_message_search_status(1, 23, 100);
+            fss_message_position_report *msg_pos = new fss_message_position_report(-43.5, 172.5, 300, fss_current_timestamp());
+            for (auto server: servers)
+            {
+                server->getConnection()->sendMsg(msg_status);
+                server->getConnection()->sendMsg(msg_search);
+                server->getConnection()->sendMsg(msg_pos);
+            }
+            delete msg_status;
+            delete msg_search;
+            delete msg_pos;
         }
     }
     while (!reconnect_servers.empty())

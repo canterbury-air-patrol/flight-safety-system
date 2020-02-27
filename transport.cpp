@@ -130,7 +130,7 @@ bool fss_connection::connect_to(const std::string &address, uint16_t port)
 
     if (connect(this->fd, (struct sockaddr *)&remote, remote.ss_family == AF_INET ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6)) < 0)
     {
-        perror("Failed to connect: ");
+        perror(("Failed to connect to " + address).c_str());
         return false;
     }
 
