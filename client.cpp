@@ -22,7 +22,7 @@ protected:
     uint64_t last_tried;
     uint64_t retry_count;
 public:
-    explicit fss_server(fss_connection *t_conn, std::string t_address, uint16_t t_port);
+    fss_server(fss_connection *t_conn, std::string t_address, uint16_t t_port);
     virtual ~fss_server();
     virtual void processMessage(fss_message *message) override;
     virtual std::string getAddress() { return this->address; };
@@ -33,9 +33,58 @@ public:
 std::list<fss_server *> servers;
 std::list<fss_server *> reconnect_servers;
 
+void
+updateServers(fss_message_server_list *msg)
+{
+    for (auto server_entry: msg->getServers())
+    {
+        bool exists = false;
+        for(auto server: servers)
+        {
+            if (server->getAddress() == server_entry.first && server->getPort() == server_entry.second)
+            {
+                exists = true;
+                break;
+            }
+        }
+        if (!exists)
+        {
+            for(auto server: servers)
+            {
+                if(server->getAddress() == server_entry.first && server->getPort() == server_entry.second)
+                {
+                    exists = true;
+                    break;
+                }
+            }
+        }
+        if (!exists)
+        {
+            fss_connection *conn = new fss_connection();
+            if (!conn->connect_to(server_entry.first, server_entry.second))
+            {
+                delete conn;
+                conn = nullptr;
+            }
+            fss_server *server = new fss_server(conn, server_entry.first, server_entry.second);
+            if (conn == nullptr)
+            {
+                reconnect_servers.push_back(server);
+            }
+            else
+            {
+                servers.push_back(server);
+            }
+        }
+    }
+}
+
 fss_server::fss_server(fss_connection *t_conn, std::string t_address, uint16_t t_port) : fss_message_cb(t_conn), address(t_address), port(t_port), last_tried(0), retry_count(0)
 {
-    conn->setHandler(this);
+    if (conn != nullptr)
+    {
+        conn->setHandler(this);
+    }
 }
 
 fss_server::~fss_server()
@@ -88,6 +137,7 @@ fss_server::reconnect()
             }
             else
             {
+                conn->setHandler(this);
                 return true;
             }
         }
@@ -145,7 +195,7 @@ fss_server::processMessage(fss_message *msg)
                 break;
             case message_type_server_list:
             {
-                /* TODO */
+                updateServers((fss_message_server_list *)msg);
             }
                 break;
             case message_type_smm_settings:
