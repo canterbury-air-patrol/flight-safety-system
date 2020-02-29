@@ -28,6 +28,40 @@ public:
     uint16_t getPort() { return this->port; };
 };
 
+class asset_command {
+private:
+    uint64_t dbid;
+    uint64_t timestamp;
+    fss_asset_command command;
+    double latitude;
+    double longitude;
+    uint16_t altitude;
+public:
+    asset_command(uint64_t t_dbid, uint64_t t_timestamp, std::string t_cmd, double t_latitude, double t_longitude, uint16_t t_altitude) : dbid(t_dbid), timestamp(t_timestamp), command(asset_command_unknown), latitude(t_latitude), longitude(t_longitude), altitude(t_altitude) {
+        if (t_cmd == "RTL") {
+            this->command = asset_command_rtl;
+        } else if (t_cmd == "HOLD") {
+            this->command = asset_command_hold;
+        } else if (t_cmd == "GOTO") {
+            this->command = asset_command_goto;
+        } else if (t_cmd == "RON") {
+            this->command = asset_command_resume;
+        } else if (t_cmd == "DISARM") {
+            this->command = asset_command_disarm;
+        } else if (t_cmd == "ALT") {
+            this->command = asset_command_altitude;
+        } else if (t_cmd == "TERM") {
+            this->command = asset_command_terminate;
+        }
+    };
+    uint64_t getDBId() { return this->dbid; };
+    uint64_t getTimeStamp() { return this->timestamp; };
+    fss_asset_command getCommand() { return this->command; };
+    double getLatitude() { return this->latitude; };
+    double getLongitude() { return this->longitude; };
+    uint16_t getAltitude() { return this->altitude; };
+};
+
 class db_connection {
 private:
     std::mutex db_lock;
@@ -39,6 +73,7 @@ public:
     void asset_add_status(std::string asset_name, uint8_t bat_percent, uint32_t bat_mah_used);
     void asset_add_search_status(std::string asset_name, uint64_t search_id, uint64_t search_completed, uint64_t search_total);
     void asset_add_position(std::string asset_name, double latitude, double longitude, uint16_t altitude);
+    asset_command *asset_get_command(std::string asset_name);
     smm_settings *asset_get_smm_settings(std::string asset_name);
     std::list<fss_server_details *> get_active_fss_servers();
 };
@@ -59,6 +94,8 @@ private:
     std::string name;
     std::list<fss_client_rtt *> outstanding_rtt_requests;
     std::string getName() { return this->name; };
+    uint64_t last_command_send_ts;
+    uint64_t last_command_dbid;
 public:
     explicit fss_client(fss_connection *conn);
     virtual ~fss_client();
@@ -66,6 +103,7 @@ public:
     void sendRTTRequest(fss_message_rtt_request *rtt_req);
     void sendMsg(fss_message *msg);
     void sendSMMSettings();
+    void sendCommand();
 };
 
 }

@@ -74,6 +74,27 @@ db_connection::asset_add_position(std::string asset_name, double latitude, doubl
     this->db_lock.unlock();
 }
 
+asset_command *
+db_connection::asset_get_command(std::string asset_name)
+{
+    this->db_lock.lock();
+    uint64_t asset_id = db_get_asset_id(asset_name.c_str());
+    if (asset_id != 0)
+    {
+        struct asset_command_s *command = db_asset_command_get(asset_id);
+        if (command)
+        {
+            this->db_lock.unlock();
+            asset_command *res = new asset_command(command->dbid, command->timestamp, std::string(command->command), command->latitude, command->longitude, command->altitude);
+            free (command->command);
+            free (command);
+            return res;
+        }
+    }
+    this->db_lock.unlock();
+    return nullptr;
+}
+
 smm_settings *
 db_connection::asset_get_smm_settings(std::string asset_name)
 {

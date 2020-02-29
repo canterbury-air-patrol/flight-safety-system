@@ -85,6 +85,40 @@ void db_position_create_entry(unsigned long long asset_id_arg, double latitude, 
     EXEC SQL INSERT INTO assets_assetposition (asset_id, position, altitude, timestamp) VALUES (:asset_id, ST_SetSRID(ST_MakePoint(:lng, :lat), 4326), :alt, NOW());
 }
 
+struct asset_command_s *
+db_asset_command_get(unsigned long long asset_id_arg)
+{
+    EXEC SQL BEGIN DECLARE SECTION;
+    unsigned long long asset_id = asset_id_arg;
+    unsigned long long id = 0;
+    unsigned long long ts;
+    char command[7];
+    double lat;
+    double lng;
+    int alt;
+    int success = 0;
+    int lat_ind;
+    int lng_ind;
+    int alt_ind;
+    EXEC SQL END DECLARE SECTION;
+
+    EXEC SQL SELECT 1, AC.id, (extract(epoch from AC.timestamp) * 1000)::bigint, AC.command, ST_Y(AC.position::geometry), ST_X(AC.position::geometry), AC.altitude INTO :success, :id, :ts, :command, :lat :lat_ind, :lng :lng_ind, :alt :alt_ind FROM assets_assetcommand AS AC WHERE AC.asset_id = :asset_id ORDER BY AC.timestamp DESC LIMIT 1;
+
+
+    struct asset_command_s *res = NULL;
+    if (success == 1)
+    {
+        res = malloc(sizeof(struct asset_command_s));
+        res->dbid = id;
+        res->command = strdup(command);
+        res->timestamp = ts;
+        res->latitude = lat;
+        res->longitude = lng;
+        res->altitude = alt;
+    }
+    return res;
+}
+
 char *
 convert_to_http(const char *address, int port, bool https)
 {

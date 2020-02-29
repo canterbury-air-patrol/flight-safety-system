@@ -18,7 +18,7 @@ db_connection *dbc = NULL;
 std::list<fss_client *> clients;
 std::queue<fss_client *> remove_clients;
 
-fss_client::fss_client(fss_connection *t_conn) : fss_message_cb(t_conn), identified(false), name(), outstanding_rtt_requests()
+fss_client::fss_client(fss_connection *t_conn) : fss_message_cb(t_conn), identified(false), name(), outstanding_rtt_requests(), last_command_send_ts(0), last_command_dbid(0)
 {
     conn->setHandler(this);
 }
@@ -41,6 +41,36 @@ void
 fss_client::sendMsg(fss_message *msg)
 {
     this->conn->sendMsg(msg);
+}
+
+void
+fss_client::sendCommand()
+{
+    uint64_t ts = fss_current_timestamp();
+    asset_command *ac = dbc->asset_get_command(this->name);
+    if (ac != nullptr && (ac->getDBId() != this->last_command_dbid || ts > (this->last_command_send_ts + 10000)))
+    {
+        /* New command or time to re-send */
+        this->last_command_send_ts = ts;
+        this->last_command_dbid = ac->getDBId();
+        fss_message_asset_command *msg = nullptr;
+        fss_asset_command command = ac->getCommand();
+        switch (command)
+        {
+            case asset_command_goto:
+                msg = new fss_message_asset_command(command, ac->getTimeStamp(), ac->getLatitude(), ac->getLongitude());
+                break;
+            case asset_command_altitude:
+                msg = new fss_message_asset_command(command, ac->getTimeStamp(), ac->getAltitude());
+                break;
+            default:
+                msg = new fss_message_asset_command(command, ac->getTimeStamp());
+                break;
+        }
+        this->conn->sendMsg(msg);
+        delete msg;
+    }
+    delete ac;
 }
 
 void
@@ -84,6 +114,8 @@ fss_client::processMessage(fss_message *msg)
         {
             this->name = ((fss_message_identity *)msg)->getName();
             this->identified = true;
+            /* send the current command */
+            this->sendCommand();
             /* send SMM config and servers list */
             this->sendSMMSettings();
             /* Send all the known fss servers */
@@ -237,6 +269,7 @@ int main(int argc, char *argv[])
         for(auto client: clients)
         {
             client->sendRTTRequest(rtt_req);
+            client->sendCommand();
         }
         delete rtt_req;
         /* Send Config settings to all clients */
