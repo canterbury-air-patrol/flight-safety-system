@@ -13,29 +13,37 @@
 
 #include <unistd.h>
 
+namespace fss_transport = flight_safety_system::transport;
+
 bool running = true;
 std::string asset_name;
 
-class fss_server: public fss_message_cb {
+namespace flight_safety_system {
+namespace client {
+class fss_server: public fss_transport::fss_message_cb {
 protected:
     std::string address;
     uint16_t port;
     uint64_t last_tried;
     uint64_t retry_count;
 public:
-    fss_server(fss_connection *t_conn, std::string t_address, uint16_t t_port);
+    fss_server(fss_transport::fss_connection *t_conn, const std::string &t_address, uint16_t t_port);
     virtual ~fss_server();
-    virtual void processMessage(fss_message *message) override;
+    virtual void processMessage(fss_transport::fss_message *message) override;
     virtual std::string getAddress() { return this->address; };
     virtual uint16_t getPort() { return this->port; };
     virtual bool reconnect();
 };
+}
+}
+
+using namespace flight_safety_system::client;
 
 std::list<fss_server *> servers;
 std::list<fss_server *> reconnect_servers;
 
 void
-updateServers(fss_message_server_list *msg)
+updateServers(fss_transport::fss_message_server_list *msg)
 {
     for (auto server_entry: msg->getServers())
     {
@@ -61,10 +69,10 @@ updateServers(fss_message_server_list *msg)
         }
         if (!exists)
         {
-            fss_connection *conn = new fss_connection();
+            auto conn = new fss_transport::fss_connection();
             if (conn->connect_to(server_entry.first, server_entry.second))
             {
-                fss_message_identity *ident_msg = new fss_message_identity(asset_name);
+                auto ident_msg = new fss_transport::fss_message_identity(asset_name);
                 conn->sendMsg(ident_msg);
                 delete ident_msg;
             }
@@ -73,7 +81,7 @@ updateServers(fss_message_server_list *msg)
                 delete conn;
                 conn = nullptr;
             }
-            fss_server *server = new fss_server(conn, server_entry.first, server_entry.second);
+            auto server = new fss_server(conn, server_entry.first, server_entry.second);
             if (conn == nullptr)
             {
                 reconnect_servers.push_back(server);
@@ -86,7 +94,7 @@ updateServers(fss_message_server_list *msg)
     }
 }
 
-fss_server::fss_server(fss_connection *t_conn, std::string t_address, uint16_t t_port) : fss_message_cb(t_conn), address(t_address), port(t_port), last_tried(0), retry_count(0)
+fss_server::fss_server(fss_transport::fss_connection *t_conn, const std::string &t_address, uint16_t t_port) : fss_message_cb(t_conn), address(t_address), port(t_port), last_tried(0), retry_count(0)
 {
     if (conn != nullptr)
     {
@@ -136,7 +144,7 @@ fss_server::reconnect()
         {
             this->retry_count++;
             this->last_tried = ts;
-            this->conn = new fss_connection();
+            this->conn = new fss_transport::fss_connection();
             if (!this->conn->connect_to(this->getAddress(), this->getPort()))
             {
                 delete this->conn;
@@ -145,7 +153,7 @@ fss_server::reconnect()
             else
             {
                 conn->setHandler(this);
-                fss_message_identity *ident_msg = new fss_message_identity(asset_name);
+                auto ident_msg = new fss_transport::fss_message_identity(asset_name);
                 conn->sendMsg(ident_msg);
                 delete ident_msg;
                 return true;
@@ -156,12 +164,12 @@ fss_server::reconnect()
 }
 
 void
-fss_server::processMessage(fss_message *msg)
+fss_server::processMessage(fss_transport::fss_message *msg)
 {
 #ifdef DEBUG
     std::cout << "Got message " << msg->getType() << std::endl;
 #endif
-    if (msg->getType() == message_type_closed)
+    if (msg->getType() == fss_transport::message_type_closed)
     {
         /* Connection has been closed, schedule reconnection */
         servers.remove(this);
@@ -174,41 +182,41 @@ fss_server::processMessage(fss_message *msg)
     {
         switch (msg->getType())
         {
-            case message_type_unknown:
-            case message_type_closed:
-            case message_type_identity:
+            case fss_transport::message_type_unknown:
+            case fss_transport::message_type_closed:
+            case fss_transport::message_type_identity:
                 break;
-            case message_type_rtt_request:
+            case fss_transport::message_type_rtt_request:
             {
                 /* Send a response */
-                fss_message_rtt_response *reply_msg = new fss_message_rtt_response(msg->getId());
+                auto reply_msg = new fss_transport::fss_message_rtt_response(msg->getId());
                 conn->sendMsg(reply_msg);
                 delete reply_msg;
             }
                 break;
-            case message_type_rtt_response:
+            case fss_transport::message_type_rtt_response:
             /* Currently we don't send any rtt requests */
                 break;
-            case message_type_position_report:
+            case fss_transport::message_type_position_report:
             /* Servers will be relaying position reports, so this is another asset */
                 break;
-            case message_type_system_status:
+            case fss_transport::message_type_system_status:
             /* Servers don't currently send status reports */
                 break;
-            case message_type_search_status:
+            case fss_transport::message_type_search_status:
             /* Servers don't have a search status to report */
                 break;
-            case message_type_command:
+            case fss_transport::message_type_command:
             {
                 /* TODO */
             }
                 break;
-            case message_type_server_list:
+            case fss_transport::message_type_server_list:
             {
-                updateServers((fss_message_server_list *)msg);
+                updateServers((fss_transport::fss_message_server_list *)msg);
             }
                 break;
-            case message_type_smm_settings:
+            case fss_transport::message_type_smm_settings:
             {
                 /* TODO */
             }
@@ -243,11 +251,11 @@ int main(int argc, char *argv[])
     configfile >> config;
 
     asset_name = config["name"].asString();
-    fss connection = fss(asset_name);
+    auto connection = flight_safety_system::fss(asset_name);
 
     for (unsigned int idx = 0; idx < config["servers"].size(); idx++)
     {
-        fss_connection *conn = connection.connect(config["servers"][idx]["address"].asString(), config["servers"][idx]["port"].asInt());
+        auto conn = connection.connect(config["servers"][idx]["address"].asString(), config["servers"][idx]["port"].asInt());
         if (conn == NULL)
         {
             return -1;
@@ -294,9 +302,9 @@ int main(int argc, char *argv[])
         if (counter % 5 == 0)
         {
             /* Send each server some fake details */
-            fss_message_system_status *msg_status = new fss_message_system_status(75, 1000);
-            fss_message_search_status *msg_search = new fss_message_search_status(1, 23, 100);
-            fss_message_position_report *msg_pos = new fss_message_position_report(-43.5, 172.5, 300, fss_current_timestamp());
+            auto msg_status = new fss_transport::fss_message_system_status(75, 1000);
+            auto msg_search = new fss_transport::fss_message_search_status(1, 23, 100);
+            auto msg_pos = new fss_transport::fss_message_position_report(-43.5, 172.5, 300, flight_safety_system::fss_current_timestamp());
             for (auto server: servers)
             {
                 server->getConnection()->sendMsg(msg_status);

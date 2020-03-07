@@ -7,6 +7,8 @@ extern "C" {
 
 #include <string>
 
+using namespace flight_safety_system::server;
+
 db_connection::db_connection(std::string host, std::string user, std::string pass, std::string db) : db_lock()
 {
     db_connect(host.c_str(), user.c_str(), pass.c_str(), db.c_str());

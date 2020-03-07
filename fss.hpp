@@ -18,6 +18,8 @@
 
 namespace flight_safety_system {
 class fss;
+
+namespace transport {
 class fss_connection;
 class fss_listen;
 class fss_message;
@@ -331,12 +333,14 @@ public:
     virtual std::vector<std::pair<std::string, uint16_t>> getServers() { return this->servers; };
 };
 
+}
+
 class fss {
 private:
     std::string name;
 public:
     explicit fss(const std::string &t_name) : name(t_name) {};
-    fss_connection *connect(std::string name, uint16_t port);
+    flight_safety_system::transport::fss_connection *connect(std::string name, uint16_t port);
     std::string getName() { return this->name; };
 };
 

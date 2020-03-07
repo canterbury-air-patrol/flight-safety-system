@@ -3,7 +3,4 @@
 
 #include "fss.hpp"
 
-using namespace flight_safety_system;
-
-
 #endif

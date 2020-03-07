@@ -5,3 +5,4 @@ fss-server
 libfss.so
 tests/*.test
 *.dSYM
+.DS_Store

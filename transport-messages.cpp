@@ -9,6 +9,8 @@
 #define htonll(x) htobe64(x)
 #endif
 
+using namespace flight_safety_system::transport;
+
 size_t
 fss_message::headerLength()
 {
@@ -49,7 +51,7 @@ fss_message::updateSize(buf_len *bl)
 buf_len *
 fss_message::getPacked()
 {
-    buf_len *bl = new buf_len();
+    auto bl = new buf_len();
 
     this->createHeader(bl);
 

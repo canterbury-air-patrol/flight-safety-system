@@ -17,6 +17,8 @@
 
 #include "transport.hpp"
 
+namespace fss_transport = flight_safety_system::transport;
+
 #ifdef DEBUG
 /* Run inet_ntop on a sockaddr_storage object */
 static const char *
@@ -39,31 +41,31 @@ inet_ntop_stor(struct sockaddr_storage *src, char *dst, size_t dstlen, uint16_t 
 }
 #endif
 
-fss_connection *fss::connect(std::string address, uint16_t port)
+fss_transport::fss_connection *flight_safety_system::fss::connect(std::string address, uint16_t port)
 {
-    fss_connection *conn = new fss_connection();
+    auto conn = new fss_transport::fss_connection();
     if (!conn->connect_to(address, port))
     {
         delete conn;
         return NULL;
     }
-    fss_message *msg = new fss_message_identity(this->getName());
+    auto msg = new fss_transport::fss_message_identity(this->getName());
     conn->sendMsg(msg);
     delete msg;
     return conn;
 }
 
-void
-recv_msg_thread(fss_connection *conn)
+static void
+recv_msg_thread(fss_transport::fss_connection *conn)
 {
     conn->processMessages();
 }
 
-fss_connection::fss_connection(int t_fd) : fd(t_fd), last_msg_id(0), handler(NULL), messages(), recv_thread(std::thread(recv_msg_thread, this)), send_lock()
+fss_transport::fss_connection::fss_connection(int t_fd) : fd(t_fd), last_msg_id(0), handler(NULL), messages(), recv_thread(std::thread(recv_msg_thread, this)), send_lock()
 {
 }
 
-fss_connection::~fss_connection()
+fss_transport::fss_connection::~fss_connection()
 {
     shutdown(this->fd, 2);
     close(this->fd);
@@ -79,18 +81,18 @@ fss_connection::~fss_connection()
     }
 }
 
-uint64_t fss_connection::getMessageId()
+uint64_t fss_transport::fss_connection::getMessageId()
 {
     return ++this->last_msg_id;
 }
 
 void
-fss_connection::processMessages()
+fss_transport::fss_connection::processMessages()
 {
     bool run = true;
     while (run)
     {
-        fss_message *msg = this->recvMsg();
+        auto msg = this->recvMsg();
         if (msg && msg->getType() == message_type_closed)
         {
             run = false;
@@ -107,7 +109,7 @@ fss_connection::processMessages()
     }
 }
 
-bool fss_connection::connect_to(const std::string &address, uint16_t port)
+bool fss_transport::fss_connection::connect_to(const std::string &address, uint16_t port)
 {
     struct sockaddr_storage remote;
     if (!convert_str_to_sa (address, port, &remote))
@@ -140,11 +142,11 @@ bool fss_connection::connect_to(const std::string &address, uint16_t port)
 }
 
 bool
-fss_connection::sendMsg(fss_message *msg)
+fss_transport::fss_connection::sendMsg(fss_message *msg)
 {
     this->send_lock.lock();
     msg->setId(this->getMessageId());
-    buf_len *bl = msg->getPacked();
+    auto bl = msg->getPacked();
 #ifdef DEBUG
     std::cout << "Sending message (len=" << bl->getLength() << ") to " << this->fd << std::endl;
 #endif
@@ -161,7 +163,7 @@ fss_connection::sendMsg(fss_message *msg)
 
 #ifdef DEBUG
 static void
-print_bl(buf_len *bl)
+print_bl(fss_transport::buf_len *bl)
 {
     unsigned char *data = (unsigned char *)bl->getData();
     size_t len = bl->getLength();
@@ -174,7 +176,7 @@ print_bl(buf_len *bl)
 #endif
 
 bool
-fss_connection::sendMsg(buf_len *bl)
+fss_transport::fss_connection::sendMsg(buf_len *bl)
 {
     size_t sent = 0;
     size_t to_send = bl->getLength();
@@ -194,22 +196,22 @@ fss_connection::sendMsg(buf_len *bl)
     return true;
 }
 
-void fss_connection::setHandler(fss_message_cb *cb)
+void fss_transport::fss_connection::setHandler(fss_message_cb *cb)
 {
     this->handler = cb;
     while(!this->messages.empty())
     {
-        fss_message *msg = this->messages.front();
+        auto msg = this->messages.front();
         this->messages.pop();
         cb->processMessage(msg);
         delete msg;
     }
 }
 
-fss_message *
-fss_connection::recvMsg()
+fss_transport::fss_message *
+fss_transport::fss_connection::recvMsg()
 {
-    fss_message *msg = NULL;
+    fss_transport::fss_message *msg = nullptr;
     size_t header_len = sizeof (uint16_t);
     char *header_data = (char *) malloc(header_len);
     ssize_t received = recv(this->fd, header_data, header_len, 0);
@@ -241,7 +243,7 @@ fss_connection::recvMsg()
             printf("Message reads: \n");
             print_bl(bl);
 #endif
-            msg = fss_message::decode(bl);
+            msg = fss_transport::fss_message::decode(bl);
             delete bl;
         }
         else
@@ -253,7 +255,7 @@ fss_connection::recvMsg()
     else if(received == 0 || (received < 0 || errno == EBADF))
     {
         /* Connection was closed */
-        msg = new fss_message_closed();
+        msg = new fss_transport::fss_message_closed();
     }
     else
     {
@@ -264,13 +266,13 @@ fss_connection::recvMsg()
 }
 
 static void
-listen_thread(fss_listen *listen)
+listen_thread(fss_transport::fss_listen *listen)
 {
     listen->processMessages();
 }
 
 void
-fss_listen::processMessages()
+fss_transport::fss_listen::processMessages()
 {
     while (1)
     {
@@ -294,7 +296,7 @@ fss_listen::processMessages()
 #endif
         if (this->cb != NULL)
         {
-            fss_connection *conn = new fss_connection(newfd);
+            auto conn = new fss_transport::fss_connection(newfd);
             if(!this->cb(conn))
             {
                 delete conn;
@@ -309,7 +311,7 @@ fss_listen::processMessages()
 }
 
 bool
-fss_listen::startListening()
+fss_transport::fss_listen::startListening()
 {
     /* open the socket */
     if (this->fd < 0)

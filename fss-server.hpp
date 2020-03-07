@@ -5,6 +5,7 @@
 #include <mutex>
 
 namespace  flight_safety_system {
+namespace server {
 class smm_settings {
 private:
     std::string address;
@@ -23,7 +24,7 @@ private:
     std::string address;
     uint16_t port;
 public:
-    fss_server_details(std::string t_address, uint16_t t_port) : address(t_address), port(t_port) {};
+    fss_server_details(const std::string &t_address, uint16_t t_port) : address(t_address), port(t_port) {};
     std::string getAddress() { return this->address; };
     uint16_t getPort() { return this->port; };
 };
@@ -32,31 +33,31 @@ class asset_command {
 private:
     uint64_t dbid;
     uint64_t timestamp;
-    fss_asset_command command;
+    transport::fss_asset_command command;
     double latitude;
     double longitude;
     uint16_t altitude;
 public:
-    asset_command(uint64_t t_dbid, uint64_t t_timestamp, std::string t_cmd, double t_latitude, double t_longitude, uint16_t t_altitude) : dbid(t_dbid), timestamp(t_timestamp), command(asset_command_unknown), latitude(t_latitude), longitude(t_longitude), altitude(t_altitude) {
+    asset_command(uint64_t t_dbid, uint64_t t_timestamp, const std::string &t_cmd, double t_latitude, double t_longitude, uint16_t t_altitude) : dbid(t_dbid), timestamp(t_timestamp), command(transport::asset_command_unknown), latitude(t_latitude), longitude(t_longitude), altitude(t_altitude) {
         if (t_cmd == "RTL") {
-            this->command = asset_command_rtl;
+            this->command = transport::asset_command_rtl;
         } else if (t_cmd == "HOLD") {
-            this->command = asset_command_hold;
+            this->command = transport::asset_command_hold;
         } else if (t_cmd == "GOTO") {
-            this->command = asset_command_goto;
+            this->command = transport::asset_command_goto;
         } else if (t_cmd == "RON") {
-            this->command = asset_command_resume;
+            this->command = transport::asset_command_resume;
         } else if (t_cmd == "DISARM") {
-            this->command = asset_command_disarm;
+            this->command = transport::asset_command_disarm;
         } else if (t_cmd == "ALT") {
-            this->command = asset_command_altitude;
+            this->command = transport::asset_command_altitude;
         } else if (t_cmd == "TERM") {
-            this->command = asset_command_terminate;
+            this->command = transport::asset_command_terminate;
         }
     };
     uint64_t getDBId() { return this->dbid; };
     uint64_t getTimeStamp() { return this->timestamp; };
-    fss_asset_command getCommand() { return this->command; };
+    transport::fss_asset_command getCommand() { return this->command; };
     double getLatitude() { return this->latitude; };
     double getLongitude() { return this->longitude; };
     uint16_t getAltitude() { return this->altitude; };
@@ -88,7 +89,7 @@ public:
     uint64_t getRequestId() { return this->reqid; };
 };
 
-class fss_client: public fss_message_cb {
+class fss_client: public transport::fss_message_cb {
 private:
     bool identified;
     std::string name;
@@ -97,13 +98,13 @@ private:
     uint64_t last_command_send_ts;
     uint64_t last_command_dbid;
 public:
-    explicit fss_client(fss_connection *conn);
+    explicit fss_client(transport::fss_connection *conn);
     virtual ~fss_client();
-    virtual void processMessage(fss_message *message) override;
-    void sendRTTRequest(fss_message_rtt_request *rtt_req);
-    void sendMsg(fss_message *msg);
+    virtual void processMessage(transport::fss_message *message) override;
+    void sendRTTRequest(transport::fss_message_rtt_request *rtt_req);
+    void sendMsg(transport::fss_message *msg);
     void sendSMMSettings();
     void sendCommand();
 };
-
+}
 }
