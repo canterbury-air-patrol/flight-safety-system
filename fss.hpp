@@ -195,8 +195,8 @@ public:
 
 class fss_message_closed: public fss_message {
 protected:
-    virtual void unpackData(buf_len *bl) override;
-    virtual void packData(buf_len *bl) override;
+    virtual void unpackData(buf_len *bl) override {};
+    virtual void packData(buf_len *bl) override {};
 public:
     fss_message_closed() : fss_message(message_type_closed) {};
 };
@@ -215,8 +215,8 @@ public:
 
 class fss_message_rtt_request : public fss_message {
 protected:
-    virtual void unpackData(buf_len *bl) override;
-    virtual void packData(buf_len *bl) override;
+    virtual void unpackData(buf_len *bl) override {};
+    virtual void packData(buf_len *bl) override {};
 public:
     fss_message_rtt_request() : fss_message(message_type_rtt_request) {};
     fss_message_rtt_request(uint64_t t_id, buf_len *bl) : fss_message(t_id, message_type_rtt_request) {};

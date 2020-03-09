@@ -14,8 +14,13 @@ DEBUG_FLAGS?=-g2
 ifeq ($(DEBUG),1)
 DEBUG_FLAGS+=-DDEBUG
 endif
-CFLAGS=${WARNFLAGS} -fPIC -std=c99 -I. $(DEBUG_FLAGS)
-CXXFLAGS=${WARNCXXFLAGS} -fPIC -std=c++11 -I. $(DEBUG_FLAGS)
+TEST_FLAGS?=
+ifeq ($(TEST),1)
+TEST_FLAGS+=-ftest-coverage -fprofile-arcs -g -O0
+LDFLAGS+=-lgcov
+endif
+CFLAGS=${WARNFLAGS} -fPIC -std=c99 -I. $(DEBUG_FLAGS) $(TEST_FLAGS)
+CXXFLAGS=${WARNCXXFLAGS} -fPIC -std=c++11 -I. $(DEBUG_FLAGS) $(TEST_FLAGS)
 
 PC_LIST=jsoncpp libecpg
 
@@ -46,13 +51,13 @@ TESTSUITES=$(addprefix tests/,$(TESTSUITES_SOURCE:.cpp=.test))
 	$(GCC) -c -o $(@) $(<) $(CFLAGS) $(EXTRA_CFLAGS)
 
 fss-server: libfss.so $(SERVER_OBJS)
-	$(CXX) -o $(@) $(SERVER_OBJS) -L. -lfss $(EXTRA_LIBS)
+	$(CXX) -o $(@) $(SERVER_OBJS) -L. -lfss $(EXTRA_LIBS) $(LDFLAGS)
 
 fss-client: libfss.so $(CLIENT_OBJS)
-	$(CXX) -o $(@) $(CLIENT_OBJS) -L. -lfss $(EXTRA_LIBS)
+	$(CXX) -o $(@) $(CLIENT_OBJS) -L. -lfss $(EXTRA_LIBS) $(LDFLAGS)
 
 libfss.so: $(LIBFSS_OBJS)
-	$(CXX) -shared -o $(@) $(LIBFSS_OBJS)
+	$(CXX) -shared -o $(@) $(LIBFSS_OBJS) $(LDFLAGS)
 
 tests/%.test: tests/%.cpp libfss.so
 	$(CXX) -o $(@) $(<) $(CXXFLAGS) -L. -lfss $(EXTRA_CXXFLAGS)
