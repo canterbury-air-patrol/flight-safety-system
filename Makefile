@@ -19,8 +19,8 @@ ifeq ($(TEST),1)
 TEST_FLAGS+=-ftest-coverage -fprofile-arcs -g -O0
 LDFLAGS+=-lgcov
 endif
-CFLAGS=${WARNFLAGS} -fPIC -std=c99 -I. $(DEBUG_FLAGS) $(TEST_FLAGS)
-CXXFLAGS=${WARNCXXFLAGS} -fPIC -std=c++11 -I. $(DEBUG_FLAGS) $(TEST_FLAGS)
+CFLAGS=${WARNFLAGS} -pthread -fPIC -std=c99 -I. $(DEBUG_FLAGS) $(TEST_FLAGS)
+CXXFLAGS=${WARNCXXFLAGS} -pthread -fPIC -std=c++11 -I. $(DEBUG_FLAGS) $(TEST_FLAGS)
 
 PC_LIST=jsoncpp libecpg
 
@@ -38,7 +38,7 @@ CLIENT_OBJS=$(CLIENT_SOURCE:.cpp=.o)
 LIBFSS_SOURCE=transport.cpp transport-helpers.cpp transport-messages.cpp
 LIBFSS_OBJS=$(LIBFSS_SOURCE:.cpp=.o)
 
-TESTSUITES_SOURCE=messages.cpp
+TESTSUITES_SOURCE=messages.cpp connection.cpp
 TESTSUITES=$(addprefix tests/,$(TESTSUITES_SOURCE:.cpp=.test))
 
 %.o: %.cpp $(INCLUDES)

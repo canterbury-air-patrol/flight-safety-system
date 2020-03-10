@@ -109,6 +109,21 @@ fss_transport::fss_connection::processMessages()
     }
 }
 
+fss_transport::fss_message *
+fss_transport::fss_connection::getMsg()
+{
+    if (this->handler == nullptr)
+    {
+        auto msg = this->messages.front();
+        if (msg != nullptr)
+        {
+            this->messages.pop();
+        }
+        return msg;
+    }
+    return nullptr;
+}
+
 bool fss_transport::fss_connection::connect_to(const std::string &address, uint16_t port)
 {
     struct sockaddr_storage remote;

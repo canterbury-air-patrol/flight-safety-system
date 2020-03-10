@@ -6,3 +6,5 @@ libfss.so
 tests/*.test
 *.dSYM
 .DS_Store
+*.gcno
+*.gcda
