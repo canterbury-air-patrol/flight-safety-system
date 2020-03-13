@@ -2,7 +2,7 @@ CXX?=g++
 GCC?=gcc
 ECPG?=ecpg
 
-all: fss-server fss-client
+all: fss-server example-client
 
 WARNFLAGS=-Werror -Wall -Wshadow -Wunused -Wnull-dereference -Wformat=2 -pedantic
 WARNCXXFLAGS=${WARNFLAGS} -Wnon-virtual-dtor -Woverloaded-virtual -Wpedantic -Weffc++
@@ -32,8 +32,11 @@ SERVER_SOURCE=server.cpp db.cpp
 SERVER_ECPG=server-db.pgc
 SERVER_OBJS=$(SERVER_SOURCE:.cpp=.o) $(SERVER_ECPG:.pgc=.o)
 
-CLIENT_SOURCE=client.cpp
-CLIENT_OBJS=$(CLIENT_SOURCE:.cpp=.o)
+EXAMPLE_CLIENT_SOURCE=examples/fake_client.cpp
+EXAMPLE_CLIENT_OBJS=$(EXAMPLE_CLIENT_SOURCE:.cpp=.o)
+
+LIBFSS_CLIENT_SOURCE=client.cpp
+LIBFSS_CLIENT_OBJS=$(LIBFSS_CLIENT_SOURCE:.cpp=.o)
 
 LIBFSS_SOURCE=transport.cpp transport-helpers.cpp transport-messages.cpp
 LIBFSS_OBJS=$(LIBFSS_SOURCE:.cpp=.o)
@@ -41,7 +44,7 @@ LIBFSS_OBJS=$(LIBFSS_SOURCE:.cpp=.o)
 TESTSUITES_SOURCE=messages.cpp connection.cpp
 TESTSUITES=$(addprefix tests/,$(TESTSUITES_SOURCE:.cpp=.test))
 
-$(LIBFSS_OBJS) $(SERVER_OBJS) $(CLIENT_OBJS): fss.hpp fss-internal.hpp Makefile
+$(LIBFSS_OBJS) $(SERVER_OBJS) $(LIBFSS_CLIENT_OBJS): fss.hpp fss-internal.hpp Makefile
 $(LIBFSS_OBJS): transport.hpp
 $(SERVER_OBJS): fss-server.hpp
 
@@ -57,11 +60,14 @@ $(SERVER_OBJS): fss-server.hpp
 fss-server: libfss.so $(SERVER_OBJS)
 	$(CXX) -o $(@) $(SERVER_OBJS) -L. -lfss $(EXTRA_LIBS) $(LDFLAGS)
 
-fss-client: libfss.so $(CLIENT_OBJS)
-	$(CXX) -o $(@) $(CLIENT_OBJS) -L. -lfss $(EXTRA_LIBS) $(LDFLAGS)
+example-client: libfss.so libfss-client.so $(EXAMPLE_CLIENT_OBJS)
+	$(CXX) -o $(@) $(EXAMPLE_CLIENT_OBJS) -L. -lfss -lfss-client $(EXTRA_LIBS) $(LDFLAGS)
 
 libfss.so: $(LIBFSS_OBJS)
 	$(CXX) -shared -o $(@) $(LIBFSS_OBJS) $(LDFLAGS)
+
+libfss-client.so: $(LIBFSS_CLIENT_OBJS)
+	$(CXX) -shared -o $(@) $(LIBFSS_CLIENT_OBJS) $(LDFLAGS) -L. -lfss $(EXTRA_LIBS)
 
 tests/%.test: tests/%.cpp libfss.so
 	$(CXX) -o $(@) $(<) $(CXXFLAGS) -L. -lfss $(EXTRA_CXXFLAGS)
@@ -78,8 +84,8 @@ cov.html: cov.info
 coverage: cov.html
 
 check-cppcheck:
-	cppcheck *.cpp tests/*.cpp --enable=all
+	cppcheck *.cpp tests/*.cpp examples/*.cpp --enable=all
 
 clean:
-	rm -f fss-server fss-client libfss.so $(SERVER_OBJS) $(CLIENT_OBJS) $(LIBFSS_OBJS) $(TESTSUITES)
+	rm -f fss-server fss-client libfss.so libfss-client.so $(SERVER_OBJS) $(CLIENT_OBJS) $(LIBFSS_OBJS) $(TESTSUITES)
 	rm -fr *.gcno *.gcda cov.info cov.html

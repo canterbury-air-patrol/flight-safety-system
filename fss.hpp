@@ -150,7 +150,7 @@ public:
     explicit fss_connection(int fd);
     virtual ~fss_connection();
     void setHandler(fss_message_cb *cb);
-    bool connect_to(const std::string &address, uint16_t port);
+    bool connectTo(const std::string &address, uint16_t port);
     bool sendMsg(fss_message *msg);
     fss_message *getMsg();
     virtual void processMessages();

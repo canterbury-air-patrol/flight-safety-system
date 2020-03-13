@@ -44,7 +44,7 @@ inet_ntop_stor(struct sockaddr_storage *src, char *dst, size_t dstlen, uint16_t 
 fss_transport::fss_connection *flight_safety_system::fss::connect(std::string address, uint16_t port)
 {
     auto conn = new fss_transport::fss_connection();
-    if (!conn->connect_to(address, port))
+    if (!conn->connectTo(address, port))
     {
         delete conn;
         return nullptr;
@@ -124,7 +124,7 @@ fss_transport::fss_connection::getMsg()
     return nullptr;
 }
 
-bool fss_transport::fss_connection::connect_to(const std::string &address, uint16_t port)
+bool fss_transport::fss_connection::connectTo(const std::string &address, uint16_t port)
 {
     struct sockaddr_storage remote;
     if (!convert_str_to_sa (address, port, &remote))

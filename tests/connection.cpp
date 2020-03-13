@@ -17,11 +17,11 @@ TEST_CASE("Connection Create (failure)") {
     auto conn = new transport::fss_connection();
     REQUIRE(conn != nullptr);
 
-    REQUIRE(!conn->connect_to("localhost", 1));
-    REQUIRE(!conn->connect_to("127.0.0.1", 1));
-    REQUIRE(!conn->connect_to("::1", 1));
+    REQUIRE(!conn->connectTo("localhost", 1));
+    REQUIRE(!conn->connectTo("127.0.0.1", 1));
+    REQUIRE(!conn->connectTo("::1", 1));
 
-    REQUIRE(!conn->connect_to("this.host.does.not.exist", 1));
+    REQUIRE(!conn->connectTo("this.host.does.not.exist", 1));
 
     delete conn;
 }
@@ -40,7 +40,7 @@ TEST_CASE("Listen Socket") {
 
     auto conn = new transport::fss_connection();
     REQUIRE(conn != nullptr);
-    REQUIRE(conn->connect_to("localhost", 20202));
+    REQUIRE(conn->connectTo("localhost", 20202));
     auto send_msg = new transport::fss_message_identity("testClient");
     conn->sendMsg(send_msg);
 

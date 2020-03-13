@@ -1,49 +1,114 @@
-#include "fss-internal.hpp"
+#include "fss-client.hpp"
 
 #include <iostream>
 #include <fstream>
 #include <string>
 #include <list>
-#include <csignal>
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Weffc++"
 #include <json/json.h>
 #pragma GCC diagnostic pop
 
-#include <unistd.h>
-
 namespace fss_transport = flight_safety_system::transport;
-
-bool running = true;
-std::string asset_name;
-
-namespace flight_safety_system {
-namespace client {
-class fss_server: public fss_transport::fss_message_cb {
-protected:
-    std::string address;
-    uint16_t port;
-    uint64_t last_tried;
-    uint64_t retry_count;
-public:
-    fss_server(fss_transport::fss_connection *t_conn, const std::string &t_address, uint16_t t_port);
-    virtual ~fss_server();
-    virtual void processMessage(fss_transport::fss_message *message) override;
-    virtual std::string getAddress() { return this->address; };
-    virtual uint16_t getPort() { return this->port; };
-    virtual bool reconnect();
-};
-}
-}
 
 using namespace flight_safety_system::client;
 
-std::list<fss_server *> servers;
-std::list<fss_server *> reconnect_servers;
+flight_safety_system::client::fss_client::fss_client(const std::string &t_fileName)
+{
+    /* Open the config file */
+    std::ifstream configfile(t_fileName);
+    if (!configfile.is_open())
+    {
+        printf("Failed to load configuration\n");
+        return;
+    }
+    Json::Value config;
+    configfile >> config;
+
+    this->asset_name = config["name"].asString();
+
+    /* Load all the known servers from the config */
+    for (unsigned int idx = 0; idx < config["servers"].size(); idx++)
+    {
+        this->connectTo(config["servers"][idx]["address"].asString(), config["servers"][idx]["port"].asInt());
+    }
+}
+
+flight_safety_system::client::fss_client::~fss_client()
+{
+    while (!this->reconnect_servers.empty())
+    {
+        auto server = this->reconnect_servers.front();
+        this->reconnect_servers.pop_front();
+        delete server;
+    }
+    while (!this->servers.empty())
+    {
+        auto server = this->servers.front();
+        this->servers.pop_front();
+        delete server;
+    }
+
+}
 
 void
-updateServers(fss_transport::fss_message_server_list *msg)
+flight_safety_system::client::fss_client::connectTo(const std::string &t_address, uint16_t t_port)
+{
+    auto conn = new fss_transport::fss_connection();
+    if (conn->connectTo(t_address, t_port))
+    {
+        auto ident_msg = new fss_transport::fss_message_identity(asset_name);
+        conn->sendMsg(ident_msg);
+        delete ident_msg;
+    }
+    else
+    {
+        delete conn;
+        conn = nullptr;
+    }
+    auto server = new fss_server(this, conn, t_address, t_port);
+    if (conn == nullptr)
+    {
+        reconnect_servers.push_back(server);
+    }
+    else
+    {
+        servers.push_back(server);
+    }
+}
+
+void
+flight_safety_system::client::fss_client::attemptReconnect()
+{
+    std::list<fss_server *> reconnected;
+    for (auto server : this->reconnect_servers)
+    {
+        if(server->reconnect())
+        {
+            reconnected.push_back(server);
+        }
+    }
+    while(!reconnected.empty())
+    {
+        auto server = reconnected.front();
+        reconnected.pop_front();
+        reconnect_servers.remove(server);
+        servers.push_back(server);
+    }
+}
+
+void
+flight_safety_system::client::fss_client::sendMsgAll(fss_transport::fss_message *msg)
+{
+    for (auto server: this->servers)
+    {
+        server->getConnection()->sendMsg(msg);
+    }
+}
+
+void
+flight_safety_system::client::fss_client::updateServers(fss_transport::fss_message_server_list *msg)
 {
     for (auto server_entry: msg->getServers())
     {
@@ -69,32 +134,19 @@ updateServers(fss_transport::fss_message_server_list *msg)
         }
         if (!exists)
         {
-            auto conn = new fss_transport::fss_connection();
-            if (conn->connect_to(server_entry.first, server_entry.second))
-            {
-                auto ident_msg = new fss_transport::fss_message_identity(asset_name);
-                conn->sendMsg(ident_msg);
-                delete ident_msg;
-            }
-            else
-            {
-                delete conn;
-                conn = nullptr;
-            }
-            auto server = new fss_server(conn, server_entry.first, server_entry.second);
-            if (conn == nullptr)
-            {
-                reconnect_servers.push_back(server);
-            }
-            else
-            {
-                servers.push_back(server);
-            }
+            this->connectTo(server_entry.first, server_entry.second);
         }
     }
 }
 
-fss_server::fss_server(fss_transport::fss_connection *t_conn, const std::string &t_address, uint16_t t_port) : fss_message_cb(t_conn), address(t_address), port(t_port), last_tried(0), retry_count(0)
+void
+flight_safety_system::client::fss_client::serverRequiresReconnect(fss_server *server)
+{
+    this->servers.remove(server);
+    this->reconnect_servers.push_back(server);
+}
+
+fss_server::fss_server(fss_client *t_client, fss_transport::fss_connection *t_conn, const std::string &t_address, uint16_t t_port) : fss_message_cb(t_conn), client(t_client), address(t_address), port(t_port)
 {
     if (conn != nullptr)
     {
@@ -145,7 +197,7 @@ fss_server::reconnect()
             this->retry_count++;
             this->last_tried = ts;
             this->conn = new fss_transport::fss_connection();
-            if (!this->conn->connect_to(this->getAddress(), this->getPort()))
+            if (!this->conn->connectTo(this->getAddress(), this->getPort()))
             {
                 delete this->conn;
                 this->conn = nullptr;
@@ -153,7 +205,7 @@ fss_server::reconnect()
             else
             {
                 conn->setHandler(this);
-                auto ident_msg = new fss_transport::fss_message_identity(asset_name);
+                auto ident_msg = new fss_transport::fss_message_identity(this->client->getAssetName());
                 conn->sendMsg(ident_msg);
                 delete ident_msg;
                 return true;
@@ -172,8 +224,7 @@ fss_server::processMessage(fss_transport::fss_message *msg)
     if (msg->getType() == fss_transport::message_type_closed)
     {
         /* Connection has been closed, schedule reconnection */
-        servers.remove(this);
-        reconnect_servers.push_back(this);
+        this->getClient()->serverRequiresReconnect(this);
         this->last_tried = 0;
         this->retry_count = 0;
         return;
@@ -213,7 +264,7 @@ fss_server::processMessage(fss_transport::fss_message *msg)
                 break;
             case fss_transport::message_type_server_list:
             {
-                updateServers((fss_transport::fss_message_server_list *)msg);
+                this->getClient()->updateServers((fss_transport::fss_message_server_list *)msg);
             }
                 break;
             case fss_transport::message_type_smm_settings:
@@ -222,110 +273,5 @@ fss_server::processMessage(fss_transport::fss_message *msg)
             }
                 break;
         }
-    }
-}
-
-void sigIntHandler(int signum)
-{
-    running = false;
-}
-
-int main(int argc, char *argv[])
-{
-    if (argc < 2)
-    {
-        std::cout << "Insufficient arguments" << std::endl;
-        return -1;
-    }
-    /* Watch out for sigint */
-    signal (SIGINT, sigIntHandler);
-
-    /* Load all the known servers from the config */
-    std::ifstream configfile(argv[1]);
-    if (!configfile.is_open())
-    {
-        printf("Failed to load configuration\n");
-        return -1;
-    }
-    Json::Value config;
-    configfile >> config;
-
-    asset_name = config["name"].asString();
-    auto connection = flight_safety_system::fss(asset_name);
-
-    for (unsigned int idx = 0; idx < config["servers"].size(); idx++)
-    {
-        auto conn = connection.connect(config["servers"][idx]["address"].asString(), config["servers"][idx]["port"].asInt());
-        if (conn == nullptr)
-        {
-            return -1;
-        }
-        servers.push_back(new fss_server(conn, config["servers"][idx]["address"].asString(), config["servers"][idx]["port"].asInt()));
-    }
-
-    /* Connect to each server */
-    /* Send reports:
-       - Battery status
-       - Position
-       - Search information
-     */
-    /* Receieve:
-       - Commands
-       - ping request
-       - Position reports
-       - Updated server list
-     */
-    /* Possible events:
-       - Server reset
-     */
-    
-    int counter = 0;
-    while (running)
-    {
-        sleep (1);
-        std::list<fss_server *> reconnected;
-        for (auto server : reconnect_servers)
-        {
-            if(server->reconnect())
-            {
-                reconnected.push_back(server);
-            }
-        }
-        while(!reconnected.empty())
-        {
-            auto server = reconnected.front();
-            reconnected.pop_front();
-            reconnect_servers.remove(server);
-            servers.push_back(server);
-        }
-        counter++;
-        if (counter % 5 == 0)
-        {
-            /* Send each server some fake details */
-            auto msg_status = new fss_transport::fss_message_system_status(75, 1000);
-            auto msg_search = new fss_transport::fss_message_search_status(1, 23, 100);
-            auto msg_pos = new fss_transport::fss_message_position_report(-43.5, 172.5, 300, flight_safety_system::fss_current_timestamp());
-            for (auto server: servers)
-            {
-                server->getConnection()->sendMsg(msg_status);
-                server->getConnection()->sendMsg(msg_search);
-                server->getConnection()->sendMsg(msg_pos);
-            }
-            delete msg_status;
-            delete msg_search;
-            delete msg_pos;
-        }
-    }
-    while (!reconnect_servers.empty())
-    {
-        auto server = reconnect_servers.front();
-        reconnect_servers.pop_front();
-        delete server;
-    }
-    while (!servers.empty())
-    {
-        auto server = servers.front();
-        servers.pop_front();
-        delete server;
     }
 }

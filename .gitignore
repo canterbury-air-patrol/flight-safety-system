@@ -2,7 +2,8 @@
 *.json
 fss-client
 fss-server
-libfss.so
+example-*
+libfss*.so
 tests/*.test
 *.dSYM
 .DS_Store
