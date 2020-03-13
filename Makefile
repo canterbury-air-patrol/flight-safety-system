@@ -65,8 +65,17 @@ tests/%.test: tests/%.cpp libfss.so
 test: $(TESTSUITES)
 	for t in $(TESTSUITES); do ./$$t; done
 
+cov.info: test
+	lcov --capture --directory . --output-file cov.info
+
+cov.html: cov.info
+	genhtml cov.info --output-directory cov.html
+
+coverage: cov.html
+
 check-cppcheck:
 	cppcheck *.cpp --enable=all
 
 clean:
 	rm -f fss-server fss-client libfss.so $(SERVER_OBJS) $(CLIENT_OBJS) $(LIBFSS_OBJS) $(TESTSUITES)
+	rm -fr *.gcno *.gcda cov.info cov.html

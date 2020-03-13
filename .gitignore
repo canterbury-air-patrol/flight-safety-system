@@ -8,3 +8,5 @@ tests/*.test
 .DS_Store
 *.gcno
 *.gcda
+cov.info
+cov.html
