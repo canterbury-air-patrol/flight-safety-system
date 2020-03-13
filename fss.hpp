@@ -206,7 +206,7 @@ protected:
     void unpackData(buf_len *bl);
     virtual void packData(buf_len *bl) override;
 public:
-    fss_message_identity(const std::string &t_name) : fss_message(message_type_identity), name(t_name) {};
+    explicit fss_message_identity(const std::string &t_name) : fss_message(message_type_identity), name(t_name) {};
     fss_message_identity(uint64_t t_id, buf_len *bl) : fss_message(t_id, message_type_identity), name() { this->unpackData(bl); };
     virtual std::string getName() { return this->name; };
 };
