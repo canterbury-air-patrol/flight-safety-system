@@ -269,7 +269,7 @@ fss_message_smm_settings::unpackData(buf_len *bl)
     {
         uint16_t len = ntohs(*(uint16_t *)(data + offset));
         offset += sizeof(uint16_t);
-        this->server_url = std::string((char *)(data + offset));
+        this->server_url.assign((char *)(data + offset), len);
         offset += len;
         offset += (sizeof(uint64_t) - offset % sizeof(uint64_t));
     }
@@ -277,7 +277,7 @@ fss_message_smm_settings::unpackData(buf_len *bl)
     {
         uint16_t len = ntohs(*(uint16_t *)(data + offset));
         offset += sizeof(uint16_t);
-        this->username = std::string((char *)(data + offset));
+        this->username.assign((char *)(data + offset), len);
         offset += len;
         offset += (sizeof(uint64_t) - offset % sizeof(uint64_t));
     }
@@ -285,8 +285,7 @@ fss_message_smm_settings::unpackData(buf_len *bl)
     {
         uint16_t len = ntohs(*(uint16_t *)(data + offset));
         offset += sizeof(uint16_t);
-        this->password = std::string((char *)(data + offset));
-        offset += len + (sizeof(uint32_t) - len % sizeof(uint32_t));
+        this->password.assign((char *)(data + offset), len);
     }
 }
 
@@ -319,7 +318,9 @@ fss_message_server_list::unpackData(buf_len *bl)
         offset += sizeof(uint16_t);
         uint16_t len = ntohs(*(uint16_t *)(data + offset));
         offset += sizeof(uint16_t);
-        this->servers.push_back(std::make_pair(std::string((char *)(data + offset)), port));
+        std::string server_addr;
+        server_addr.assign((char *)(data + offset), len);
+        this->servers.push_back(std::make_pair(server_addr, port));
         offset += len;
         offset += (sizeof(uint64_t) - offset % sizeof(uint64_t));
     }
