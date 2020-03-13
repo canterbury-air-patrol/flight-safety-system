@@ -104,10 +104,10 @@ fss_server::fss_server(fss_transport::fss_connection *t_conn, const std::string 
 
 fss_server::~fss_server()
 {
-    if (this->conn != NULL)
+    if (this->conn != nullptr)
     {
         delete this->conn;
-        this->conn = NULL;
+        this->conn = nullptr;
     }
 }
 
@@ -256,7 +256,7 @@ int main(int argc, char *argv[])
     for (unsigned int idx = 0; idx < config["servers"].size(); idx++)
     {
         auto conn = connection.connect(config["servers"][idx]["address"].asString(), config["servers"][idx]["port"].asInt());
-        if (conn == NULL)
+        if (conn == nullptr)
         {
             return -1;
         }

@@ -41,9 +41,9 @@ convert_str_to_sa(std::string addr, uint16_t port, struct sockaddr_storage *sa)
     /* Use host name lookup (probably DNS) to resolve the name */
     if (family == AF_UNSPEC)
     {
-        struct addrinfo *ai = NULL;
+        struct addrinfo *ai = nullptr;
         
-        if (getaddrinfo(addr.c_str(), NULL, NULL, &ai) == 0)
+        if (getaddrinfo(addr.c_str(), nullptr, nullptr, &ai) == 0)
         {
             memcpy (sa, ai->ai_addr, ai->ai_addrlen);
             family = ai->ai_family;

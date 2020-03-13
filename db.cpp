@@ -129,7 +129,7 @@ db_connection::get_active_fss_servers()
     this->db_lock.unlock();
     if (servers)
     {
-        for(size_t i = 0; servers[i] != NULL; i++)
+        for(size_t i = 0; servers[i] != nullptr; i++)
         {
             res.push_back(new fss_server_details(servers[i]->address, servers[i]->port));
         }

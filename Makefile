@@ -74,7 +74,7 @@ cov.html: cov.info
 coverage: cov.html
 
 check-cppcheck:
-	cppcheck *.cpp --enable=all
+	cppcheck *.cpp tests/*.cpp --enable=all
 
 clean:
 	rm -f fss-server fss-client libfss.so $(SERVER_OBJS) $(CLIENT_OBJS) $(LIBFSS_OBJS) $(TESTSUITES)

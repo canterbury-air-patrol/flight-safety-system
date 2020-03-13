@@ -328,7 +328,7 @@ fss_message_server_list::unpackData(buf_len *bl)
 fss_message *
 fss_message::decode(buf_len *bl)
 {
-    fss_message *msg = NULL;
+    fss_message *msg = nullptr;
     char *data = bl->getData();
     fss_message_type type = (fss_message_type) ntohs(*(uint16_t *)(data + sizeof(uint16_t)));
     uint64_t msg_id = ntohll (*(uint64_t *)(data + sizeof(uint16_t) + sizeof(uint16_t)));

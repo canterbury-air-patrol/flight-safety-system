@@ -37,7 +37,7 @@ inet_ntop_stor(struct sockaddr_storage *src, char *dst, size_t dstlen, uint16_t 
             return inet_ntop (AF_INET6, &((struct sockaddr_in6 *)src)->sin6_addr, dst, dstlen);
         } break;
     }
-    return NULL;
+    return nullptr;
 }
 #endif
 
@@ -47,7 +47,7 @@ fss_transport::fss_connection *flight_safety_system::fss::connect(std::string ad
     if (!conn->connect_to(address, port))
     {
         delete conn;
-        return NULL;
+        return nullptr;
     }
     auto msg = new fss_transport::fss_message_identity(this->getName());
     conn->sendMsg(msg);
@@ -61,7 +61,7 @@ recv_msg_thread(fss_transport::fss_connection *conn)
     conn->processMessages();
 }
 
-fss_transport::fss_connection::fss_connection(int t_fd) : fd(t_fd), last_msg_id(0), handler(NULL), messages(), recv_thread(std::thread(recv_msg_thread, this)), send_lock()
+fss_transport::fss_connection::fss_connection(int t_fd) : fd(t_fd), last_msg_id(0), handler(nullptr), messages(), recv_thread(std::thread(recv_msg_thread, this)), send_lock()
 {
 }
 
@@ -97,7 +97,7 @@ fss_transport::fss_connection::processMessages()
         {
             run = false;
         }
-        if (this->handler != NULL)
+        if (this->handler != nullptr)
         {
             this->handler->processMessage(msg);
             delete msg;
@@ -309,7 +309,7 @@ fss_transport::fss_listen::processMessages()
         inet_ntop_stor(&sa, addr_str, INET6_ADDRSTRLEN, &client_port);
         std::cout << "New client from " << addr_str << ":" << client_port << " as " << fd << std::endl;
 #endif
-        if (this->cb != NULL)
+        if (this->cb != nullptr)
         {
             auto conn = new fss_transport::fss_connection(newfd);
             if(!this->cb(conn))
@@ -355,6 +355,6 @@ uint64_t
 flight_safety_system::fss_current_timestamp()
 {
     struct timeval tv;
-    gettimeofday(&tv, NULL);
+    gettimeofday(&tv, nullptr);
     return tv.tv_sec * 1000 + (tv.tv_usec / 1000);
 }

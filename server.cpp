@@ -16,7 +16,7 @@
 using namespace flight_safety_system::server;
 namespace fss_transport = flight_safety_system::transport;
 
-db_connection *dbc = NULL;
+db_connection *dbc = nullptr;
 
 std::list<fss_client *> clients;
 std::queue<fss_client *> remove_clients;
@@ -28,10 +28,10 @@ fss_client::fss_client(fss_transport::fss_connection *t_conn) : fss_message_cb(t
 
 fss_client::~fss_client()
 {
-    if (this->conn != NULL)
+    if (this->conn != nullptr)
     {
         delete this->conn;
-        this->conn = NULL;
+        this->conn = nullptr;
     }
     for(auto rtt_req : this->outstanding_rtt_requests)
     {
@@ -152,7 +152,7 @@ fss_client::processMessage(fss_transport::fss_message *msg)
             case fss_transport::message_type_rtt_response:
             {
                 /* Find the original message and calculate the response time */
-                fss_client_rtt *rtt_req = NULL;
+                fss_client_rtt *rtt_req = nullptr;
                 uint64_t current_ts = fss_current_timestamp();
                 for(auto req : this->outstanding_rtt_requests)
                 {
@@ -301,7 +301,7 @@ int main(int argc, char *argv[])
     }
     
     delete listen;
-    listen = NULL;
+    listen = nullptr;
     /* Disconnect all the clients */
     while (!clients.empty())
     {
@@ -311,5 +311,5 @@ int main(int argc, char *argv[])
     }
     cleanup_removable_clients();
     delete dbc;
-    dbc = NULL;
+    dbc = nullptr;
 }
