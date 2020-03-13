@@ -174,7 +174,6 @@ private:
     fss_message_type type;
 protected:
     size_t headerLength();
-    virtual void unpackData(buf_len *bl) = 0;
     virtual void packData(buf_len *bl) = 0;
 public:
     explicit fss_message(fss_message_type t_type) : id(0), type(t_type) {};
@@ -195,7 +194,6 @@ public:
 
 class fss_message_closed: public fss_message {
 protected:
-    virtual void unpackData(buf_len *bl) override {};
     virtual void packData(buf_len *bl) override {};
 public:
     fss_message_closed() : fss_message(message_type_closed) {};
@@ -205,7 +203,7 @@ class fss_message_identity : public fss_message {
 private:
     std::string name;
 protected:
-    virtual void unpackData(buf_len *bl) override;
+    void unpackData(buf_len *bl);
     virtual void packData(buf_len *bl) override;
 public:
     fss_message_identity(const std::string &t_name) : fss_message(message_type_identity), name(t_name) {};
@@ -215,7 +213,6 @@ public:
 
 class fss_message_rtt_request : public fss_message {
 protected:
-    virtual void unpackData(buf_len *bl) override {};
     virtual void packData(buf_len *bl) override {};
 public:
     fss_message_rtt_request() : fss_message(message_type_rtt_request) {};
@@ -226,7 +223,7 @@ class fss_message_rtt_response : public fss_message {
 private:
     uint64_t request_id;
 protected:
-    virtual void unpackData(buf_len *bl) override;
+    void unpackData(buf_len *bl);
     virtual void packData(buf_len *bl) override;
 public:
     explicit fss_message_rtt_response(uint64_t t_request_id) : fss_message(message_type_rtt_response), request_id(t_request_id) {};
@@ -241,7 +238,7 @@ private:
     uint32_t altitude;
     uint64_t timestamp;
 protected:
-    virtual void unpackData(buf_len *bl) override;
+    void unpackData(buf_len *bl);
     virtual void packData(buf_len *bl) override;
 public:
     fss_message_position_report(double t_latitude, double t_longitude, uint32_t t_altitude, uint64_t t_timestamp) : fss_message(message_type_position_report), latitude(t_latitude), longitude(t_longitude), altitude(t_altitude), timestamp(t_timestamp) {};
@@ -257,7 +254,7 @@ private:
     uint8_t bat_percent;
     uint32_t mah_used;
 protected:
-    virtual void unpackData(buf_len *bl) override;
+    void unpackData(buf_len *bl);
     virtual void packData(buf_len *bl) override;
 public:
     fss_message_system_status(uint8_t bat_remaining_percent, uint32_t bat_mah_used) : fss_message(message_type_system_status), bat_percent(bat_remaining_percent), mah_used(bat_mah_used) {};
@@ -272,7 +269,7 @@ private:
     uint64_t point_completed;
     uint64_t points_total;
 protected:
-    virtual void unpackData(buf_len *bl) override;
+    void unpackData(buf_len *bl);
     virtual void packData(buf_len *bl) override;
 public:
     fss_message_search_status(uint64_t t_search_id, uint64_t last_point_completed, uint64_t total_search_points) : fss_message(message_type_search_status), search_id(t_search_id), point_completed(last_point_completed), points_total(total_search_points) {};
@@ -290,7 +287,7 @@ private:
     uint32_t altitude;
     uint64_t timestamp;
 protected:
-    virtual void unpackData(buf_len *bl) override;
+    void unpackData(buf_len *bl);
     virtual void packData(buf_len *bl) override;
 public:
     fss_message_asset_command(fss_asset_command t_command, uint64_t t_timestamp) : fss_message(message_type_command), command(t_command), latitude(NAN), longitude(NAN), altitude(0), timestamp(t_timestamp) {};
@@ -310,7 +307,7 @@ private:
     std::string username;
     std::string password;
 protected:
-    virtual void unpackData(buf_len *bl) override;
+    void unpackData(buf_len *bl);
     virtual void packData(buf_len *bl) override;
 public:
     fss_message_smm_settings(const std::string &t_server_url, const std::string &t_username, const std::string &t_password) : fss_message(message_type_smm_settings), server_url(t_server_url), username(t_username), password(t_password) {};
@@ -324,7 +321,7 @@ class fss_message_server_list: public fss_message {
 private:
     std::vector<std::pair<std::string, uint16_t>> servers;
 protected:
-    virtual void unpackData(buf_len *bl) override;
+    void unpackData(buf_len *bl);
     virtual void packData(buf_len *bl) override;
 public:
     fss_message_server_list() : fss_message(message_type_server_list), servers() {};
