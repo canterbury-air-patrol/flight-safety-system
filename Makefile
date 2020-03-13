@@ -41,6 +41,10 @@ LIBFSS_OBJS=$(LIBFSS_SOURCE:.cpp=.o)
 TESTSUITES_SOURCE=messages.cpp connection.cpp
 TESTSUITES=$(addprefix tests/,$(TESTSUITES_SOURCE:.cpp=.test))
 
+$(LIBFSS_OBJS) $(SERVER_OBJS) $(CLIENT_OBJS): fss.hpp fss-internal.hpp Makefile
+$(LIBFSS_OBJS): transport.hpp
+$(SERVER_OBJS): fss-server.hpp
+
 %.o: %.cpp $(INCLUDES)
 	$(CXX) -c -o $(@) $(<) $(CXXFLAGS) $(EXTRA_CXXFLAGS)
 
