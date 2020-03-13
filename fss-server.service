@@ -1,0 +1,12 @@
+[Unit]
+Description=Flight-Safety-System Server
+Requires=postgresql.service
+After=postgresql.service
+
+[Service]
+User=cap
+Environment=LD_LIBRARY_PATH=/home/cap/software/flight-safety-system
+ExecStart=/home/cap/software/flight-safety-system/fss-server
+
+[Install]
+WantedBy=multi-user.target
