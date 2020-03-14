@@ -1,6 +1,8 @@
 #define CATCH_CONFIG_MAIN  // This tells Catch to provide a main() - only do this in one cpp file
 #include <catch2/catch.hpp>
 
+#include <cmath>
+
 #include "fss.hpp"
 using namespace flight_safety_system::transport;
 
@@ -15,6 +17,14 @@ TEST_CASE("Close Connection Check") {
     REQUIRE(bl != nullptr);
     auto decoded_generic = fss_message::decode(bl);
     REQUIRE(decoded_generic == nullptr);
+    delete decoded_generic;
+
+    /* Check the base fss_message functionality */
+    REQUIRE(std::isnan(msg->getLatitude()));
+    REQUIRE(std::isnan(msg->getLongitude()));
+    REQUIRE(msg->getAltitude() == 0);
+    REQUIRE(msg->getTimeStamp() == 0);
+
     delete bl;
     delete msg;
 }
