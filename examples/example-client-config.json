@@ -1,0 +1,8 @@
+{
+    "port": 20202,
+    "postgres": {
+       "host": "localhost",
+       "user": "fss",
+       "db": "fss"
+    }
+}

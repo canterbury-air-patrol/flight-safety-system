@@ -1,0 +1,5 @@
+*.test
+*_test
+*_test.log
+*_test.trs
+test-suite.log
