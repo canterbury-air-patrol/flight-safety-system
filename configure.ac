@@ -3,6 +3,8 @@ AC_PREREQ([2.69])
 AC_INIT([flight-safety-system], [0.0], [sjp@canterburyairpatrol.org])
 AM_INIT_AUTOMAKE([-Wall -Werror foreign])
 
+m4_include([m4/ax_cxx_compile_stdcxx.m4])
+
 AC_CONFIG_HEADERS([config.h])
 AC_CONFIG_MACRO_DIRS([m4])
 
@@ -10,6 +12,8 @@ AC_CONFIG_MACRO_DIRS([m4])
 AC_PROG_CXX
 AC_PROG_CC
 AM_PROG_AR
+
+AX_CXX_COMPILE_STDCXX([11],[],[mandatory])
 
 LT_INIT([disable-static pic-only])
 
@@ -47,6 +51,13 @@ AM_CONDITIONAL([HAVE_SYSTEMD], [test "x$with_systemdsystemunitdir" != "xno"])
 
 AS_IF([test "x$enable_server" == "xyes"], [
     PKG_CHECK_MODULES([ECPG], [libecpg])
+])
+
+AS_IF([test "x$enable_tests" == "xyes"], [
+AC_LANG_PUSH([C++])
+    AC_CHECK_HEADERS([catch2/catch.hpp], [], [
+	AC_CHECK_HEADERS([catch/catch.hpp])])
+AC_LANG_POP([C++])
 ])
 
 # Output Makefile files.
