@@ -7,6 +7,8 @@ AM_CFLAGS = -pthread -fPIC -std=c99 -I. -Werror -Wall -Wshadow -Wunused -Wnull-d
 bin_PROGRAMS =
 sbin_PROGRAMS =
 lib_LTLIBRARIES = libfss.la libfss-client.la libfss-transport.la
+include_HEADERS = fss.hpp
+pkgconfig_DATA = fss.pc
 
 libfss_la_LDFLAGS = -version-info 0:0:0
 libfss_client_la_LDFLAGS = -version-info 0:0:0
@@ -14,6 +16,8 @@ libfss_transport_la_LDFLAGS = -version-info 0:0:0
 
 libfss_la_SOURCES = fss.hpp
 
+include_HEADERS+= fss-client.hpp
+pkgconfig_DATA+= fss-client.pc
 libfss_client_la_SOURCES = client.cpp fss-client.hpp
 libfss_client_la_CXXFLAGS = $(AM_CXXFLAGS) $(JSONCPP_CFLAGS)
 libfss_client_la_LIBADD = $(JSONCPP_LIBS) libfss-transport.la

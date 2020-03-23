@@ -1,0 +1,10 @@
+prefix=@prefix@
+exec_prefix=@exec_prefix@
+libdir=@libdir@
+include=@includedir@
+
+Name: fss
+Description: Flight Safety System - Base Library
+Version: @VERSION@
+Requires:
+Libs: -L${libdir} -lfss

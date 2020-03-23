@@ -13,6 +13,9 @@ AM_PROG_AR
 
 LT_INIT([disable-static pic-only])
 
+# Setup so we can install pkg-config
+PKG_INSTALLDIR
+
 # Check for required pkg-config
 PKG_CHECK_MODULES([JSONCPP], [jsoncpp])
 
@@ -47,5 +50,5 @@ AS_IF([test "x$enable_server" == "xyes"], [
 ])
 
 # Output Makefile files.
-AC_CONFIG_FILES([Makefile src/Makefile examples/Makefile tests/Makefile])
+AC_CONFIG_FILES([Makefile src/Makefile src/fss.pc src/fss-client.pc examples/Makefile tests/Makefile])
 AC_OUTPUT

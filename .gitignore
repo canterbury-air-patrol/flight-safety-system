@@ -22,3 +22,4 @@ config.*
 depcomp
 *.lo
 *.o
+*.pc

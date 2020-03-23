@@ -1,0 +1,10 @@
+prefix=@prefix@
+exec_prefix=@exec_prefix@
+libdir=@libdir@
+include=@includedir@
+
+Name: fss-client
+Description: Flight Safety System - Client Library
+Version: @VERSION@
+Requires: fss
+Libs: -L${libdir} -lfss-client
