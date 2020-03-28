@@ -1,6 +1,6 @@
 #include <string>
 #include <cstring>
-#include "fss.hpp"
+#include "fss-transport.hpp"
 
 #include <iostream>
 
@@ -38,20 +38,6 @@ inet_ntop_stor(struct sockaddr_storage *src, char *dst, size_t dstlen, uint16_t 
     return nullptr;
 }
 #endif
-
-fss_transport::fss_connection *flight_safety_system::fss::connect(std::string address, uint16_t port)
-{
-    auto conn = new fss_transport::fss_connection();
-    if (!conn->connectTo(address, port))
-    {
-        delete conn;
-        return nullptr;
-    }
-    auto msg = new fss_transport::fss_message_identity(this->getName());
-    conn->sendMsg(msg);
-    delete msg;
-    return conn;
-}
 
 static void
 recv_msg_thread(fss_transport::fss_connection *conn)

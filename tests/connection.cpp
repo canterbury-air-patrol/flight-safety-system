@@ -9,17 +9,8 @@
 #error No catch header
 #endif
 
-#include "fss.hpp"
+#include "fss-transport.hpp"
 using namespace flight_safety_system;
-
-TEST_CASE("FSS Create") {
-    auto fss_obj = new fss("testClient");
-
-    REQUIRE(fss_obj != nullptr);
-    REQUIRE(fss_obj->getName() == "testClient");
-
-    delete fss_obj;
-}
 
 TEST_CASE("Connection Create (failure)") {
     auto conn = new transport::fss_connection();
@@ -75,39 +66,4 @@ TEST_CASE("Listen Socket") {
     client_conn = nullptr;
 
     delete listen;
-}
-
-TEST_CASE("fss::connect") {
-    auto fss_obj = new fss("testFssClient");
-    REQUIRE(fss_obj != nullptr);
-
-    auto listen = new transport::fss_listen(20202, test_client_connect_cb);
-    REQUIRE(listen != nullptr);
-
-    auto conn = fss_obj->connect("localhost", 20202);
-    REQUIRE(conn != nullptr);
-    delete conn;
-
-    sleep(1);
-
-    REQUIRE(client_conn != nullptr);
-    auto msg = client_conn->getMsg();
-
-    REQUIRE(msg != nullptr);
-    REQUIRE(msg->getType() == transport::message_type_identity);
-
-    delete msg;
-
-    msg = client_conn->getMsg();
-    REQUIRE(msg != nullptr);
-    REQUIRE(msg->getType() == transport::message_type_closed);
-
-    delete msg;
-
-    delete client_conn;
-    client_conn = nullptr;
-
-    delete listen;
-
-    delete fss_obj;
 }

@@ -68,5 +68,5 @@ AC_SUBST(pthread_LIBS)
 
 
 # Output Makefile files.
-AC_CONFIG_FILES([Makefile src/Makefile src/fss.pc src/fss-client.pc examples/Makefile tests/Makefile])
+AC_CONFIG_FILES([Makefile src/Makefile src/fss.pc src/fss-transport.pc src/fss-client.pc examples/Makefile tests/Makefile])
 AC_OUTPUT
