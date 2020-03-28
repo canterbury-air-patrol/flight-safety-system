@@ -1,4 +1,4 @@
-#include "fss-internal.hpp"
+#include "fss.hpp"
 
 #include <string>
 #include <list>

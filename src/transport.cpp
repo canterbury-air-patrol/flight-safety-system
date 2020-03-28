@@ -1,6 +1,6 @@
 #include <string>
 #include <cstring>
-#include "fss-internal.hpp"
+#include "fss.hpp"
 
 #include <iostream>
 

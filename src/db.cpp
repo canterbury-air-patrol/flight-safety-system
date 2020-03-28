@@ -1,5 +1,5 @@
 #include "fss-server.hpp"
-#include "fss-internal.hpp"
+#include "fss.hpp"
 
 extern "C" {
 #include "server-db.h"
