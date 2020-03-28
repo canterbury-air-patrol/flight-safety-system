@@ -13,8 +13,6 @@
 
 #include <errno.h>
 
-#include <sys/time.h>
-
 #include "transport.hpp"
 
 namespace fss_transport = flight_safety_system::transport;
@@ -349,12 +347,4 @@ fss_transport::fss_listen::startListening()
     }
     this->recv_thread = std::thread(listen_thread, this);
     return true;
-}
-
-uint64_t
-flight_safety_system::fss_current_timestamp()
-{
-    struct timeval tv;
-    gettimeofday(&tv, nullptr);
-    return tv.tv_sec * 1000 + (tv.tv_usec / 1000);
 }

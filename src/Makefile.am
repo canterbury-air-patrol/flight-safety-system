@@ -14,7 +14,7 @@ libfss_la_LDFLAGS = -version-info 0:0:0
 libfss_client_la_LDFLAGS = -version-info 0:0:0
 libfss_transport_la_LDFLAGS = -version-info 0:0:0
 
-libfss_la_SOURCES = fss.hpp
+libfss_la_SOURCES = fss-main.cpp fss.hpp
 
 include_HEADERS+= fss-client.hpp
 pkgconfig_DATA+= fss-client.pc
