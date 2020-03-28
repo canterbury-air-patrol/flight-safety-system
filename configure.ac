@@ -60,6 +60,13 @@ AC_LANG_PUSH([C++])
 AC_LANG_POP([C++])
 ])
 
+AC_CHECK_LIB([pthread], [pthread_create], [
+       have_pthread=yes
+       pthread_LIBS="-pthread"],
+    [AC_MSG_ERROR([pthread is required for this program])])
+AC_SUBST(pthread_LIBS)
+
+
 # Output Makefile files.
 AC_CONFIG_FILES([Makefile src/Makefile src/fss.pc src/fss-client.pc examples/Makefile tests/Makefile])
 AC_OUTPUT

@@ -23,6 +23,7 @@ libfss_client_la_CXXFLAGS = $(AM_CXXFLAGS) $(JSONCPP_CFLAGS)
 libfss_client_la_LIBADD = $(JSONCPP_LIBS) libfss-transport.la
 
 libfss_transport_la_SOURCES = transport.cpp transport-helpers.cpp transport-messages.cpp transport.hpp
+libfss_transport_la_LIBADD = $(pthread_LIBS)
 
 
 .pgc.c:
