@@ -5,7 +5,10 @@
 void db_connect(const char *host, const char *user, const char *pass, const char *db)
 {
     char *target = NULL;
-    asprintf(&target, "%s@%s", db, host);
+    if (asprintf(&target, "%s@%s", db, host) < 0)
+    {
+        return;
+    }
     EXEC SQL BEGIN DECLARE SECTION;
     const char *db_target = target;
     const char *db_user = user;
@@ -134,11 +137,17 @@ convert_to_http(const char *address, int port, bool https)
     char *result = NULL;
     if (default_port)
     {
-        asprintf(&result, "%s://%s/", https ? "https" : "http", address);
+        if (asprintf(&result, "%s://%s/", https ? "https" : "http", address) < 0)
+        {
+            result = NULL;
+        }
     }
     else
     {
-        asprintf(&result, "%s://%s:%i/", https ? "https" : "http", address, port);
+        if (asprintf(&result, "%s://%s:%i/", https ? "https" : "http", address, port) < 0)
+        {
+            result = NULL;
+        }
     }
     return result;
 }
