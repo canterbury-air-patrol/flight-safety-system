@@ -14,9 +14,13 @@ endif
 
 if HAVE_SYSTEMD
 systemdsystemunit_DATA =
+nodist_systemdsystemunit_DATA =
+dist_systemdsystemunit_DATA =
 
 if SERVER
 systemdsystemunit_DATA += fss-server.service
+nodist_systemdsystemunit_DATA += fss-server.service
+dist_systemdsystemunit_DATA += fss-server.service.in
 
 SERVICE_SUBS = \
     s,[@]PREFIX[@],${sbindir},g
