@@ -1,7 +1,5 @@
 [Unit]
 Description=Flight-Safety-System Server
-Requires=postgresql.service
-After=postgresql.service
 
 [Service]
 ExecStart=@PREFIX@/fss-server
