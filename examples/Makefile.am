@@ -4,6 +4,8 @@ AM_CXXFLAGS = -pthread -fPIC -std=c++11 -I. -Werror -Wall -Wshadow -Wunused -Wnu
 
 bin_PROGRAMS =
 
+EXTRA_DIST=example-client-config.json example-server-config.json
+
 if FAKE_CLIENT
 bin_PROGRAMS += fss-fake-client
 
