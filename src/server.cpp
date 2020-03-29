@@ -236,10 +236,11 @@ int main(int argc, char *argv[])
     /* Ignore sig pipe */
     signal (SIGPIPE, SIG_IGN);
     /* Read config */
-    std::ifstream configfile((argc > 1 ? std::string(argv[1]) : "/etc/fss/server.json"));
+    std::string conf_file = (argc > 1 ? std::string(argv[1]) : "/etc/fss/server.json");
+    std::ifstream configfile(conf_file);
     if (!configfile.is_open())
     {
-        printf("Failed to load configuration\n");
+        std::cerr << "Failed to load configuration: " << conf_file << std::endl;
         exit(-1);
     }
     Json::Value config;
