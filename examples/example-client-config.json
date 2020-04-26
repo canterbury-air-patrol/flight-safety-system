@@ -1,8 +1,9 @@
 {
-    "port": 20202,
-    "postgres": {
-       "host": "localhost",
-       "user": "fss",
-       "db": "fss"
-    }
+    "name": "test-1",
+    "servers": [
+        {
+            "address": "127.0.0.1",
+            "port": 20202
+        }
+    ]
 }
