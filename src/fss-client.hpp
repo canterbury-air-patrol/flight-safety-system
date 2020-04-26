@@ -21,6 +21,7 @@ public:
     virtual std::string getAssetName() { return this->asset_name; };
     virtual void serverRequiresReconnect(fss_server *server);
     virtual void updateServers(flight_safety_system::transport::fss_message_server_list *msg);
+    virtual void handleCommand(flight_safety_system::transport::fss_message_asset_command *msg);
 };
 
 class fss_server: public flight_safety_system::transport::fss_message_cb {

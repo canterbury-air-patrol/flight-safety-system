@@ -140,6 +140,11 @@ flight_safety_system::client::fss_client::updateServers(fss_transport::fss_messa
 }
 
 void
+flight_safety_system::client::fss_client::handleCommand(fss_transport::fss_message_asset_command *msg)
+{
+}
+
+void
 flight_safety_system::client::fss_client::serverRequiresReconnect(fss_server *server)
 {
     this->servers.remove(server);
@@ -259,7 +264,7 @@ fss_server::processMessage(fss_transport::fss_message *msg)
                 break;
             case fss_transport::message_type_command:
             {
-                /* TODO */
+                this->getClient()->handleCommand((fss_transport::fss_message_asset_command *)msg);
             }
                 break;
             case fss_transport::message_type_server_list:
