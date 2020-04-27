@@ -50,7 +50,7 @@ int main(int argc, char *argv[])
             /* Send each server some fake details */
             auto msg_status = new flight_safety_system::transport::fss_message_system_status(75, 1000);
             auto msg_search = new flight_safety_system::transport::fss_message_search_status(1, 23, 100);
-            auto msg_pos = new flight_safety_system::transport::fss_message_position_report(-43.5, 172.5, 300, flight_safety_system::fss_current_timestamp());
+            auto msg_pos = new flight_safety_system::transport::fss_message_position_report(-43.5, 172.5, 300, 1800, 200, 0, 0, "example", 01200, flight_safety_system::fss_current_timestamp());
             client->sendMsgAll(msg_status);
             client->sendMsgAll(msg_search);
             client->sendMsgAll(msg_pos);

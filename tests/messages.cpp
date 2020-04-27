@@ -120,7 +120,7 @@ TEST_CASE("RTT Response Message Check") {
 
 TEST_CASE("Position Report Message Check") {
     /* Create a test position report */
-    auto msg = new fss_message_position_report(-43.5, 172.0, 1234, 5678);
+    auto msg = new fss_message_position_report(-43.5, 172.0, 1234, 240, 200, 1, 217573, "ZK-ABC", 01200, 5678);
     /* Check the type */
     REQUIRE(msg->getType() == message_type_position_report);
     /* Check the parameters */
@@ -128,6 +128,12 @@ TEST_CASE("Position Report Message Check") {
     REQUIRE(msg->getLongitude() == 172.0);
     REQUIRE(msg->getAltitude() == 1234);
     REQUIRE(msg->getTimeStamp() == 5678);
+    REQUIRE(msg->getICAOAddress() == 217573);
+    REQUIRE(msg->getHeading() == 240);
+    REQUIRE(msg->getHorzVel() == 200);
+    REQUIRE(msg->getVertVel() == 1);
+    REQUIRE(msg->getCallSign() == "ZK-ABC");
+    REQUIRE(msg->getSquawk() == 01200);
     /* Convert to bl and back */
     msg->setId(2563);
     auto bl = msg->getPacked();
@@ -141,6 +147,12 @@ TEST_CASE("Position Report Message Check") {
     REQUIRE(decoded->getLongitude() == 172.0);
     REQUIRE(decoded->getAltitude() == 1234);
     REQUIRE(decoded->getTimeStamp() == 5678);
+    REQUIRE(decoded->getICAOAddress() == 217573);
+    REQUIRE(decoded->getHeading() == 240);
+    REQUIRE(decoded->getHorzVel() == 200);
+    REQUIRE(decoded->getVertVel() == 1);
+    REQUIRE(decoded->getCallSign() == "ZK-ABC");
+    REQUIRE(decoded->getSquawk() == 01200);
     auto decoded_generic = fss_message::decode(bl);
     /* Check the type */
     REQUIRE(decoded_generic->getType() == message_type_position_report);

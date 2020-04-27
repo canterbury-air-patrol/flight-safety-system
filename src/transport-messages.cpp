@@ -11,6 +11,18 @@
 
 using namespace flight_safety_system::transport;
 
+void
+packString(buf_len *bl, std::string val)
+{
+    size_t str_len = val.length();
+    uint16_t len = htons(str_len);
+    bl->addData((char *)&len, sizeof(uint16_t));
+    bl->addData(val.c_str(), str_len);
+    /* align to 8-byte boundary (will add 1 to 8 bytes on '\0') */
+    uint64_t empty = 0;
+    bl->addData((char *)&empty, sizeof(uint64_t) - (bl->getLength() % sizeof(uint64_t)));
+}
+
 size_t
 fss_message::headerLength()
 {
@@ -112,10 +124,22 @@ fss_message_position_report::packData(buf_len *bl)
     int32_t lat = htonl((int32_t) (this->getLatitude() / 0.000001));
     int32_t lng = htonl((int32_t) (this->getLongitude() / 0.000001));
     uint32_t alt = htonl(this->getAltitude());
+    uint32_t icao_id = htonl(this->getICAOAddress());
+    uint16_t head = htons(this->getHeading());
+    uint16_t hor_vel = htons(this->getHorzVel());
+    uint16_t ver_vel = htons(this->getVertVel());
+    uint16_t squawk_code = htons(this->getSquawk());
+
     bl->addData((char *)&ts, sizeof(uint64_t));
     bl->addData((char *)&lat, sizeof(int32_t));
     bl->addData((char *)&lng, sizeof(int32_t));
     bl->addData((char *)&alt, sizeof(uint32_t));
+    bl->addData((char *)&icao_id, sizeof(uint32_t));
+    bl->addData((char *)&head, sizeof(uint16_t));
+    bl->addData((char *)&hor_vel, sizeof(uint16_t));
+    bl->addData((char *)&ver_vel, sizeof(uint16_t));
+    bl->addData((char *)&squawk_code, sizeof(uint16_t));
+    packString(bl, this->getCallSign());
 }
 
 void
@@ -128,18 +152,61 @@ fss_message_position_report::unpackData(buf_len *bl)
     int32_t lng = 0;
     this->altitude = 0;
     this->timestamp = 0;
-    if (length - offset == (sizeof(uint64_t) + sizeof(int32_t) + sizeof(int32_t) + sizeof(uint32_t)))
+    if (length - offset >= sizeof(uint64_t))
     {
         this->timestamp = ntohll(*(uint64_t *)(data + offset));
         offset += sizeof(uint64_t);
+    }
+    if (length - offset >= sizeof(int32_t))
+    {
         lat = ntohl(*(int32_t *)(data + offset));
         offset += sizeof(int32_t);
+        this->latitude = ((double)lat) * 0.000001;
+    }
+    if (length - offset >= sizeof(int32_t))
+    {
         lng = ntohl(*(int32_t *)(data + offset));
         offset += sizeof(int32_t);
-        this->altitude = ntohl(*(uint32_t *)(data + offset));
+        this->longitude = ((double)lng) * 0.000001;
     }
-    this->latitude = ((double)lat) * 0.000001;
-    this->longitude = ((double)lng) * 0.000001;
+    if (length - offset >= sizeof(uint32_t))
+    {
+        this->altitude = ntohl(*(uint32_t *)(data + offset));
+        offset += sizeof(uint32_t);
+    }
+    if (length - offset >= sizeof(uint32_t))
+    {
+        this->icao_address = ntohl(*(uint32_t *)(data + offset));
+        offset += sizeof(uint32_t);
+    }
+    if (length - offset >= sizeof(uint16_t))
+    {
+        this->heading = ntohs(*(uint16_t *)(data + offset));
+        offset += sizeof(uint16_t);
+    }
+    if (length - offset >= sizeof(uint16_t))
+    {
+        this->hor_velocity = ntohs(*(uint16_t *)(data + offset));
+        offset += sizeof(uint16_t);
+    }
+    if (length - offset >= sizeof(uint16_t))
+    {
+        this->ver_velocity = ntohs(*(uint16_t *)(data + offset));
+        offset += sizeof(uint16_t);
+    }
+    if (length - offset >= sizeof(uint16_t))
+    {
+        this->squawk = ntohs(*(uint16_t *)(data + offset));
+        offset += sizeof(uint16_t);
+    }
+    if (length - offset >= sizeof(uint16_t))
+    {
+        uint16_t len = ntohs(*(uint16_t *)(data + offset));
+        offset += sizeof(uint16_t);
+        this->callsign.assign((char *)(data + offset), len);
+        offset += len;
+        offset += (sizeof(uint64_t) - offset % sizeof(uint64_t));
+    }
 }
 
 void
@@ -237,18 +304,6 @@ fss_message_asset_command::unpackData(buf_len *bl)
     }
     this->latitude = lat * 0.000001;
     this->longitude = lng * 0.000001;
-}
-
-void
-packString(buf_len *bl, std::string val)
-{
-    size_t str_len = val.length();
-    uint16_t len = htons(str_len);
-    bl->addData((char *)&len, sizeof(uint16_t));
-    bl->addData(val.c_str(), str_len);
-    /* align to 8-byte boundary (will add 1 to 8 bytes on '\0') */
-    uint64_t empty = 0;
-    bl->addData((char *)&empty, sizeof(uint64_t) - (bl->getLength() % sizeof(uint64_t)));
 }
 
 void

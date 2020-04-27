@@ -20,7 +20,7 @@ flight_safety_system::client::fss_client::fss_client(const std::string &t_fileNa
     std::ifstream configfile(t_fileName);
     if (!configfile.is_open())
     {
-        printf("Failed to load configuration\n");
+        std::cerr << "Failed to load configuration" << std::endl;
         return;
     }
     Json::Value config;
@@ -145,6 +145,11 @@ flight_safety_system::client::fss_client::handleCommand(fss_transport::fss_messa
 }
 
 void
+flight_safety_system::client::fss_client::handlePositionReport(fss_transport::fss_message_position_report *msg)
+{
+}
+
+void
 flight_safety_system::client::fss_client::serverRequiresReconnect(fss_server *server)
 {
     this->servers.remove(server);
@@ -254,8 +259,10 @@ fss_server::processMessage(fss_transport::fss_message *msg)
             /* Currently we don't send any rtt requests */
                 break;
             case fss_transport::message_type_position_report:
-            /* Servers will be relaying position reports, so this is another asset */
-                break;
+            {
+                /* Servers will be relaying position reports, so this is another asset */
+                this->getClient()->handlePositionReport((fss_transport::fss_message_position_report *)msg);
+            } break;
             case fss_transport::message_type_system_status:
             /* Servers don't currently send status reports */
                 break;
@@ -265,18 +272,15 @@ fss_server::processMessage(fss_transport::fss_message *msg)
             case fss_transport::message_type_command:
             {
                 this->getClient()->handleCommand((fss_transport::fss_message_asset_command *)msg);
-            }
-                break;
+            } break;
             case fss_transport::message_type_server_list:
             {
                 this->getClient()->updateServers((fss_transport::fss_message_server_list *)msg);
-            }
-                break;
+            } break;
             case fss_transport::message_type_smm_settings:
             {
                 /* TODO */
-            }
-                break;
+            } break;
         }
     }
 }
