@@ -177,6 +177,13 @@ fss_client::processMessage(fss_transport::fss_message *msg)
                 /* Capture and store in the database */
                 dbc->asset_add_position(this->name, msg->getLatitude(), msg->getLongitude(), msg->getAltitude());
                 /* Ideally reflect this message to all clients */
+                for (auto client : clients)
+                {
+                    if (client != this)
+                    {
+                        client->sendMsg(msg);
+                    }
+                }
                 
             }
                 break;
