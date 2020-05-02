@@ -127,7 +127,7 @@ fss_message_position_report::packData(buf_len *bl)
     uint32_t icao_id = htonl(this->getICAOAddress());
     uint16_t head = htons(this->getHeading());
     uint16_t hor_vel = htons(this->getHorzVel());
-    uint16_t ver_vel = htons(this->getVertVel());
+    int16_t ver_vel = htons(this->getVertVel());
     uint16_t squawk_code = htons(this->getSquawk());
 
     bl->addData((char *)&ts, sizeof(uint64_t));
@@ -137,7 +137,7 @@ fss_message_position_report::packData(buf_len *bl)
     bl->addData((char *)&icao_id, sizeof(uint32_t));
     bl->addData((char *)&head, sizeof(uint16_t));
     bl->addData((char *)&hor_vel, sizeof(uint16_t));
-    bl->addData((char *)&ver_vel, sizeof(uint16_t));
+    bl->addData((char *)&ver_vel, sizeof(int16_t));
     bl->addData((char *)&squawk_code, sizeof(uint16_t));
     packString(bl, this->getCallSign());
 }
@@ -189,10 +189,10 @@ fss_message_position_report::unpackData(buf_len *bl)
         this->hor_velocity = ntohs(*(uint16_t *)(data + offset));
         offset += sizeof(uint16_t);
     }
-    if (length - offset >= sizeof(uint16_t))
+    if (length - offset >= sizeof(int16_t))
     {
-        this->ver_velocity = ntohs(*(uint16_t *)(data + offset));
-        offset += sizeof(uint16_t);
+        this->ver_velocity = ntohs(*(int16_t *)(data + offset));
+        offset += sizeof(int16_t);
     }
     if (length - offset >= sizeof(uint16_t))
     {

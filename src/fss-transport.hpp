@@ -224,7 +224,7 @@ private:
     uint32_t altitude;
     uint16_t heading;
     uint16_t hor_velocity;
-    uint16_t ver_velocity;
+    int16_t ver_velocity;
     uint32_t icao_address;
     std::string callsign;
     uint16_t squawk;
@@ -233,7 +233,7 @@ protected:
     void unpackData(buf_len *bl);
     virtual void packData(buf_len *bl) override;
 public:
-    fss_message_position_report(double t_latitude, double t_longitude, uint32_t t_altitude, uint16_t t_heading, uint16_t t_hor_vel, uint16_t t_ver_vel, uint32_t t_icao_address, std::string t_callsign, uint16_t t_squawk, uint64_t t_timestamp) : fss_message(message_type_position_report), latitude(t_latitude), longitude(t_longitude), altitude(t_altitude), heading(t_heading), hor_velocity(t_hor_vel), ver_velocity(t_ver_vel), icao_address(t_icao_address), callsign(t_callsign), squawk(t_squawk), timestamp(t_timestamp) {};
+    fss_message_position_report(double t_latitude, double t_longitude, uint32_t t_altitude, uint16_t t_heading, uint16_t t_hor_vel, int16_t t_ver_vel, uint32_t t_icao_address, std::string t_callsign, uint16_t t_squawk, uint64_t t_timestamp) : fss_message(message_type_position_report), latitude(t_latitude), longitude(t_longitude), altitude(t_altitude), heading(t_heading), hor_velocity(t_hor_vel), ver_velocity(t_ver_vel), icao_address(t_icao_address), callsign(t_callsign), squawk(t_squawk), timestamp(t_timestamp) {};
     fss_message_position_report(uint64_t t_id, buf_len *bl) : fss_message(t_id, message_type_position_report), latitude(NAN), longitude(NAN), altitude(0), heading(0), hor_velocity(0), ver_velocity(0), icao_address(0), callsign(), squawk(0), timestamp(0) { this->unpackData(bl); };
     virtual double getLatitude() override { return this->latitude; };
     virtual double getLongitude() override { return this->longitude; };
@@ -242,7 +242,7 @@ public:
     virtual uint32_t getICAOAddress() { return this->icao_address; };
     virtual uint16_t getHeading() { return this->heading; };
     virtual uint16_t getHorzVel() { return this->hor_velocity; };
-    virtual uint16_t getVertVel() { return this->ver_velocity; };
+    virtual int16_t getVertVel() { return this->ver_velocity; };
     virtual std::string getCallSign() { return this->callsign; };
     virtual uint16_t getSquawk() { return this->squawk; };
 };
