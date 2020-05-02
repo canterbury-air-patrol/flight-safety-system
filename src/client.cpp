@@ -82,11 +82,13 @@ void
 flight_safety_system::client::fss_client::attemptReconnect()
 {
     std::list<fss_server *> reconnected;
+    bool any_connected = false;
     for (auto server : this->reconnect_servers)
     {
         if(server->reconnect())
         {
             reconnected.push_back(server);
+            any_connected = true;
         }
     }
     while(!reconnected.empty())
@@ -95,6 +97,10 @@ flight_safety_system::client::fss_client::attemptReconnect()
         reconnected.pop_front();
         reconnect_servers.remove(server);
         servers.push_back(server);
+    }
+    if (any_connected)
+    {
+        this->notifyConnectionStatus();
     }
 }
 
@@ -150,10 +156,33 @@ flight_safety_system::client::fss_client::handlePositionReport(fss_transport::fs
 }
 
 void
+flight_safety_system::client::fss_client::connectionStatusChange(flight_safety_system::client::connection_status status)
+{
+}
+
+void
+flight_safety_system::client::fss_client::notifyConnectionStatus()
+{
+    switch (this->servers.size())
+    {
+        case 0:
+            this->connectionStatusChange(CLIENT_CONNECTION_STATUS_DISCONNECTED);
+            break;
+        case 1:
+            this->connectionStatusChange(CLIENT_CONNECTION_STATUS_CONNECTED_1_SERVER);
+            break;
+        default:
+            this->connectionStatusChange(CLIENT_CONNECTION_STATUS_CONNECTED_2_OR_MORE);
+            break;
+    }
+}
+
+void
 flight_safety_system::client::fss_client::serverRequiresReconnect(fss_server *server)
 {
     this->servers.remove(server);
     this->reconnect_servers.push_back(server);
+    this->notifyConnectionStatus();
 }
 
 fss_server::fss_server(fss_client *t_client, fss_transport::fss_connection *t_conn, const std::string &t_address, uint16_t t_port) : fss_message_cb(t_conn), client(t_client), address(t_address), port(t_port)

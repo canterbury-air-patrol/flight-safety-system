@@ -7,11 +7,20 @@ namespace client {
 class fss_client;
 class fss_server;
 
+enum connection_status {
+CLIENT_CONNECTION_STATUS_UNKNOWN,
+CLIENT_CONNECTION_STATUS_CONNECTED_1_SERVER,
+CLIENT_CONNECTION_STATUS_CONNECTED_2_OR_MORE,
+CLIENT_CONNECTION_STATUS_DISCONNECTED,
+};
+
 class fss_client {
 protected:
     std::string asset_name{""};
     std::list<fss_server *> servers{};
     std::list<fss_server *> reconnect_servers{};
+    void notifyConnectionStatus();
+    virtual void connectionStatusChange(flight_safety_system::client::connection_status status);
 public:
     explicit fss_client(const std::string &config_file);
     virtual ~fss_client();
