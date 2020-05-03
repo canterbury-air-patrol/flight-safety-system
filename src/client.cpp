@@ -205,50 +205,56 @@ fss_server::~fss_server()
 bool
 fss_server::reconnect()
 {
-    if (this->conn == nullptr)
+    uint64_t ts = fss_current_timestamp();
+    bool try_now = false;
+    uint64_t elapsed_time = ts - this->last_tried;
+
+    if (this->conn != nullptr)
     {
-        uint64_t ts = fss_current_timestamp();
-        bool try_now = false;
-        uint64_t elapsed_time = ts - this->last_tried;
-        switch (this->retry_count)
+        delete this->conn;
+        this->conn = nullptr;
+    }
+
+    switch (this->retry_count)
+    {
+        case 0:
+            try_now = (elapsed_time > 1000);
+            break;
+        case 1:
+            try_now = (elapsed_time > 2000);
+            break;
+        case 2:
+            try_now = (elapsed_time > 4000);
+            break;
+        case 3:
+            try_now = (elapsed_time > 8000);
+            break;
+        case 4:
+            try_now = (elapsed_time > 15000);
+            break;
+        default:
+            try_now = (elapsed_time > 30000);
+            break;
+    }
+    if (try_now)
+    {
+        this->retry_count++;
+        this->last_tried = ts;
+        this->conn = new fss_transport::fss_connection();
+        if (!this->conn->connectTo(this->getAddress(), this->getPort()))
         {
-            case 0:
-                try_now = (elapsed_time > 1000);
-                break;
-            case 1:
-                try_now = (elapsed_time > 2000);
-                break;
-            case 2:
-                try_now = (elapsed_time > 4000);
-                break;
-            case 3:
-                try_now = (elapsed_time > 8000);
-                break;
-            case 4:
-                try_now = (elapsed_time > 15000);
-                break;
-            default:
-                try_now = (elapsed_time > 30000);
-                break;
+            delete this->conn;
+            this->conn = nullptr;
         }
-        if (try_now)
+        else
         {
-            this->retry_count++;
-            this->last_tried = ts;
-            this->conn = new fss_transport::fss_connection();
-            if (!this->conn->connectTo(this->getAddress(), this->getPort()))
-            {
-                delete this->conn;
-                this->conn = nullptr;
-            }
-            else
-            {
-                conn->setHandler(this);
-                auto ident_msg = new fss_transport::fss_message_identity(this->client->getAssetName());
-                conn->sendMsg(ident_msg);
-                delete ident_msg;
-                return true;
-            }
+            conn->setHandler(this);
+            auto ident_msg = new fss_transport::fss_message_identity(this->client->getAssetName());
+            conn->sendMsg(ident_msg);
+            delete ident_msg;
+            this->retry_count = 0;
+            this->last_tried = 0;
+            return true;
         }
     }
     return false;
