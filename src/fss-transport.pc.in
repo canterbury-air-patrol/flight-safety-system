@@ -8,3 +8,4 @@ Description: Flight Safety System - Transport Library
 Version: @VERSION@
 Requires: fss
 Libs: -L${libdir} -lfss-transport
+Cflags: -I${include}

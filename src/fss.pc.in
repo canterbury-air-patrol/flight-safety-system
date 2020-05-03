@@ -8,3 +8,4 @@ Description: Flight Safety System - Base Library
 Version: @VERSION@
 Requires:
 Libs: -L${libdir} -lfss
+Cflags: -I${include}

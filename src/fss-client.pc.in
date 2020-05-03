@@ -6,5 +6,6 @@ include=@includedir@
 Name: fss-client
 Description: Flight Safety System - Client Library
 Version: @VERSION@
-Requires: fss
+Requires: fss jsoncpp
 Libs: -L${libdir} -lfss-client
+Cflags: -I${include}
