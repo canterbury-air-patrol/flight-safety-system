@@ -56,7 +56,8 @@ AS_IF([test "x$enable_server" == "xyes"], [
 AS_IF([test "x$enable_tests" == "xyes"], [
 AC_LANG_PUSH([C++])
     AC_CHECK_HEADERS([catch2/catch.hpp], [], [
-	AC_CHECK_HEADERS([catch/catch.hpp])])
+	AC_CHECK_HEADERS([catch/catch.hpp], [], [
+            AC_CHECK_HEADERS([catch.hpp])])])
 AC_LANG_POP([C++])
 ])
 

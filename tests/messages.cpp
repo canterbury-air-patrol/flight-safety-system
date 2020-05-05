@@ -5,6 +5,8 @@
 #include <catch2/catch.hpp>
 #elif HAVE_CATCH_CATCH_HPP
 #include <catch/catch.hpp>
+#elif HAVE_CATCH_HPP
+#include <catch.hpp>
 #else
 #error No catch header
 #endif
