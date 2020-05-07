@@ -51,8 +51,11 @@ fss_transport::fss_connection::fss_connection(int t_fd) : fd(t_fd), last_msg_id(
 
 fss_transport::fss_connection::~fss_connection()
 {
-    shutdown(this->fd, 2);
-    close(this->fd);
+    if (this->fd != -1)
+    {
+        shutdown(this->fd, 2);
+        close(this->fd);
+    }
     if (this->recv_thread.joinable())
     {
         this->recv_thread.join();
