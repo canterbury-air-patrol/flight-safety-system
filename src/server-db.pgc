@@ -196,6 +196,8 @@ db_active_fss_servers_get(void)
     EXEC SQL OPEN cur1;
 
     EXEC SQL WHENEVER NOT FOUND DO BREAK;
+    EXEC SQL WHENEVER SQLERROR DO BREAK;
+    EXEC SQL WHENEVER SQLWARNING DO BREAK;
     while (1)
     {
         EXEC SQL FETCH FROM cur1 INTO :server_address, :server_port;
