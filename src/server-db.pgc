@@ -209,6 +209,9 @@ db_active_fss_servers_get(void)
         res = (struct fss_server_s **)realloc(res, sizeof(struct fss_server *) * (len + 1));
         res[len] = NULL;
     }
+    EXEC SQL WHENEVER NOT FOUND CONTINUE;
+    EXEC SQL WHENEVER SQLERROR CONTINUE;
+    EXEC SQL WHENEVER SQLWARNING CONTINUE;
 
     EXEC SQL CLOSE cur1;
     EXEC SQL SET AUTOCOMMIT TO ON;
