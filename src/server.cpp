@@ -81,6 +81,7 @@ fss_client::disconnect()
 {
     this->conn->disconnect();
     delete this->conn;
+    this->conn = nullptr;
 }
 
 void
@@ -284,13 +285,15 @@ int main(int argc, char *argv[])
         sleep (1);
         cleanup_removable_clients();
         /* Send RTT messages to all clients */
-        auto rtt_req = new fss_transport::fss_message_rtt_request();
-        for(auto client: clients)
         {
-            client->sendRTTRequest(rtt_req);
-            client->sendCommand();
+            auto rtt_req = new fss_transport::fss_message_rtt_request();
+            for(auto client: clients)
+            {
+                client->sendRTTRequest(rtt_req);
+                client->sendCommand();
+            }
+            delete rtt_req;
         }
-        delete rtt_req;
         /* Send Config settings to all clients */
         if (counter == 30)
         {
