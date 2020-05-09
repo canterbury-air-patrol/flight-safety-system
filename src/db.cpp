@@ -132,7 +132,10 @@ db_connection::get_active_fss_servers()
         for(size_t i = 0; servers[i] != nullptr; i++)
         {
             res.push_back(new fss_server_details(servers[i]->address, servers[i]->port));
+            free (servers[i]->address);
+            free (servers[i]);
         }
+        free (servers);
     }
     return res;
 }

@@ -49,13 +49,23 @@ fss_transport::fss_connection::fss_connection(int t_fd) : fd(t_fd), last_msg_id(
 {
 }
 
-fss_transport::fss_connection::~fss_connection()
+void
+fss_transport::fss_connection::disconnect()
 {
     if (this->fd != -1)
     {
         shutdown(this->fd, 2);
         close(this->fd);
+        this->fd = -1;
     }
+    if (this->recv_thread.joinable())
+    {
+        this->recv_thread.join();
+    }
+}
+
+fss_transport::fss_connection::~fss_connection()
+{
     if (this->recv_thread.joinable())
     {
         this->recv_thread.join();
@@ -267,6 +277,19 @@ fss_transport::fss_connection::recvMsg()
     return msg;
 }
 
+fss_transport::fss_listen::~fss_listen()
+{
+    if (this->fd != -1)
+    {
+        shutdown(this->fd, 2);
+        close (this->fd);
+    }
+    if (this->recv_thread.joinable())
+    {
+        this->recv_thread.join();
+    }
+}
+
 static void
 listen_thread(fss_transport::fss_listen *listen)
 {
@@ -276,18 +299,18 @@ listen_thread(fss_transport::fss_listen *listen)
 void
 fss_transport::fss_listen::processMessages()
 {
-    while (1)
+    while (this->fd >= 0)
     {
         struct sockaddr_storage sa = {};
         socklen_t sa_len = sizeof(sockaddr_storage);
         int newfd = accept(this->fd, (struct sockaddr *)&sa, &sa_len);
         if (newfd < 0)
         {
-            perror("Failed to accept: ");
             if (errno == EBADF)
             {
                 return;
             }
+            perror("Failed to accept: ");
             continue;
         }
 #ifdef DEBUG

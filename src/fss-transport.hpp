@@ -140,6 +140,7 @@ public:
     bool sendMsg(fss_message *msg);
     fss_message *getMsg();
     virtual void processMessages();
+    void disconnect();
 };
 
 class fss_listen : public fss_connection {
@@ -151,6 +152,7 @@ public:
     fss_listen(uint16_t t_port, fss_connect_cb t_cb) : fss_connection(), port(t_port), cb(t_cb) {
         this->startListening();
     };
+    ~fss_listen();
     virtual void processMessages() override;
 };
 

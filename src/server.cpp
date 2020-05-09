@@ -77,6 +77,13 @@ fss_client::sendCommand()
 }
 
 void
+fss_client::disconnect()
+{
+    this->conn->disconnect();
+    delete this->conn;
+}
+
+void
 fss_client::sendRTTRequest(fss_transport::fss_message_rtt_request *rtt_req)
 {
     uint64_t ts = fss_current_timestamp();
@@ -313,9 +320,9 @@ int main(int argc, char *argv[])
     /* Disconnect all the clients */
     while (!clients.empty())
     {
-        fss_client *client = clients.front();
+        auto client = clients.front();
         clients.pop_front();
-        delete client;
+        client->disconnect();
     }
     cleanup_removable_clients();
     delete dbc;

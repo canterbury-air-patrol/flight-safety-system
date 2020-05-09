@@ -183,7 +183,7 @@ struct fss_server_s **
 db_active_fss_servers_get(void)
 {
     size_t len = 0;
-    struct fss_server_s **res = (struct fss_server_s **)malloc(sizeof(struct fss_server *) * (len + 1));
+    struct fss_server_s **res = (struct fss_server_s **)malloc(sizeof(struct fss_server_s *) * (len + 1));
     res[len] = NULL;
 
     EXEC SQL BEGIN DECLARE SECTION;
@@ -206,7 +206,7 @@ db_active_fss_servers_get(void)
         s->port = server_port;
         res[len] = s;
         len++;
-        res = (struct fss_server_s **)realloc(res, sizeof(struct fss_server *) * (len + 1));
+        res = (struct fss_server_s **)realloc(res, sizeof(struct fss_server_s *) * (len + 1));
         res[len] = NULL;
     }
     EXEC SQL WHENEVER NOT FOUND CONTINUE;

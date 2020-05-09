@@ -105,6 +105,7 @@ public:
     void sendMsg(transport::fss_message *msg);
     void sendSMMSettings();
     void sendCommand();
+    void disconnect();
 };
 }
 }
