@@ -315,14 +315,18 @@ int main(int argc, char *argv[])
         counter++;
     }
     
+    /* Close the listen socket */
     delete listen;
     listen = nullptr;
     /* Disconnect all the clients */
+    for (auto c: clients)
+    {
+        c->disconnect();
+    }
+    /* Wait for all clients to move to disconnected state */
     while (!clients.empty())
     {
-        auto client = clients.front();
-        clients.pop_front();
-        client->disconnect();
+        sleep (1);
     }
     cleanup_removable_clients();
     delete dbc;
