@@ -1,3 +1,4 @@
+#include "fss-transport.hpp"
 #include "fss.hpp"
 #include "fss-server.hpp"
 
@@ -5,6 +6,7 @@
 #include <fstream>
 #include <csignal>
 #include <list>
+#include <mutex>
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Weffc++"
@@ -18,8 +20,101 @@ namespace fss_transport = flight_safety_system::transport;
 
 db_connection *dbc = nullptr;
 
-std::list<fss_client *> clients;
-std::queue<fss_client *> remove_clients;
+class server_clients{
+private:
+    std::mutex lock{};
+    std::list<fss_client *> clients{};
+    std::queue<fss_client *> disconnected{};
+    uint32_t total_clients{0};
+public:
+    server_clients() {};
+    ~server_clients() {
+        std::queue<fss_client *> toDisconnect;
+        /* Prevent changes while we empty the client list */
+        this->lock.lock();
+        for (auto c: this->clients)
+        {
+            toDisconnect.push(c);
+        }
+        this->clients.clear();
+        this->lock.unlock();
+        /* Disconnect the clients that were still in the list */
+        while (!toDisconnect.empty())
+        {
+            auto c = toDisconnect.front();
+            toDisconnect.pop();
+            c->disconnect();
+        }
+        /* Wait for all clients to move to disconnected state */
+        while (total_clients > this->disconnected.size())
+        {
+            this->lock.unlock();
+            sleep (1);
+            this->lock.lock();
+        }
+        this->lock.unlock();
+        this->cleanupRemovableClients();
+    }
+    void cleanupRemovableClients()
+    {
+        this->lock.lock();
+        while(!this->disconnected.empty())
+        {
+            fss_client *client = this->disconnected.front();
+            this->disconnected.pop();
+            total_clients--;
+            delete client;
+        }
+        this->lock.unlock();
+    };
+    void clientConnected(fss_client *client)
+    {
+        this->lock.lock();
+        this->total_clients++;
+        this->clients.push_back(client);
+        this->lock.unlock();
+    };
+    void clientDisconnected(fss_client *client)
+    {
+        this->lock.lock();
+        this->clients.remove(client);
+        this->disconnected.push(client);
+        this->lock.unlock();
+    };
+    void sendMsg(fss_transport::fss_message *msg, fss_client *except = nullptr)
+    {
+        for (auto client : clients)
+        {
+            if (client != except)
+            {
+                client->sendMsg(msg);
+            }
+        }
+    }
+    void sendSMMSettings()
+    {
+        for(auto client: clients)
+        {
+            client->sendSMMSettings();
+        }
+    };
+    void sendRTTRequest(fss_transport::fss_message_rtt_request *rtt_req)
+    {
+        for(auto client: this->clients)
+        {
+            client->sendRTTRequest(rtt_req);
+        }
+    };
+    void sendCommand()
+    {
+        for(auto client: this->clients)
+        {
+            client->sendCommand();
+        }
+    };
+};
+
+server_clients *clients = nullptr;
 
 fss_client::fss_client(fss_transport::fss_connection *t_conn) : fss_message_cb(t_conn), identified(false), name(), outstanding_rtt_requests(), last_command_send_ts(0), last_command_dbid(0)
 {
@@ -114,8 +209,7 @@ fss_client::processMessage(fss_transport::fss_message *msg)
     if (msg->getType() == fss_transport::message_type_closed)
     {
         /* Connection has been closed, cleanup */
-        clients.remove(this);
-        remove_clients.push(this);
+        clients->clientDisconnected(this);
         return;
     }
     if (!this->identified)
@@ -185,14 +279,7 @@ fss_client::processMessage(fss_transport::fss_message *msg)
                 /* Capture and store in the database */
                 dbc->asset_add_position(this->name, msg->getLatitude(), msg->getLongitude(), msg->getAltitude());
                 /* Ideally reflect this message to all clients */
-                for (auto client : clients)
-                {
-                    if (client != this)
-                    {
-                        client->sendMsg(msg);
-                    }
-                }
-                
+                clients->sendMsg(msg, this);
             }
                 break;
             case fss_transport::message_type_system_status:
@@ -230,18 +317,8 @@ bool new_client_connect(fss_transport::fss_connection *conn)
 #ifdef DEBUG
     std::cout << "New client connected" << std::endl;
 #endif
-    clients.push_back(new fss_client(conn));
+    clients->clientConnected(new fss_client(conn));
     return true;
-}
-
-void cleanup_removable_clients()
-{
-    while(!remove_clients.empty())
-    {
-        fss_client *client = remove_clients.front();
-        remove_clients.pop();
-        delete client;
-    }
 }
 
 int main(int argc, char *argv[])
@@ -264,6 +341,9 @@ int main(int argc, char *argv[])
     /* Connect to database */
     dbc = new db_connection(config["postgres"]["host"].asString(), config["postgres"]["user"].asString(), config["postgres"]["pass"].asString(), config["postgres"]["db"].asString());
     
+    /* Create the clients tracking */
+    clients = new server_clients();
+
     /* Open listen socket */
     auto listen = new fss_transport::fss_listen(config["port"].asInt(), new_client_connect);
     /* Process client messages:
@@ -283,15 +363,12 @@ int main(int argc, char *argv[])
     while (running)
     {
         sleep (1);
-        cleanup_removable_clients();
+        clients->cleanupRemovableClients();
         /* Send RTT messages to all clients */
         {
             auto rtt_req = new fss_transport::fss_message_rtt_request();
-            for(auto client: clients)
-            {
-                client->sendRTTRequest(rtt_req);
-                client->sendCommand();
-            }
+            clients->sendRTTRequest(rtt_req);
+            clients->sendCommand();
             delete rtt_req;
         }
         /* Send Config settings to all clients */
@@ -305,15 +382,9 @@ int main(int argc, char *argv[])
                 server_list->addServer(server_details->getAddress(),server_details->getPort());
                 delete server_details;
             }
-            for(auto client: clients)
-            {
-                client->sendMsg(server_list);
-            }
+            clients->sendMsg(server_list);
             delete server_list;
-            for(auto client: clients)
-            {
-                client->sendSMMSettings();
-            }
+            clients->sendSMMSettings();
         }
         counter++;
     }
@@ -322,16 +393,9 @@ int main(int argc, char *argv[])
     delete listen;
     listen = nullptr;
     /* Disconnect all the clients */
-    for (auto c: clients)
-    {
-        c->disconnect();
-    }
-    /* Wait for all clients to move to disconnected state */
-    while (!clients.empty())
-    {
-        sleep (1);
-    }
-    cleanup_removable_clients();
+    delete clients;
+    clients = nullptr;
+    /* Disconnect the database */
     delete dbc;
     dbc = nullptr;
 }
