@@ -1,0 +1,26 @@
+Source: flight-safety-system
+Section: main
+Priority: optional
+Maintainer: Scott Parlane <sjp@canterburyairpatrol.org>
+Build-Depends: debhelper (>= 10), autotools-dev, pkg-config, libecpg-dev, libjsoncpp-dev, catch, systemd
+Standards-Version: 4.1.3
+
+Package: libfss
+Architecture: any
+Depends:
+Description: The base Flight-Safety-System library
+
+Package: libfss-transport
+Architecture: any
+Depends: libfss
+Description: The transport library for Flight-Safety-System
+
+Package: libfss-client
+Architecture: any
+Depends: libfss, libfss-transport, libjsoncpp-dev
+Description: The client library for Flight-Safety-System
+
+Package: flight-safety-system-server
+Architecture: any
+Depends: libfss, libfss-transport, libjsoncpp1, libecpg6
+Description: The Flight-Safety-System server

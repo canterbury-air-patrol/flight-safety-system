@@ -1,0 +1,3 @@
+usr/lib/*/libfss-client.*
+usr/lib/*/pkgconfig/fss-client.pc
+usr/include/fss-client.hpp
