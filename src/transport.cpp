@@ -54,9 +54,10 @@ fss_transport::fss_connection::disconnect()
 {
     if (this->fd != -1)
     {
-        shutdown(this->fd, 2);
-        close(this->fd);
+        int orig_fd = this->fd;
         this->fd = -1;
+        shutdown(orig_fd, 2);
+        close(orig_fd);
     }
     if (this->recv_thread.joinable())
     {
@@ -66,10 +67,7 @@ fss_transport::fss_connection::disconnect()
 
 fss_transport::fss_connection::~fss_connection()
 {
-    if (this->recv_thread.joinable())
-    {
-        this->recv_thread.join();
-    }
+    this->disconnect();
     while(!this->messages.empty())
     {
         fss_message *msg = this->messages.front();
@@ -279,15 +277,7 @@ fss_transport::fss_connection::recvMsg()
 
 fss_transport::fss_listen::~fss_listen()
 {
-    if (this->fd != -1)
-    {
-        shutdown(this->fd, 2);
-        close (this->fd);
-    }
-    if (this->recv_thread.joinable())
-    {
-        this->recv_thread.join();
-    }
+    this->disconnect();
 }
 
 static void
