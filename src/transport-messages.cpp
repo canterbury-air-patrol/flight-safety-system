@@ -129,6 +129,7 @@ fss_message_position_report::packData(buf_len *bl)
     uint16_t hor_vel = htons(this->getHorzVel());
     int16_t ver_vel = htons(this->getVertVel());
     uint16_t squawk_code = htons(this->getSquawk());
+    uint16_t enc_flags = htons(this->getFlags());
 
     bl->addData((char *)&ts, sizeof(uint64_t));
     bl->addData((char *)&lat, sizeof(int32_t));
@@ -140,6 +141,9 @@ fss_message_position_report::packData(buf_len *bl)
     bl->addData((char *)&ver_vel, sizeof(int16_t));
     bl->addData((char *)&squawk_code, sizeof(uint16_t));
     packString(bl, this->getCallSign());
+    bl->addData((char *)&enc_flags, sizeof(uint16_t));
+    bl->addData((char *)&this->altitude_type, sizeof(uint8_t));
+    bl->addData((char *)&this->emitter_type, sizeof(uint8_t));
 }
 
 void
@@ -186,12 +190,12 @@ fss_message_position_report::unpackData(buf_len *bl)
     }
     if (length - offset >= sizeof(uint16_t))
     {
-        this->hor_velocity = ntohs(*(uint16_t *)(data + offset));
+        this->horizontal_velocity = ntohs(*(uint16_t *)(data + offset));
         offset += sizeof(uint16_t);
     }
     if (length - offset >= sizeof(int16_t))
     {
-        this->ver_velocity = ntohs(*(int16_t *)(data + offset));
+        this->vertical_velocity = ntohs(*(int16_t *)(data + offset));
         offset += sizeof(int16_t);
     }
     if (length - offset >= sizeof(uint16_t))
@@ -206,6 +210,21 @@ fss_message_position_report::unpackData(buf_len *bl)
         this->callsign.assign((char *)(data + offset), len);
         offset += len;
         offset += (sizeof(uint64_t) - offset % sizeof(uint64_t));
+    }
+    if (length - offset >= sizeof(uint16_t))
+    {
+        this->flags = ntohs(*(uint16_t *)(data + offset));
+        offset += sizeof(uint16_t);
+    }
+    if (length - offset >= sizeof(uint8_t))
+    {
+        this->altitude_type = (*(uint8_t *)(data + offset));
+        offset += sizeof(uint8_t);
+    }
+    if (length - offset >= sizeof(uint8_t))
+    {
+        this->emitter_type = (*(uint8_t *)(data + offset));
+        offset += sizeof(uint8_t);
     }
 }
 
@@ -381,6 +400,38 @@ fss_message_server_list::unpackData(buf_len *bl)
     }
 }
 
+void
+fss_message_identity_non_aircraft::packData(buf_len *bl)
+{
+    uint64_t caps = htonll(this->capabilities);
+    bl->addData((char *)&caps, sizeof(uint64_t));
+}
+
+void
+fss_message_identity_non_aircraft::unpackData(buf_len *bl)
+{
+    size_t offset = this->headerLength();
+    char *data = bl->getData();
+    size_t length = bl->getLength();
+    if (length - offset >= (sizeof(uint64_t)))
+    {
+        uint64_t caps = ntohll(*(uint64_t *)(data + offset));
+        this->capabilities = caps;
+    }
+}
+
+void
+fss_message_identity_non_aircraft::addCapability(uint8_t cap_id)
+{
+    this->capabilities |= ((uint64_t)(1) << cap_id);
+}
+
+bool
+fss_message_identity_non_aircraft::getCapability(uint8_t cap_id)
+{
+    return !!(this->capabilities & ((uint64_t)(1) << cap_id));
+}
+
 fss_message *
 fss_message::decode(buf_len *bl)
 {
@@ -420,6 +471,9 @@ fss_message::decode(buf_len *bl)
             break;
         case message_type_smm_settings:
             msg = new fss_message_smm_settings(msg_id, bl);
+            break;
+        case message_type_identity_non_aircraft:
+            msg = new fss_message_identity_non_aircraft(msg_id, bl);
             break;
     }
     

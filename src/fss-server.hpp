@@ -91,12 +91,13 @@ public:
 
 class fss_client: public transport::fss_message_cb {
 private:
-    bool identified;
-    std::string name;
-    std::list<fss_client_rtt *> outstanding_rtt_requests;
+    bool identified{false};
+    bool aircraft{false};
+    std::string name{};
+    std::list<fss_client_rtt *> outstanding_rtt_requests{};
     std::string getName() { return this->name; };
-    uint64_t last_command_send_ts;
-    uint64_t last_command_dbid;
+    uint64_t last_command_send_ts{0};
+    uint64_t last_command_dbid{0};
 public:
     explicit fss_client(transport::fss_connection *conn);
     virtual ~fss_client();
@@ -106,6 +107,7 @@ public:
     void sendSMMSettings();
     void sendCommand();
     void disconnect();
+    bool isAircraft() { return this->aircraft; };
 };
 }
 }

@@ -281,6 +281,7 @@ fss_server::processMessage(fss_transport::fss_message *msg)
             case fss_transport::message_type_unknown:
             case fss_transport::message_type_closed:
             case fss_transport::message_type_identity:
+            case fss_transport::message_type_identity_non_aircraft:
                 break;
             case fss_transport::message_type_rtt_request:
             {

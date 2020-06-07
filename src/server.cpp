@@ -85,7 +85,7 @@ public:
     {
         for (auto client : clients)
         {
-            if (client != except)
+            if (client->isAircraft() && client != except)
             {
                 client->sendMsg(msg);
             }
@@ -116,7 +116,7 @@ public:
 
 server_clients *clients = nullptr;
 
-fss_client::fss_client(fss_transport::fss_connection *t_conn) : fss_message_cb(t_conn), identified(false), name(), outstanding_rtt_requests(), last_command_send_ts(0), last_command_dbid(0)
+fss_client::fss_client(fss_transport::fss_connection *t_conn) : fss_message_cb(t_conn)
 {
     conn->setHandler(this);
 }
@@ -219,6 +219,7 @@ fss_client::processMessage(fss_transport::fss_message *msg)
         {
             this->name = ((fss_transport::fss_message_identity *)msg)->getName();
             this->identified = true;
+            this->aircraft = true;
             /* send the current command */
             this->sendCommand();
             /* send SMM config and servers list */
@@ -234,6 +235,11 @@ fss_client::processMessage(fss_transport::fss_message *msg)
             this->conn->sendMsg(server_list);
             delete server_list;
         }
+        else if(msg->getType() == fss_transport::message_type_identity_non_aircraft)
+        {
+            this->identified = true;
+            this->aircraft = false;
+        }
     }
     else
     {
@@ -242,6 +248,7 @@ fss_client::processMessage(fss_transport::fss_message *msg)
             case fss_transport::message_type_unknown:
             case fss_transport::message_type_closed:
             case fss_transport::message_type_identity:
+            case fss_transport::message_type_identity_non_aircraft:
                 break;
             case fss_transport::message_type_rtt_request:
             {
@@ -276,9 +283,12 @@ fss_client::processMessage(fss_transport::fss_message *msg)
                 break;
             case fss_transport::message_type_position_report:
             {
-                /* Capture and store in the database */
-                dbc->asset_add_position(this->name, msg->getLatitude(), msg->getLongitude(), msg->getAltitude());
-                /* Ideally reflect this message to all clients */
+                if (this->aircraft)
+                {
+                    /* Capture and store in the database */
+                    dbc->asset_add_position(this->name, msg->getLatitude(), msg->getLongitude(), msg->getAltitude());
+                }
+                /* Reflect this message to all aircraft clients */
                 clients->sendMsg(msg, this);
             }
                 break;

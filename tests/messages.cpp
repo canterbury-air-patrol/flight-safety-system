@@ -122,7 +122,7 @@ TEST_CASE("RTT Response Message Check") {
 
 TEST_CASE("Position Report Message Check") {
     /* Create a test position report */
-    auto msg = new fss_message_position_report(-43.5, 172.0, 1234, 240, 200, 1, 217573, "ZK-ABC", 01200, 5678);
+    auto msg = new fss_message_position_report(-43.5, 172.0, 1234, 240, 200, 1, 217573, "ZK-ABC", 01200, 0, 0xAA55, 1, 14, 5678);
     /* Check the type */
     REQUIRE(msg->getType() == message_type_position_report);
     /* Check the parameters */
@@ -136,6 +136,9 @@ TEST_CASE("Position Report Message Check") {
     REQUIRE(msg->getVertVel() == 1);
     REQUIRE(msg->getCallSign() == "ZK-ABC");
     REQUIRE(msg->getSquawk() == 01200);
+    REQUIRE(msg->getFlags() == 0xAA55);
+    REQUIRE(msg->getAltitudeType() == 1);
+    REQUIRE(msg->getEmitterType() == 14);
     /* Convert to bl and back */
     msg->setId(2563);
     auto bl = msg->getPacked();
@@ -155,6 +158,9 @@ TEST_CASE("Position Report Message Check") {
     REQUIRE(decoded->getVertVel() == 1);
     REQUIRE(decoded->getCallSign() == "ZK-ABC");
     REQUIRE(decoded->getSquawk() == 01200);
+    REQUIRE(decoded->getFlags() == 0xAA55);
+    REQUIRE(decoded->getAltitudeType() == 1);
+    REQUIRE(decoded->getEmitterType() == 14);
     auto decoded_generic = fss_message::decode(bl);
     /* Check the type */
     REQUIRE(decoded_generic->getType() == message_type_position_report);
@@ -415,5 +421,36 @@ TEST_CASE("Server List Message Check") {
     delete decoded_generic;
     delete bl;
     delete decoded;
+    delete msg;
+}
+
+TEST_CASE("Identity (Non-Aircraft) Message Check") {
+    /* Create a test identity */
+    auto msg = new fss_message_identity_non_aircraft();
+    /* Check the type */
+    REQUIRE(msg->getType() == message_type_identity_non_aircraft);
+    /* Checking the capabilities */
+    msg->addCapability(12);
+    REQUIRE(msg->getCapability(13) == false);
+    REQUIRE(msg->getCapability(12) == true);
+    REQUIRE(msg->getCapability(11) == false);
+    /* Convert to bl and back */
+    msg->setId(2563);
+    auto bl = msg->getPacked();
+    REQUIRE(bl != nullptr);
+    auto decoded = new fss_message_identity_non_aircraft(2563, bl);
+    /* Check the type */
+    REQUIRE(decoded->getType() == message_type_identity_non_aircraft);
+    /* Check input == output */
+    REQUIRE(decoded->getId() == 2563);
+    REQUIRE(decoded->getCapability(13) == false);
+    REQUIRE(decoded->getCapability(12) == true);
+    REQUIRE(decoded->getCapability(11) == false);
+    delete decoded;
+    auto decoded_generic = fss_message::decode(bl);
+    REQUIRE(decoded_generic->getType() == message_type_identity_non_aircraft);
+    REQUIRE(decoded_generic->getId() == 2563);
+    delete decoded_generic;
+    delete bl;
     delete msg;
 }
