@@ -137,14 +137,14 @@ convert_to_http(const char *address, int port, bool https)
     char *result = NULL;
     if (default_port)
     {
-        if (asprintf(&result, "%s://%s/", https ? "https" : "http", address) < 0)
+        if (asprintf(&result, "%s://%s", https ? "https" : "http", address) < 0)
         {
             result = NULL;
         }
     }
     else
     {
-        if (asprintf(&result, "%s://%s:%i/", https ? "https" : "http", address, port) < 0)
+        if (asprintf(&result, "%s://%s:%i", https ? "https" : "http", address, port) < 0)
         {
             result = NULL;
         }
