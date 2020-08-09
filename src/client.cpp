@@ -1,4 +1,5 @@
 #include "fss-client.hpp"
+#include "fss-transport.hpp"
 
 #include <iostream>
 #include <fstream>
@@ -161,6 +162,11 @@ flight_safety_system::client::fss_client::connectionStatusChange(flight_safety_s
 }
 
 void
+flight_safety_system::client::fss_client::handleSMMSettings(flight_safety_system::transport::fss_message_smm_settings *msg)
+{
+}
+
+void
 flight_safety_system::client::fss_client::notifyConnectionStatus()
 {
     switch (this->servers.size())
@@ -315,7 +321,7 @@ fss_server::processMessage(fss_transport::fss_message *msg)
             } break;
             case fss_transport::message_type_smm_settings:
             {
-                /* TODO */
+                this->getClient()->handleSMMSettings((fss_transport::fss_message_smm_settings *)msg);
             } break;
         }
     }
