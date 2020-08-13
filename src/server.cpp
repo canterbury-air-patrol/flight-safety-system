@@ -382,7 +382,7 @@ int main(int argc, char *argv[])
             delete rtt_req;
         }
         /* Send Config settings to all clients */
-        if (counter == 30)
+        if ((counter % 15) == 0)
         {
             /* Send all the known fss servers */
             auto known_servers = dbc->get_active_fss_servers();
