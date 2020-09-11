@@ -203,6 +203,10 @@ fss_client::sendSMMSettings()
 void
 fss_client::processMessage(fss_transport::fss_message *msg)
 {
+    if (msg == nullptr)
+    {
+        return;
+    }
 #ifdef DEBUG
     std::cout << "Got message " << msg->getType() << std::endl;
 #endif

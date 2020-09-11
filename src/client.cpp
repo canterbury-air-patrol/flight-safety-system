@@ -269,6 +269,10 @@ fss_server::reconnect()
 void
 fss_server::processMessage(fss_transport::fss_message *msg)
 {
+    if (msg == nullptr)
+    {
+        return;
+    }
 #ifdef DEBUG
     std::cout << "Got message " << msg->getType() << std::endl;
 #endif
