@@ -53,6 +53,8 @@ typedef enum {
     asset_command_disarm,
     /* Adjust altitude (climb or descend to supplied height) */
     asset_command_altitude,
+    /* Enter Manual Flight Mode */
+    asset_command_manual,
 } fss_asset_command;
 
 class buf_len {

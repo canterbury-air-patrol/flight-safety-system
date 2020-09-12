@@ -53,6 +53,8 @@ public:
             this->command = transport::asset_command_altitude;
         } else if (t_cmd == "TERM") {
             this->command = transport::asset_command_terminate;
+        } else if (t_cmd == "MAN") {
+            this->command = transport::asset_command_manual;
         }
     };
     uint64_t getDBId() { return this->dbid; };
