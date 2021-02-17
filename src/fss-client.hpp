@@ -23,6 +23,7 @@ protected:
     virtual void connectionStatusChange(flight_safety_system::client::connection_status status);
 public:
     explicit fss_client(const std::string &config_file);
+    explicit fss_client();
     virtual ~fss_client();
     void connectTo(const std::string &t_address, uint16_t t_port);
     virtual void attemptReconnect();
@@ -43,7 +44,7 @@ protected:
     uint64_t last_tried{0};
     uint64_t retry_count{0};
 public:
-    fss_server(fss_client *t_client, flight_safety_system::transport::fss_connection *t_conn, const std::string &t_address, uint16_t t_port);
+    fss_server(fss_client *t_client, const std::string &t_address, uint16_t t_port);
     fss_server(const fss_server &other) : flight_safety_system::transport::fss_message_cb(other.conn), client(other.client), address(other.address), port(other.port) {};
     fss_server& operator=(const fss_server& other)
     {
@@ -62,7 +63,9 @@ public:
     virtual std::string getAddress() { return this->address; };
     virtual uint16_t getPort() { return this->port; };
     virtual bool reconnect();
+    virtual bool connected() { return this->conn != nullptr; };
     virtual fss_client *getClient() { return this->client; };
+    virtual void sendIdentify();
 };
 }
 }

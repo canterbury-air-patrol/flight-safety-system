@@ -36,6 +36,10 @@ flight_safety_system::client::fss_client::fss_client(const std::string &t_fileNa
     }
 }
 
+flight_safety_system::client::fss_client::fss_client()
+{
+}
+
 flight_safety_system::client::fss_client::~fss_client()
 {
     while (!this->reconnect_servers.empty())
@@ -56,26 +60,14 @@ flight_safety_system::client::fss_client::~fss_client()
 void
 flight_safety_system::client::fss_client::connectTo(const std::string &t_address, uint16_t t_port)
 {
-    auto conn = new fss_transport::fss_connection();
-    if (conn->connectTo(t_address, t_port))
-    {
-        auto ident_msg = new fss_transport::fss_message_identity(asset_name);
-        conn->sendMsg(ident_msg);
-        delete ident_msg;
-    }
-    else
-    {
-        delete conn;
-        conn = nullptr;
-    }
-    auto server = new fss_server(this, conn, t_address, t_port);
-    if (conn == nullptr)
-    {
-        reconnect_servers.push_back(server);
-    }
-    else
+    auto server = new fss_server(this, t_address, t_port);
+    if (server->connected())
     {
         servers.push_back(server);
+    }
+    else
+    {
+        reconnect_servers.push_back(server);
     }
 }
 
@@ -191,11 +183,12 @@ flight_safety_system::client::fss_client::serverRequiresReconnect(fss_server *se
     this->notifyConnectionStatus();
 }
 
-fss_server::fss_server(fss_client *t_client, fss_transport::fss_connection *t_conn, const std::string &t_address, uint16_t t_port) : fss_message_cb(t_conn), client(t_client), address(t_address), port(t_port)
+fss_server::fss_server(fss_client *t_client, const std::string &t_address, uint16_t t_port) : fss_message_cb(nullptr), client(t_client), address(t_address), port(t_port)
 {
-    if (conn != nullptr)
+    if (this->reconnect())
     {
-        conn->setHandler(this);
+        this->conn->setHandler(this);
+        this->sendIdentify();
     }
 }
 
@@ -206,6 +199,14 @@ fss_server::~fss_server()
         delete this->conn;
         this->conn = nullptr;
     }
+}
+
+void
+fss_server::sendIdentify()
+{
+        auto ident_msg = new fss_transport::fss_message_identity(this->client->getAssetName());
+        conn->sendMsg(ident_msg);
+        delete ident_msg;
 }
 
 bool
@@ -255,9 +256,7 @@ fss_server::reconnect()
         else
         {
             conn->setHandler(this);
-            auto ident_msg = new fss_transport::fss_message_identity(this->client->getAssetName());
-            conn->sendMsg(ident_msg);
-            delete ident_msg;
+            this->sendIdentify();
             this->retry_count = 0;
             this->last_tried = 0;
             return true;
