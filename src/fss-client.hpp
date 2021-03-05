@@ -25,7 +25,7 @@ public:
     explicit fss_client(const std::string &config_file);
     explicit fss_client();
     virtual ~fss_client();
-    void connectTo(const std::string &t_address, uint16_t t_port);
+    void connectTo(const std::string &t_address, uint16_t t_port, bool connect);
     virtual void attemptReconnect();
     virtual void sendMsgAll(flight_safety_system::transport::fss_message *msg);
     virtual std::string getAssetName() { return this->asset_name; };
@@ -44,7 +44,7 @@ protected:
     uint64_t last_tried{0};
     uint64_t retry_count{0};
 public:
-    fss_server(fss_client *t_client, const std::string &t_address, uint16_t t_port);
+    fss_server(fss_client *t_client, const std::string &t_address, uint16_t t_port, bool connect);
     fss_server(const fss_server &other) : flight_safety_system::transport::fss_message_cb(other.conn), client(other.client), address(other.address), port(other.port) {};
     fss_server& operator=(const fss_server& other)
     {

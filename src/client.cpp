@@ -32,7 +32,7 @@ flight_safety_system::client::fss_client::fss_client(const std::string &t_fileNa
     /* Load all the known servers from the config */
     for (unsigned int idx = 0; idx < config["servers"].size(); idx++)
     {
-        this->connectTo(config["servers"][idx]["address"].asString(), config["servers"][idx]["port"].asInt());
+        this->connectTo(config["servers"][idx]["address"].asString(), config["servers"][idx]["port"].asInt(), false);
     }
 }
 
@@ -58,9 +58,9 @@ flight_safety_system::client::fss_client::~fss_client()
 }
 
 void
-flight_safety_system::client::fss_client::connectTo(const std::string &t_address, uint16_t t_port)
+flight_safety_system::client::fss_client::connectTo(const std::string &t_address, uint16_t t_port, bool connect)
 {
-    auto server = new fss_server(this, t_address, t_port);
+    auto server = new fss_server(this, t_address, t_port, connect);
     if (server->connected())
     {
         servers.push_back(server);
@@ -112,7 +112,7 @@ flight_safety_system::client::fss_client::updateServers(fss_transport::fss_messa
     for (auto server_entry: msg->getServers())
     {
         bool exists = false;
-        for(auto server: servers)
+        for(auto server: this->servers)
         {
             if (server->getAddress().compare(server_entry.first) == 0 && server->getPort() == server_entry.second)
             {
@@ -122,7 +122,7 @@ flight_safety_system::client::fss_client::updateServers(fss_transport::fss_messa
         }
         if (!exists)
         {
-            for(auto server: servers)
+            for(auto server: this->reconnect_servers)
             {
                 if(server->getAddress().compare(server_entry.first) == 0 && server->getPort() == server_entry.second)
                 {
@@ -133,7 +133,7 @@ flight_safety_system::client::fss_client::updateServers(fss_transport::fss_messa
         }
         if (!exists)
         {
-            this->connectTo(server_entry.first, server_entry.second);
+            this->connectTo(server_entry.first, server_entry.second, false);
         }
     }
 }
@@ -183,9 +183,9 @@ flight_safety_system::client::fss_client::serverRequiresReconnect(fss_server *se
     this->notifyConnectionStatus();
 }
 
-fss_server::fss_server(fss_client *t_client, const std::string &t_address, uint16_t t_port) : fss_message_cb(nullptr), client(t_client), address(t_address), port(t_port)
+fss_server::fss_server(fss_client *t_client, const std::string &t_address, uint16_t t_port, bool connect) : fss_message_cb(nullptr), client(t_client), address(t_address), port(t_port)
 {
-    if (this->reconnect())
+    if (connect && this->reconnect())
     {
         this->conn->setHandler(this);
         this->sendIdentify();
