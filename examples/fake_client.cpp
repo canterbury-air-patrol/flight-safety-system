@@ -59,4 +59,6 @@ int main(int argc, char *argv[])
             delete msg_pos;
         }
     }
+
+    delete client;
 }
