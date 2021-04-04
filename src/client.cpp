@@ -36,31 +36,10 @@ flight_safety_system::client::fss_client::fss_client(const std::string &t_fileNa
     }
 }
 
-flight_safety_system::client::fss_client::fss_client()
-{
-}
-
-flight_safety_system::client::fss_client::~fss_client()
-{
-    while (!this->reconnect_servers.empty())
-    {
-        auto server = this->reconnect_servers.front();
-        this->reconnect_servers.pop_front();
-        delete server;
-    }
-    while (!this->servers.empty())
-    {
-        auto server = this->servers.front();
-        this->servers.pop_front();
-        delete server;
-    }
-
-}
-
 void
 flight_safety_system::client::fss_client::connectTo(const std::string &t_address, uint16_t t_port, bool connect)
 {
-    auto server = new fss_server(this, t_address, t_port, connect);
+    auto server = std::make_shared<fss_server>(this, t_address, t_port, connect);
     if (server->connected())
     {
         servers.push_back(server);
@@ -74,9 +53,9 @@ flight_safety_system::client::fss_client::connectTo(const std::string &t_address
 void
 flight_safety_system::client::fss_client::attemptReconnect()
 {
-    std::list<fss_server *> reconnected;
+    std::list<std::shared_ptr<fss_server>> reconnected;
     bool any_connected = false;
-    for (auto server : this->reconnect_servers)
+    for (auto const &server : this->reconnect_servers)
     {
         if(server->reconnect())
         {
@@ -100,7 +79,7 @@ flight_safety_system::client::fss_client::attemptReconnect()
 void
 flight_safety_system::client::fss_client::sendMsgAll(fss_transport::fss_message *msg)
 {
-    for (auto server: this->servers)
+    for (auto const &server: this->servers)
     {
         server->getConnection()->sendMsg(msg);
     }
@@ -109,10 +88,10 @@ flight_safety_system::client::fss_client::sendMsgAll(fss_transport::fss_message 
 void
 flight_safety_system::client::fss_client::updateServers(fss_transport::fss_message_server_list *msg)
 {
-    for (auto server_entry: msg->getServers())
+    for (auto const &server_entry: msg->getServers())
     {
         bool exists = false;
-        for(auto server: this->servers)
+        for(auto const &server: this->servers)
         {
             if (server->getAddress().compare(server_entry.first) == 0 && server->getPort() == server_entry.second)
             {
@@ -122,7 +101,7 @@ flight_safety_system::client::fss_client::updateServers(fss_transport::fss_messa
         }
         if (!exists)
         {
-            for(auto server: this->reconnect_servers)
+            for(auto const &server: this->reconnect_servers)
             {
                 if(server->getAddress().compare(server_entry.first) == 0 && server->getPort() == server_entry.second)
                 {
@@ -136,26 +115,6 @@ flight_safety_system::client::fss_client::updateServers(fss_transport::fss_messa
             this->connectTo(server_entry.first, server_entry.second, false);
         }
     }
-}
-
-void
-flight_safety_system::client::fss_client::handleCommand(fss_transport::fss_message_asset_command *msg)
-{
-}
-
-void
-flight_safety_system::client::fss_client::handlePositionReport(fss_transport::fss_message_position_report *msg)
-{
-}
-
-void
-flight_safety_system::client::fss_client::connectionStatusChange(flight_safety_system::client::connection_status status)
-{
-}
-
-void
-flight_safety_system::client::fss_client::handleSMMSettings(flight_safety_system::transport::fss_message_smm_settings *msg)
-{
 }
 
 void
@@ -176,14 +135,14 @@ flight_safety_system::client::fss_client::notifyConnectionStatus()
 }
 
 void
-flight_safety_system::client::fss_client::serverRequiresReconnect(fss_server *server)
+flight_safety_system::client::fss_client::serverRequiresReconnect(const std::shared_ptr<fss_server> &server)
 {
     this->servers.remove(server);
     this->reconnect_servers.push_back(server);
     this->notifyConnectionStatus();
 }
 
-fss_server::fss_server(fss_client *t_client, const std::string &t_address, uint16_t t_port, bool connect) : fss_message_cb(nullptr), client(t_client), address(t_address), port(t_port)
+fss_server::fss_server(fss_client *t_client, std::string t_address, uint16_t t_port, bool connect) : fss_message_cb(nullptr), client(t_client), address(std::move(t_address)), port(t_port)
 {
     if (connect && this->reconnect())
     {
@@ -204,16 +163,15 @@ fss_server::~fss_server()
 void
 fss_server::sendIdentify()
 {
-        auto ident_msg = new fss_transport::fss_message_identity(this->client->getAssetName());
-        conn->sendMsg(ident_msg);
-        delete ident_msg;
+    auto ident_msg = new fss_transport::fss_message_identity(this->client->getAssetName());
+    conn->sendMsg(ident_msg);
+    delete ident_msg;
 }
 
-bool
-fss_server::reconnect()
+auto
+fss_server::reconnect() -> bool
 {
     uint64_t ts = fss_current_timestamp();
-    bool try_now = false;
     uint64_t elapsed_time = ts - this->last_tried;
 
     if (this->conn != nullptr)
@@ -222,30 +180,13 @@ fss_server::reconnect()
         this->conn = nullptr;
     }
 
-    switch (this->retry_count)
-    {
-        case 0:
-            try_now = (elapsed_time > 1000);
-            break;
-        case 1:
-            try_now = (elapsed_time > 2000);
-            break;
-        case 2:
-            try_now = (elapsed_time > 4000);
-            break;
-        case 3:
-            try_now = (elapsed_time > 8000);
-            break;
-        case 4:
-            try_now = (elapsed_time > 15000);
-            break;
-        default:
-            try_now = (elapsed_time > 30000);
-            break;
-    }
-    if (try_now)
+    if (elapsed_time > this->retry_delay)
     {
         this->retry_count++;
+        if (this->retry_delay < retry_delay_cap)
+        {
+            this->retry_delay += this->retry_delay;
+        }
         this->last_tried = ts;
         this->conn = new fss_transport::fss_connection();
         if (!this->conn->connectTo(this->getAddress(), this->getPort()))
@@ -259,6 +200,7 @@ fss_server::reconnect()
             this->sendIdentify();
             this->retry_count = 0;
             this->last_tried = 0;
+            this->retry_delay = retry_delay_start;
             return true;
         }
     }
@@ -278,7 +220,7 @@ fss_server::processMessage(fss_transport::fss_message *msg)
     if (msg->getType() == fss_transport::message_type_closed)
     {
         /* Connection has been closed, schedule reconnection */
-        this->getClient()->serverRequiresReconnect(this);
+        this->getClient()->serverRequiresReconnect(std::shared_ptr<fss_server>(this));
         this->last_tried = 0;
         this->retry_count = 0;
         return;
@@ -306,25 +248,24 @@ fss_server::processMessage(fss_transport::fss_message *msg)
             case fss_transport::message_type_position_report:
             {
                 /* Servers will be relaying position reports, so this is another asset */
-                this->getClient()->handlePositionReport((fss_transport::fss_message_position_report *)msg);
+                this->getClient()->handlePositionReport(dynamic_cast<fss_transport::fss_message_position_report *>(msg));
             } break;
             case fss_transport::message_type_system_status:
             /* Servers don't currently send status reports */
-                break;
             case fss_transport::message_type_search_status:
             /* Servers don't have a search status to report */
                 break;
             case fss_transport::message_type_command:
             {
-                this->getClient()->handleCommand((fss_transport::fss_message_asset_command *)msg);
+                this->getClient()->handleCommand(dynamic_cast<fss_transport::fss_message_asset_command *>(msg));
             } break;
             case fss_transport::message_type_server_list:
             {
-                this->getClient()->updateServers((fss_transport::fss_message_server_list *)msg);
+                this->getClient()->updateServers(dynamic_cast<fss_transport::fss_message_server_list *>(msg));
             } break;
             case fss_transport::message_type_smm_settings:
             {
-                this->getClient()->handleSMMSettings((fss_transport::fss_message_smm_settings *)msg);
+                this->getClient()->handleSMMSettings(dynamic_cast<fss_transport::fss_message_smm_settings *>(msg));
             } break;
         }
     }
