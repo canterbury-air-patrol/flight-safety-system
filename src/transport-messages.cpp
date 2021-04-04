@@ -432,10 +432,10 @@ fss_message_identity_non_aircraft::getCapability(uint8_t cap_id)
     return !!(this->capabilities & ((uint64_t)(1) << cap_id));
 }
 
-fss_message *
+std::shared_ptr<fss_message>
 fss_message::decode(buf_len *bl)
 {
-    fss_message *msg = nullptr;
+    std::shared_ptr<fss_message> msg = nullptr;
     char *data = bl->getData();
     fss_message_type type = (fss_message_type) ntohs(*(uint16_t *)(data + sizeof(uint16_t)));
     uint64_t msg_id = ntohll (*(uint64_t *)(data + sizeof(uint16_t) + sizeof(uint16_t)));
@@ -446,34 +446,34 @@ fss_message::decode(buf_len *bl)
         case message_type_closed:
             break;
         case message_type_identity:
-            msg = new fss_message_identity(msg_id, bl);
+            msg = std::make_shared<fss_message_identity>(msg_id, bl);
             break;
         case message_type_rtt_request:
-            msg = new fss_message_rtt_request(msg_id, bl);
+            msg = std::make_shared<fss_message_rtt_request>(msg_id, bl);
             break;
         case message_type_rtt_response:
-            msg = new fss_message_rtt_response(msg_id, bl);
+            msg = std::make_shared<fss_message_rtt_response>(msg_id, bl);
             break;
         case message_type_position_report:
-            msg = new fss_message_position_report(msg_id, bl);
+            msg = std::make_shared<fss_message_position_report>(msg_id, bl);
             break;
         case message_type_system_status:
-            msg = new fss_message_system_status(msg_id, bl);
+            msg = std::make_shared<fss_message_system_status>(msg_id, bl);
             break;
         case message_type_search_status:
-            msg = new fss_message_search_status(msg_id, bl);
+            msg = std::make_shared<fss_message_search_status>(msg_id, bl);
             break;
         case message_type_command:
-            msg = new fss_message_asset_command(msg_id, bl);
+            msg = std::make_shared<fss_message_asset_command>(msg_id, bl);
             break;
         case message_type_server_list:
-            msg = new fss_message_server_list(msg_id, bl);
+            msg = std::make_shared<fss_message_server_list>(msg_id, bl);
             break;
         case message_type_smm_settings:
-            msg = new fss_message_smm_settings(msg_id, bl);
+            msg = std::make_shared<fss_message_smm_settings>(msg_id, bl);
             break;
         case message_type_identity_non_aircraft:
-            msg = new fss_message_identity_non_aircraft(msg_id, bl);
+            msg = std::make_shared<fss_message_identity_non_aircraft>(msg_id, bl);
             break;
     }
     

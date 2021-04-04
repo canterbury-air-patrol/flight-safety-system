@@ -42,10 +42,9 @@ TEST_CASE("Listen Socket") {
     auto conn = new transport::fss_connection();
     REQUIRE(conn != nullptr);
     REQUIRE(conn->connectTo("localhost", 20202));
-    auto send_msg = new transport::fss_message_identity("testClient");
+    auto send_msg = std::make_shared<transport::fss_message_identity>("testClient");
     conn->sendMsg(send_msg);
 
-    delete send_msg;
     delete conn;
 
     sleep(1);
@@ -56,13 +55,9 @@ TEST_CASE("Listen Socket") {
     REQUIRE(msg != nullptr);
     REQUIRE(msg->getType() == transport::message_type_identity);
 
-    delete msg;
-
     msg = client_conn->getMsg();
     REQUIRE(msg != nullptr);
     REQUIRE(msg->getType() == transport::message_type_closed);
-
-    delete msg;
 
     delete client_conn;
     client_conn = nullptr;

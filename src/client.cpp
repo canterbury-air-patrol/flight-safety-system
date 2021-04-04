@@ -3,6 +3,7 @@
 
 #include <iostream>
 #include <fstream>
+#include <memory>
 #include <string>
 #include <list>
 
@@ -77,7 +78,7 @@ flight_safety_system::client::fss_client::attemptReconnect()
 }
 
 void
-flight_safety_system::client::fss_client::sendMsgAll(fss_transport::fss_message *msg)
+flight_safety_system::client::fss_client::sendMsgAll(std::shared_ptr<fss_transport::fss_message> msg)
 {
     for (auto const &server: this->servers)
     {
@@ -86,7 +87,7 @@ flight_safety_system::client::fss_client::sendMsgAll(fss_transport::fss_message 
 }
 
 void
-flight_safety_system::client::fss_client::updateServers(fss_transport::fss_message_server_list *msg)
+flight_safety_system::client::fss_client::updateServers(std::shared_ptr<fss_transport::fss_message_server_list> msg)
 {
     for (auto const &server_entry: msg->getServers())
     {
@@ -163,9 +164,8 @@ fss_server::~fss_server()
 void
 fss_server::sendIdentify()
 {
-    auto ident_msg = new fss_transport::fss_message_identity(this->client->getAssetName());
+    auto ident_msg = std::make_shared<fss_transport::fss_message_identity>(this->client->getAssetName());
     conn->sendMsg(ident_msg);
-    delete ident_msg;
 }
 
 auto
@@ -208,7 +208,7 @@ fss_server::reconnect() -> bool
 }
 
 void
-fss_server::processMessage(fss_transport::fss_message *msg)
+fss_server::processMessage(std::shared_ptr<fss_transport::fss_message> msg)
 {
     if (msg == nullptr)
     {
@@ -237,9 +237,8 @@ fss_server::processMessage(fss_transport::fss_message *msg)
             case fss_transport::message_type_rtt_request:
             {
                 /* Send a response */
-                auto reply_msg = new fss_transport::fss_message_rtt_response(msg->getId());
+                auto reply_msg = std::make_shared<fss_transport::fss_message_rtt_response>(msg->getId());
                 conn->sendMsg(reply_msg);
-                delete reply_msg;
             }
                 break;
             case fss_transport::message_type_rtt_response:
@@ -248,7 +247,11 @@ fss_server::processMessage(fss_transport::fss_message *msg)
             case fss_transport::message_type_position_report:
             {
                 /* Servers will be relaying position reports, so this is another asset */
-                this->getClient()->handlePositionReport(dynamic_cast<fss_transport::fss_message_position_report *>(msg));
+                auto position_msg = std::dynamic_pointer_cast<fss_transport::fss_message_position_report>(msg);
+                if (position_msg != nullptr)
+                {
+                    this->getClient()->handlePositionReport(position_msg);
+                }
             } break;
             case fss_transport::message_type_system_status:
             /* Servers don't currently send status reports */
@@ -257,15 +260,27 @@ fss_server::processMessage(fss_transport::fss_message *msg)
                 break;
             case fss_transport::message_type_command:
             {
-                this->getClient()->handleCommand(dynamic_cast<fss_transport::fss_message_asset_command *>(msg));
+                auto command_msg = std::dynamic_pointer_cast<fss_transport::fss_message_asset_command>(msg);
+                if (command_msg != nullptr)
+                {
+                    this->getClient()->handleCommand(command_msg);
+                }
             } break;
             case fss_transport::message_type_server_list:
             {
-                this->getClient()->updateServers(dynamic_cast<fss_transport::fss_message_server_list *>(msg));
+                auto server_list_msg = std::dynamic_pointer_cast<fss_transport::fss_message_server_list>(msg);
+                if (server_list_msg != nullptr)
+                {
+                    this->getClient()->updateServers(server_list_msg);
+                }
             } break;
             case fss_transport::message_type_smm_settings:
             {
-                this->getClient()->handleSMMSettings(dynamic_cast<fss_transport::fss_message_smm_settings *>(msg));
+                auto smm_settings_msg = std::dynamic_pointer_cast<fss_transport::fss_message_smm_settings>(msg);
+                if (smm_settings_msg != nullptr)
+                {
+                    this->getClient()->handleSMMSettings(smm_settings_msg);
+                }
             } break;
         }
     }

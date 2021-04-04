@@ -27,13 +27,13 @@ public:
     virtual ~fss_client() {};
     void connectTo(const std::string &t_address, uint16_t t_port, bool connect);
     virtual void attemptReconnect();
-    virtual void sendMsgAll(flight_safety_system::transport::fss_message *msg);
+    virtual void sendMsgAll(std::shared_ptr<flight_safety_system::transport::fss_message> msg);
     virtual auto getAssetName() -> std::string { return this->asset_name; };
     virtual void serverRequiresReconnect(const std::shared_ptr<fss_server> &server);
-    virtual void updateServers(flight_safety_system::transport::fss_message_server_list *msg);
-    virtual void handleCommand(flight_safety_system::transport::fss_message_asset_command *msg) {};
-    virtual void handlePositionReport(flight_safety_system::transport::fss_message_position_report *msg) {};
-    virtual void handleSMMSettings(flight_safety_system::transport::fss_message_smm_settings *msg) {};
+    virtual void updateServers(std::shared_ptr<flight_safety_system::transport::fss_message_server_list> msg);
+    virtual void handleCommand(std::shared_ptr<flight_safety_system::transport::fss_message_asset_command> msg) {};
+    virtual void handlePositionReport(std::shared_ptr<flight_safety_system::transport::fss_message_position_report> msg) {};
+    virtual void handleSMMSettings(std::shared_ptr<flight_safety_system::transport::fss_message_smm_settings> msg) {};
 };
 
 class fss_server: public flight_safety_system::transport::fss_message_cb {
@@ -62,7 +62,7 @@ public:
         return *this;
     }
     virtual ~fss_server();
-    virtual void processMessage(flight_safety_system::transport::fss_message *message) override;
+    virtual void processMessage(std::shared_ptr<flight_safety_system::transport::fss_message> message) override;
     virtual std::string getAddress() { return this->address; };
     virtual uint16_t getPort() { return this->port; };
     virtual auto reconnect() -> bool;

@@ -103,9 +103,9 @@ private:
 public:
     explicit fss_client(transport::fss_connection *conn);
     virtual ~fss_client();
-    virtual void processMessage(transport::fss_message *message) override;
-    void sendRTTRequest(transport::fss_message_rtt_request *rtt_req);
-    void sendMsg(transport::fss_message *msg);
+    virtual void processMessage(std::shared_ptr<transport::fss_message> message) override;
+    void sendRTTRequest(std::shared_ptr<transport::fss_message_rtt_request> rtt_req);
+    void sendMsg(std::shared_ptr<transport::fss_message> msg);
     void sendSMMSettings();
     void sendCommand();
     void disconnect();

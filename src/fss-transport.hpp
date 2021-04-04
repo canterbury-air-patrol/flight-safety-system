@@ -118,7 +118,7 @@ public:
         }
         return *this;
     }
-    virtual void processMessage(fss_message *message) = 0;
+    virtual void processMessage(std::shared_ptr<fss_message> message) = 0;
     virtual fss_connection *getConnection() { return this->conn; };
 };
 
@@ -128,9 +128,9 @@ protected:
     int fd;
     uint64_t last_msg_id;
     fss_message_cb *handler;
-    std::queue<fss_message *> messages;
+    std::queue<std::shared_ptr<fss_message>> messages;
     std::thread recv_thread;
-    fss_message *recvMsg();
+    std::shared_ptr<fss_message> recvMsg();
     uint64_t getMessageId();
     std::mutex send_lock;
     virtual bool sendMsg(buf_len *bl);
@@ -142,8 +142,8 @@ public:
     virtual ~fss_connection();
     void setHandler(fss_message_cb *cb);
     bool connectTo(const std::string &address, uint16_t port);
-    bool sendMsg(fss_message *msg);
-    fss_message *getMsg();
+    bool sendMsg(std::shared_ptr<fss_message> msg);
+    std::shared_ptr<fss_message> getMsg();
     virtual void processMessages();
     void disconnect();
 };
@@ -182,7 +182,7 @@ public:
     virtual buf_len *getPacked();
     void createHeader(buf_len *bl);
     void updateSize(buf_len *bl);
-    static fss_message *decode(buf_len *bl);
+    static std::shared_ptr<fss_message> decode(buf_len *bl);
 };
 
 class fss_message_closed: public fss_message {

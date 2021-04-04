@@ -6,6 +6,7 @@
 #include <fstream>
 #include <csignal>
 #include <list>
+#include <memory>
 #include <mutex>
 
 #pragma GCC diagnostic push
@@ -81,7 +82,7 @@ public:
         this->disconnected.push(client);
         this->lock.unlock();
     };
-    void sendMsg(fss_transport::fss_message *msg, fss_client *except = nullptr)
+    void sendMsg(std::shared_ptr<fss_transport::fss_message> msg, fss_client *except = nullptr)
     {
         for (auto client : clients)
         {
@@ -98,7 +99,7 @@ public:
             client->sendSMMSettings();
         }
     };
-    void sendRTTRequest(fss_transport::fss_message_rtt_request *rtt_req)
+    void sendRTTRequest(std::shared_ptr<fss_transport::fss_message_rtt_request> rtt_req)
     {
         for(auto client: this->clients)
         {
@@ -136,7 +137,7 @@ fss_client::~fss_client()
 }
 
 void
-fss_client::sendMsg(fss_transport::fss_message *msg)
+fss_client::sendMsg(std::shared_ptr<fss_transport::fss_message> msg)
 {
     this->conn->sendMsg(msg);
 }
@@ -151,22 +152,21 @@ fss_client::sendCommand()
         /* New command or time to re-send */
         this->last_command_send_ts = ts;
         this->last_command_dbid = ac->getDBId();
-        fss_transport::fss_message_asset_command *msg = nullptr;
+        std::shared_ptr<fss_transport::fss_message_asset_command> msg = nullptr;
         auto command = ac->getCommand();
         switch (command)
         {
             case fss_transport::asset_command_goto:
-                msg = new fss_transport::fss_message_asset_command(command, ac->getTimeStamp(), ac->getLatitude(), ac->getLongitude());
+                msg = std::make_shared<fss_transport::fss_message_asset_command>(command, ac->getTimeStamp(), ac->getLatitude(), ac->getLongitude());
                 break;
             case fss_transport::asset_command_altitude:
-                msg = new fss_transport::fss_message_asset_command(command, ac->getTimeStamp(), ac->getAltitude());
+                msg = std::make_shared<fss_transport::fss_message_asset_command>(command, ac->getTimeStamp(), ac->getAltitude());
                 break;
             default:
-                msg = new fss_transport::fss_message_asset_command(command, ac->getTimeStamp());
+                msg = std::make_shared<fss_transport::fss_message_asset_command>(command, ac->getTimeStamp());
                 break;
         }
         this->conn->sendMsg(msg);
-        delete msg;
     }
     delete ac;
 }
@@ -180,7 +180,7 @@ fss_client::disconnect()
 }
 
 void
-fss_client::sendRTTRequest(fss_transport::fss_message_rtt_request *rtt_req)
+fss_client::sendRTTRequest(std::shared_ptr<fss_transport::fss_message_rtt_request> rtt_req)
 {
     uint64_t ts = fss_current_timestamp();
     this->conn->sendMsg(rtt_req);
@@ -193,15 +193,14 @@ fss_client::sendSMMSettings()
     smm_settings *smm = dbc->asset_get_smm_settings(this->name);
     if (smm != nullptr)
     {
-        auto settings_msg = new fss_transport::fss_message_smm_settings(smm->getAddress(), smm->getUsername(), smm->getPassword());
+        auto settings_msg = std::make_shared<fss_transport::fss_message_smm_settings>(smm->getAddress(), smm->getUsername(), smm->getPassword());
         this->conn->sendMsg(settings_msg);
-        delete settings_msg;
     }
     delete smm;
 }
 
 void
-fss_client::processMessage(fss_transport::fss_message *msg)
+fss_client::processMessage(std::shared_ptr<fss_transport::fss_message> msg)
 {
     if (msg == nullptr)
     {
@@ -221,23 +220,26 @@ fss_client::processMessage(fss_transport::fss_message *msg)
         /* Only accept identify messages */
         if (msg->getType() == fss_transport::message_type_identity)
         {
-            this->name = ((fss_transport::fss_message_identity *)msg)->getName();
-            this->identified = true;
-            this->aircraft = true;
-            /* send the current command */
-            this->sendCommand();
-            /* send SMM config and servers list */
-            this->sendSMMSettings();
-            /* Send all the known fss servers */
-            auto known_servers = dbc->get_active_fss_servers();
-            auto server_list = new fss_transport::fss_message_server_list();
-            for (auto server_details : known_servers)
+            auto identity_msg = std::dynamic_pointer_cast<fss_transport::fss_message_identity>(msg);
+            if (identity_msg != nullptr)
             {
-                server_list->addServer(server_details->getAddress(),server_details->getPort());
-                delete server_details;
+                this->name = identity_msg->getName();
+                this->identified = true;
+                this->aircraft = true;
+                /* send the current command */
+                this->sendCommand();
+                /* send SMM config and servers list */
+                this->sendSMMSettings();
+                /* Send all the known fss servers */
+                auto known_servers = dbc->get_active_fss_servers();
+                auto server_list = std::make_shared<fss_transport::fss_message_server_list>();
+                for (auto server_details : known_servers)
+                {
+                    server_list->addServer(server_details->getAddress(),server_details->getPort());
+                    delete server_details;
+                }
+                this->conn->sendMsg(server_list);
             }
-            this->conn->sendMsg(server_list);
-            delete server_list;
         }
         else if(msg->getType() == fss_transport::message_type_identity_non_aircraft)
         {
@@ -257,9 +259,8 @@ fss_client::processMessage(fss_transport::fss_message *msg)
             case fss_transport::message_type_rtt_request:
             {
                 /* Send a response */
-                auto reply_msg = new fss_transport::fss_message_rtt_response(msg->getId());
+                auto reply_msg = std::make_shared<fss_transport::fss_message_rtt_response>(msg->getId());
                 conn->sendMsg(reply_msg);
-                delete reply_msg;
             }
                 break;
             case fss_transport::message_type_rtt_response:
@@ -267,11 +268,15 @@ fss_client::processMessage(fss_transport::fss_message *msg)
                 /* Find the original message and calculate the response time */
                 fss_client_rtt *rtt_req = nullptr;
                 uint64_t current_ts = fss_current_timestamp();
-                for(auto req : this->outstanding_rtt_requests)
+                auto rtt_resp_msg = std::dynamic_pointer_cast<fss_transport::fss_message_rtt_response>(msg);
+                if (rtt_resp_msg != nullptr)
                 {
-                    if(req->getRequestId() == ((fss_transport::fss_message_rtt_response *)msg)->getRequestId())
+                    for(auto req : this->outstanding_rtt_requests)
                     {
-                        rtt_req = req;
+                        if(req->getRequestId() == rtt_resp_msg->getRequestId())
+                        {
+                            rtt_req = req;
+                        }
                     }
                 }
                 if (rtt_req)
@@ -299,15 +304,21 @@ fss_client::processMessage(fss_transport::fss_message *msg)
             case fss_transport::message_type_system_status:
             {
                 /* Capture and store in the database */
-                auto status_msg = (fss_transport::fss_message_system_status *)msg;
-                dbc->asset_add_status(this->name, status_msg->getBatRemaining(), status_msg->getBatMAHUsed());
+                auto status_msg = std::dynamic_pointer_cast<fss_transport::fss_message_system_status>(msg);
+                if (status_msg != nullptr)
+                {
+                    dbc->asset_add_status(this->name, status_msg->getBatRemaining(), status_msg->getBatMAHUsed());
+                }
             }
                 break;
             case fss_transport::message_type_search_status:
             {
                 /* Capture and store in the database */
-                auto status_msg = (fss_transport::fss_message_search_status *)msg;
-                dbc->asset_add_search_status(this->name, status_msg->getSearchId(), status_msg->getSearchCompleted(), status_msg->getSearchTotal());
+                auto status_msg = std::dynamic_pointer_cast<fss_transport::fss_message_search_status>(msg);
+                if (status_msg != nullptr)
+                {
+                    dbc->asset_add_search_status(this->name, status_msg->getSearchId(), status_msg->getSearchCompleted(), status_msg->getSearchTotal());
+                }
             }
                 break;
             /* These are server->client only */
@@ -380,24 +391,22 @@ int main(int argc, char *argv[])
         clients->cleanupRemovableClients();
         /* Send RTT messages to all clients */
         {
-            auto rtt_req = new fss_transport::fss_message_rtt_request();
+            auto rtt_req = std::make_shared<fss_transport::fss_message_rtt_request>();
             clients->sendRTTRequest(rtt_req);
             clients->sendCommand();
-            delete rtt_req;
         }
         /* Send Config settings to all clients */
         if ((counter % 15) == 0)
         {
             /* Send all the known fss servers */
             auto known_servers = dbc->get_active_fss_servers();
-            auto server_list = new fss_transport::fss_message_server_list();
+            auto server_list = std::make_shared<fss_transport::fss_message_server_list>();
             for (auto server_details : known_servers)
             {
                 server_list->addServer(server_details->getAddress(),server_details->getPort());
                 delete server_details;
             }
             clients->sendMsg(server_list);
-            delete server_list;
             clients->sendSMMSettings();
         }
         counter++;

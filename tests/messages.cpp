@@ -1,4 +1,5 @@
 #include "config.h"
+#include <memory>
 
 #define CATCH_CONFIG_MAIN  // This tells Catch to provide a main() - only do this in one cpp file
 #ifdef HAVE_CATCH2_CATCH_HPP
@@ -27,7 +28,6 @@ TEST_CASE("Close Connection Check") {
     REQUIRE(bl != nullptr);
     auto decoded_generic = fss_message::decode(bl);
     REQUIRE(decoded_generic == nullptr);
-    delete decoded_generic;
 
     /* Check the base fss_message functionality */
     REQUIRE(std::isnan(msg->getLatitude()));
@@ -60,8 +60,9 @@ TEST_CASE("Identity Message Check") {
     auto decoded_generic = fss_message::decode(bl);
     REQUIRE(decoded_generic->getType() == message_type_identity);
     REQUIRE(decoded_generic->getId() == 2563);
-    REQUIRE(((fss_message_identity *)decoded_generic)->getName() == "test1");
-    delete decoded_generic;
+    auto decoded_generic_identity = std::dynamic_pointer_cast<fss_message_identity>(decoded_generic);
+    REQUIRE(decoded_generic_identity != nullptr);
+    REQUIRE(decoded_generic_identity->getName() == "test1");
     delete bl;
     delete msg;
 }
@@ -87,7 +88,6 @@ TEST_CASE("RTT Request Message Check") {
     /* Check the id */
     REQUIRE(decoded_generic->getId() == 2563);
     delete bl;
-    delete decoded_generic;
     delete msg;
 }
 
@@ -114,8 +114,8 @@ TEST_CASE("RTT Response Message Check") {
     REQUIRE(decoded_generic->getType() == message_type_rtt_response);
     /* Check input == output */
     REQUIRE(decoded_generic->getId() == 2563);
-    REQUIRE(((fss_message_rtt_response *)decoded_generic)->getRequestId() == 8765);
-    delete decoded_generic;
+    auto decoded_generic_rtt_resp = std::dynamic_pointer_cast<fss_message_rtt_response>(decoded_generic);
+    REQUIRE((decoded_generic_rtt_resp)->getRequestId() == 8765);
     delete bl;
     delete msg;
 }
@@ -170,7 +170,6 @@ TEST_CASE("Position Report Message Check") {
     REQUIRE(decoded_generic->getLongitude() == 172.0);
     REQUIRE(decoded_generic->getAltitude() == 1234);
     REQUIRE(decoded_generic->getTimeStamp() == 5678);
-    delete decoded_generic;
     delete bl;
     delete decoded;
     delete msg;
@@ -200,9 +199,10 @@ TEST_CASE("System Status Message Check") {
     REQUIRE(decoded_generic->getType() == message_type_system_status);
     /* Check input == output */
     REQUIRE(decoded_generic->getId() == 2563);
-    REQUIRE(((fss_message_system_status *)decoded_generic)->getBatRemaining() == 99);
-    REQUIRE(((fss_message_system_status *)decoded_generic)->getBatMAHUsed() == 1200);
-    delete decoded_generic;
+    auto decoded_generic_status = std::dynamic_pointer_cast<fss_message_system_status>(decoded_generic);
+    REQUIRE(decoded_generic_status != nullptr);
+    REQUIRE(decoded_generic_status->getBatRemaining() == 99);
+    REQUIRE(decoded_generic_status->getBatMAHUsed() == 1200);
     delete bl;
     delete decoded;
     delete msg;
@@ -235,10 +235,11 @@ TEST_CASE("Search Status Message Check") {
     REQUIRE(decoded_generic->getType() == message_type_search_status);
     /* Check input == output */
     REQUIRE(decoded_generic->getId() == 2563);
-    REQUIRE(((fss_message_search_status *)decoded_generic)->getSearchId() == 1234);
-    REQUIRE(((fss_message_search_status *)decoded_generic)->getSearchCompleted() == 5678);
-    REQUIRE(((fss_message_search_status *)decoded_generic)->getSearchTotal() == 91011);
-    delete decoded_generic;
+    auto decoded_generic_search = std::dynamic_pointer_cast<fss_message_search_status>(decoded_generic);
+    REQUIRE(decoded_generic_search != nullptr);
+    REQUIRE(decoded_generic_search->getSearchId() == 1234);
+    REQUIRE(decoded_generic_search->getSearchCompleted() == 5678);
+    REQUIRE(decoded_generic_search->getSearchTotal() == 91011);
     delete bl;
     delete decoded;
     delete msg;
@@ -268,9 +269,9 @@ TEST_CASE("Asset Command Message Check - Basic") {
     REQUIRE(decoded_generic->getType() == message_type_command);
     /* Check input == output */
     REQUIRE(decoded_generic->getId() == 2563);
-    REQUIRE(((fss_message_asset_command *)decoded_generic)->getCommand() == asset_command_rtl);
-    REQUIRE(decoded_generic->getTimeStamp() == 1234);
-    delete decoded_generic;
+    auto decoded_generic_command = std::dynamic_pointer_cast<fss_message_asset_command>(decoded_generic);
+    REQUIRE(decoded_generic_command->getCommand() == asset_command_rtl);
+    REQUIRE(decoded_generic_command->getTimeStamp() == 1234);
     delete bl;
     delete decoded;
     delete msg;
@@ -304,11 +305,12 @@ TEST_CASE("Asset Command Message Check - Position") {
     REQUIRE(decoded->getType() == message_type_command);
     /* Check input == output */
     REQUIRE(decoded_generic->getId() == 2563);
-    REQUIRE(((fss_message_asset_command *)decoded_generic)->getCommand() == asset_command_goto);
+    auto decoded_generic_command = std::dynamic_pointer_cast<fss_message_asset_command>(decoded_generic);
+    REQUIRE(decoded_generic_command != nullptr);
+    REQUIRE(decoded_generic_command->getCommand() == asset_command_goto);
     REQUIRE(decoded_generic->getTimeStamp() == 1234);
     REQUIRE(decoded_generic->getLatitude() == -43.5);
     REQUIRE(decoded_generic->getLongitude() == 172.0);
-    delete decoded_generic;
     delete bl;
     delete decoded;
     delete msg;
@@ -340,10 +342,10 @@ TEST_CASE("Asset Command Message Check - Altitude") {
     REQUIRE(decoded_generic->getType() == message_type_command);
     /* Check input == output */
     REQUIRE(decoded_generic->getId() == 2563);
-    REQUIRE(((fss_message_asset_command *)decoded_generic)->getCommand() == asset_command_altitude);
+    auto decoded_generic_command = std::dynamic_pointer_cast<fss_message_asset_command>(decoded_generic);
+    REQUIRE(decoded_generic_command->getCommand() == asset_command_altitude);
     REQUIRE(decoded_generic->getTimeStamp() == 1234);
     REQUIRE(decoded_generic->getAltitude() == 5678);
-    delete decoded_generic;
     delete bl;
     delete decoded;
     delete msg;
@@ -375,10 +377,11 @@ TEST_CASE("SMM Settings Message Check") {
     REQUIRE(decoded_generic->getType() == message_type_smm_settings);
     /* Check input == output */
     REQUIRE(decoded_generic->getId() == 2563);
-    REQUIRE(((fss_message_smm_settings *)decoded_generic)->getServerURL() == "https://localhost/");
-    REQUIRE(((fss_message_smm_settings *)decoded_generic)->getUsername() == "asset");
-    REQUIRE(((fss_message_smm_settings *)decoded_generic)->getPassword() == "password1");
-    delete decoded_generic;
+    auto decoded_generic_smm = std::dynamic_pointer_cast<fss_message_smm_settings>(decoded_generic);
+    REQUIRE(decoded_generic_smm != nullptr);
+    REQUIRE(decoded_generic_smm->getServerURL() == "https://localhost/");
+    REQUIRE(decoded_generic_smm->getUsername() == "asset");
+    REQUIRE(decoded_generic_smm->getPassword() == "password1");
     delete bl;
     delete decoded;
     delete msg;
@@ -414,11 +417,12 @@ TEST_CASE("Server List Message Check") {
     REQUIRE(decoded_generic->getType() == message_type_server_list);
     /* Check input == output */
     REQUIRE(decoded_generic->getId() == 2563);
-    auto sl3 = ((fss_message_server_list *)decoded_generic)->getServers();
+    auto decoded_generic_servers = std::dynamic_pointer_cast<fss_message_server_list>(decoded_generic);
+    REQUIRE(decoded_generic_servers != nullptr);
+    auto sl3 = decoded_generic_servers->getServers();
     REQUIRE(!sl3.empty());
     REQUIRE(sl3[0].first == "localhost");
     REQUIRE(sl3[0].second == 20202);
-    delete decoded_generic;
     delete bl;
     delete decoded;
     delete msg;
@@ -450,7 +454,6 @@ TEST_CASE("Identity (Non-Aircraft) Message Check") {
     auto decoded_generic = fss_message::decode(bl);
     REQUIRE(decoded_generic->getType() == message_type_identity_non_aircraft);
     REQUIRE(decoded_generic->getId() == 2563);
-    delete decoded_generic;
     delete bl;
     delete msg;
 }

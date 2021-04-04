@@ -70,9 +70,8 @@ fss_transport::fss_connection::~fss_connection()
     this->disconnect();
     while(!this->messages.empty())
     {
-        fss_message *msg = this->messages.front();
+        auto msg = this->messages.front();
         this->messages.pop();
-        delete msg;
     }
 }
 
@@ -95,7 +94,6 @@ fss_transport::fss_connection::processMessages()
         if (this->handler != nullptr)
         {
             this->handler->processMessage(msg);
-            delete msg;
         }
         else
         {
@@ -104,7 +102,7 @@ fss_transport::fss_connection::processMessages()
     }
 }
 
-fss_transport::fss_message *
+std::shared_ptr<fss_transport::fss_message>
 fss_transport::fss_connection::getMsg()
 {
     if (this->handler == nullptr)
@@ -152,7 +150,7 @@ bool fss_transport::fss_connection::connectTo(const std::string &address, uint16
 }
 
 bool
-fss_transport::fss_connection::sendMsg(fss_message *msg)
+fss_transport::fss_connection::sendMsg(std::shared_ptr<fss_message> msg)
 {
     this->send_lock.lock();
     msg->setId(this->getMessageId());
@@ -214,14 +212,13 @@ void fss_transport::fss_connection::setHandler(fss_message_cb *cb)
         auto msg = this->messages.front();
         this->messages.pop();
         cb->processMessage(msg);
-        delete msg;
     }
 }
 
-fss_transport::fss_message *
+std::shared_ptr<fss_transport::fss_message>
 fss_transport::fss_connection::recvMsg()
 {
-    fss_transport::fss_message *msg = nullptr;
+    std::shared_ptr<fss_transport::fss_message> msg = nullptr;
     size_t header_len = sizeof (uint16_t);
     char *header_data = (char *) malloc(header_len);
     ssize_t received = recv(this->fd, header_data, header_len, 0);
@@ -265,7 +262,7 @@ fss_transport::fss_connection::recvMsg()
     else if(received == 0 || (received < 0 || errno == EBADF))
     {
         /* Connection was closed */
-        msg = new fss_transport::fss_message_closed();
+        msg = std::make_shared<fss_transport::fss_message_closed>();
     }
     else
     {
