@@ -35,7 +35,6 @@ TEST_CASE("Close Connection Check") {
     REQUIRE(msg->getAltitude() == 0);
     REQUIRE(msg->getTimeStamp() == 0);
 
-    delete bl;
     delete msg;
 }
 
@@ -63,7 +62,7 @@ TEST_CASE("Identity Message Check") {
     auto decoded_generic_identity = std::dynamic_pointer_cast<fss_message_identity>(decoded_generic);
     REQUIRE(decoded_generic_identity != nullptr);
     REQUIRE(decoded_generic_identity->getName() == "test1");
-    delete bl;
+
     delete msg;
 }
 
@@ -87,7 +86,7 @@ TEST_CASE("RTT Request Message Check") {
     REQUIRE(decoded_generic->getType() == message_type_rtt_request);
     /* Check the id */
     REQUIRE(decoded_generic->getId() == 2563);
-    delete bl;
+
     delete msg;
 }
 
@@ -116,7 +115,7 @@ TEST_CASE("RTT Response Message Check") {
     REQUIRE(decoded_generic->getId() == 2563);
     auto decoded_generic_rtt_resp = std::dynamic_pointer_cast<fss_message_rtt_response>(decoded_generic);
     REQUIRE((decoded_generic_rtt_resp)->getRequestId() == 8765);
-    delete bl;
+
     delete msg;
 }
 
@@ -170,7 +169,7 @@ TEST_CASE("Position Report Message Check") {
     REQUIRE(decoded_generic->getLongitude() == 172.0);
     REQUIRE(decoded_generic->getAltitude() == 1234);
     REQUIRE(decoded_generic->getTimeStamp() == 5678);
-    delete bl;
+
     delete decoded;
     delete msg;
 }
@@ -203,7 +202,7 @@ TEST_CASE("System Status Message Check") {
     REQUIRE(decoded_generic_status != nullptr);
     REQUIRE(decoded_generic_status->getBatRemaining() == 99);
     REQUIRE(decoded_generic_status->getBatMAHUsed() == 1200);
-    delete bl;
+
     delete decoded;
     delete msg;
 }
@@ -240,7 +239,7 @@ TEST_CASE("Search Status Message Check") {
     REQUIRE(decoded_generic_search->getSearchId() == 1234);
     REQUIRE(decoded_generic_search->getSearchCompleted() == 5678);
     REQUIRE(decoded_generic_search->getSearchTotal() == 91011);
-    delete bl;
+
     delete decoded;
     delete msg;
 }
@@ -272,7 +271,7 @@ TEST_CASE("Asset Command Message Check - Basic") {
     auto decoded_generic_command = std::dynamic_pointer_cast<fss_message_asset_command>(decoded_generic);
     REQUIRE(decoded_generic_command->getCommand() == asset_command_rtl);
     REQUIRE(decoded_generic_command->getTimeStamp() == 1234);
-    delete bl;
+
     delete decoded;
     delete msg;
 }
@@ -311,7 +310,7 @@ TEST_CASE("Asset Command Message Check - Position") {
     REQUIRE(decoded_generic->getTimeStamp() == 1234);
     REQUIRE(decoded_generic->getLatitude() == -43.5);
     REQUIRE(decoded_generic->getLongitude() == 172.0);
-    delete bl;
+
     delete decoded;
     delete msg;
 }
@@ -346,7 +345,7 @@ TEST_CASE("Asset Command Message Check - Altitude") {
     REQUIRE(decoded_generic_command->getCommand() == asset_command_altitude);
     REQUIRE(decoded_generic->getTimeStamp() == 1234);
     REQUIRE(decoded_generic->getAltitude() == 5678);
-    delete bl;
+
     delete decoded;
     delete msg;
 }
@@ -382,7 +381,7 @@ TEST_CASE("SMM Settings Message Check") {
     REQUIRE(decoded_generic_smm->getServerURL() == "https://localhost/");
     REQUIRE(decoded_generic_smm->getUsername() == "asset");
     REQUIRE(decoded_generic_smm->getPassword() == "password1");
-    delete bl;
+
     delete decoded;
     delete msg;
 }
@@ -423,7 +422,7 @@ TEST_CASE("Server List Message Check") {
     REQUIRE(!sl3.empty());
     REQUIRE(sl3[0].first == "localhost");
     REQUIRE(sl3[0].second == 20202);
-    delete bl;
+
     delete decoded;
     delete msg;
 }
@@ -454,6 +453,6 @@ TEST_CASE("Identity (Non-Aircraft) Message Check") {
     auto decoded_generic = fss_message::decode(bl);
     REQUIRE(decoded_generic->getType() == message_type_identity_non_aircraft);
     REQUIRE(decoded_generic->getId() == 2563);
-    delete bl;
+
     delete msg;
 }

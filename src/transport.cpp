@@ -1,3 +1,4 @@
+#include <bits/stdint-uintn.h>
 #include <string>
 #include <cstring>
 #include "fss-transport.hpp"
@@ -9,9 +10,9 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-#include <string.h>
+#include <cstring>
 
-#include <errno.h>
+#include <cerrno>
 
 #include "transport.hpp"
 
@@ -75,7 +76,7 @@ fss_transport::fss_connection::~fss_connection()
     }
 }
 
-uint64_t fss_transport::fss_connection::getMessageId()
+auto fss_transport::fss_connection::getMessageId() -> uint64_t
 {
     return ++this->last_msg_id;
 }
@@ -102,8 +103,8 @@ fss_transport::fss_connection::processMessages()
     }
 }
 
-std::shared_ptr<fss_transport::fss_message>
-fss_transport::fss_connection::getMsg()
+auto
+fss_transport::fss_connection::getMsg() -> std::shared_ptr<fss_transport::fss_message>
 {
     if (this->handler == nullptr)
     {
@@ -117,9 +118,10 @@ fss_transport::fss_connection::getMsg()
     return nullptr;
 }
 
-bool fss_transport::fss_connection::connectTo(const std::string &address, uint16_t port)
+auto
+fss_transport::fss_connection::connectTo(const std::string &address, uint16_t port) -> bool
 {
-    struct sockaddr_storage remote;
+    struct sockaddr_storage remote = {};
     if (!convert_str_to_sa (address, port, &remote))
     {
         std::cerr << "Failed to convert '" << address << "' to a usable address\n";
@@ -149,8 +151,8 @@ bool fss_transport::fss_connection::connectTo(const std::string &address, uint16
     return true;
 }
 
-bool
-fss_transport::fss_connection::sendMsg(std::shared_ptr<fss_message> msg)
+auto
+fss_transport::fss_connection::sendMsg(const std::shared_ptr<fss_message> &msg) -> bool
 {
     this->send_lock.lock();
     msg->setId(this->getMessageId());
@@ -160,18 +162,16 @@ fss_transport::fss_connection::sendMsg(std::shared_ptr<fss_message> msg)
 #endif
     if (!bl->isValid())
     {
-        delete bl;
         return false;
     }
     bool ret = this->sendMsg(bl);
-    delete bl;
     this->send_lock.unlock();
     return ret;
 }
 
 #ifdef DEBUG
 static void
-print_bl(fss_transport::buf_len *bl)
+print_bl(std::shared_ptr<buf_len> bl)
 {
     unsigned char *data = (unsigned char *)bl->getData();
     size_t len = bl->getLength();
@@ -183,8 +183,8 @@ print_bl(fss_transport::buf_len *bl)
 }
 #endif
 
-bool
-fss_transport::fss_connection::sendMsg(buf_len *bl)
+auto
+fss_transport::fss_connection::sendMsg(const std::shared_ptr<buf_len> &bl) -> bool
 {
     size_t sent = 0;
     size_t to_send = bl->getLength();
@@ -194,7 +194,7 @@ fss_transport::fss_connection::sendMsg(buf_len *bl)
 #endif
     while (sent < to_send)
     {
-        ssize_t transfered = send(this->fd, data + sent, to_send - sent, 0);
+        ssize_t transfered = send(this->fd, &data[sent], to_send - sent, 0);
         if (transfered < 0)
         {
             return false;
@@ -204,7 +204,8 @@ fss_transport::fss_connection::sendMsg(buf_len *bl)
     return true;
 }
 
-void fss_transport::fss_connection::setHandler(fss_message_cb *cb)
+void
+fss_transport::fss_connection::setHandler(fss_message_cb *cb)
 {
     this->handler = cb;
     while(!this->messages.empty())
@@ -215,27 +216,26 @@ void fss_transport::fss_connection::setHandler(fss_message_cb *cb)
     }
 }
 
-std::shared_ptr<fss_transport::fss_message>
-fss_transport::fss_connection::recvMsg()
+auto
+fss_transport::fss_connection::recvMsg() -> std::shared_ptr<fss_transport::fss_message>
 {
     std::shared_ptr<fss_transport::fss_message> msg = nullptr;
-    size_t header_len = sizeof (uint16_t);
-    char *header_data = (char *) malloc(header_len);
-    ssize_t received = recv(this->fd, header_data, header_len, 0);
-    if (received == (ssize_t) header_len)
+    std::string data;
+    data.resize(sizeof (uint16_t));
+    ssize_t received = recv(this->fd, &data[0], data.size(), 0);
+    if (received == static_cast<ssize_t>(data.size()))
     {
-        uint16_t data_length = ntohs(*(uint16_t *)header_data);
-        ssize_t total_length = (ssize_t) data_length;
+        uint16_t data_length = ntohs(*(uint16_t *)&data[0]);
+        auto total_length = static_cast<ssize_t>(data_length);
         if (data_length % sizeof(uint64_t) != 0)
         {
             total_length = data_length + sizeof(uint64_t) - (data_length % sizeof(uint64_t));
         }
         /* Get the full message */
-        char *data = (char *) malloc (total_length);
-        memcpy(data, header_data, header_len);
+        data.resize(total_length);
         while (received != total_length)
         {
-            ssize_t this_time = recv(this->fd, data + received, total_length - received, 0);
+            ssize_t this_time = recv(this->fd, &data[received], total_length - received, 0);
             if (this_time < 0)
             {
                 perror("Error receiving data");
@@ -245,18 +245,16 @@ fss_transport::fss_connection::recvMsg()
         }
         if (received == total_length)
         {
-            buf_len *bl = new buf_len(data, data_length);
+            auto bl = std::make_shared<buf_len>(&data[0], data_length);
 #ifdef DEBUG
             printf("Message reads: \n");
             print_bl(bl);
 #endif
             msg = fss_transport::fss_message::decode(bl);
-            delete bl;
         }
         else
         {
             perror ("Failed to get all the data: ");
-            free (data);
         }
     }
     else if(received == 0 || (received < 0 || errno == EBADF))
@@ -268,7 +266,6 @@ fss_transport::fss_connection::recvMsg()
     {
         perror("Failed to get header: ");
     }
-    free (header_data);
     return msg;
 }
 
@@ -308,11 +305,8 @@ fss_transport::fss_listen::processMessages()
 #endif
         if (this->cb != nullptr)
         {
-            auto conn = new fss_transport::fss_connection(newfd);
-            if(!this->cb(conn))
-            {
-                delete conn;
-            }
+            auto conn = std::make_shared<fss_transport::fss_connection>(newfd);
+            this->cb(conn);
         }
         else
         {
@@ -322,15 +316,15 @@ fss_transport::fss_listen::processMessages()
     }
 }
 
-bool
-fss_transport::fss_listen::startListening()
+auto
+fss_transport::fss_listen::startListening() -> bool
 {
     /* open the socket */
     if (this->fd < 0)
     {
         this->fd = socket(PF_INET6, SOCK_STREAM, IPPROTO_TCP);
     }
-    struct sockaddr_in6 bind_addr;
+    struct sockaddr_in6 bind_addr = {};
     memset(&bind_addr, 0, sizeof (struct sockaddr_in6));
     bind_addr.sin6_family = AF_INET6;
     bind_addr.sin6_port = htons(this->port);
@@ -339,7 +333,7 @@ fss_transport::fss_listen::startListening()
         perror("Failed to bind socket: ");
         return false;
     }
-    if(listen(this->fd, 10) < 0)
+    if(listen(this->fd, this->max_pending_connections) < 0)
     {
         perror("Failed to listen on socket: ");
         return false;

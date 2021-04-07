@@ -117,7 +117,7 @@ public:
 
 server_clients *clients = nullptr;
 
-fss_client::fss_client(fss_transport::fss_connection *t_conn) : fss_message_cb(t_conn)
+fss_client::fss_client(std::shared_ptr<fss_transport::fss_connection> t_conn) : fss_message_cb(t_conn)
 {
     conn->setHandler(this);
 }
@@ -126,7 +126,6 @@ fss_client::~fss_client()
 {
     if (this->conn != nullptr)
     {
-        delete this->conn;
         this->conn = nullptr;
     }
     for(auto rtt_req : this->outstanding_rtt_requests)
@@ -175,7 +174,6 @@ void
 fss_client::disconnect()
 {
     this->conn->disconnect();
-    delete this->conn;
     this->conn = nullptr;
 }
 
@@ -337,7 +335,7 @@ void sigIntHandler(int signum)
     running = false;
 }
 
-bool new_client_connect(fss_transport::fss_connection *conn)
+bool new_client_connect(std::shared_ptr<fss_transport::fss_connection> conn)
 {
 #ifdef DEBUG
     std::cout << "New client connected" << std::endl;

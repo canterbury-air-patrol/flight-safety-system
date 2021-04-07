@@ -27,8 +27,8 @@ TEST_CASE("Connection Create (failure)") {
     delete conn;
 }
 
-transport::fss_connection *client_conn = nullptr;
-bool test_client_connect_cb (transport::fss_connection *new_conn)
+std::shared_ptr<transport::fss_connection> client_conn = nullptr;
+bool test_client_connect_cb (std::shared_ptr<transport::fss_connection> new_conn)
 {
     client_conn = new_conn;
     return true;
@@ -59,7 +59,6 @@ TEST_CASE("Listen Socket") {
     REQUIRE(msg != nullptr);
     REQUIRE(msg->getType() == transport::message_type_closed);
 
-    delete client_conn;
     client_conn = nullptr;
 
     delete listen;

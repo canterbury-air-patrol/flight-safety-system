@@ -101,7 +101,7 @@ private:
     uint64_t last_command_send_ts{0};
     uint64_t last_command_dbid{0};
 public:
-    explicit fss_client(transport::fss_connection *conn);
+    explicit fss_client(std::shared_ptr<transport::fss_connection> conn);
     virtual ~fss_client();
     virtual void processMessage(std::shared_ptr<transport::fss_message> message) override;
     void sendRTTRequest(std::shared_ptr<transport::fss_message_rtt_request> rtt_req);

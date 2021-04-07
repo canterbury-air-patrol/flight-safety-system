@@ -78,7 +78,7 @@ flight_safety_system::client::fss_client::attemptReconnect()
 }
 
 void
-flight_safety_system::client::fss_client::sendMsgAll(std::shared_ptr<fss_transport::fss_message> msg)
+flight_safety_system::client::fss_client::sendMsgAll(const std::shared_ptr<fss_transport::fss_message> &msg)
 {
     for (auto const &server: this->servers)
     {
@@ -86,30 +86,29 @@ flight_safety_system::client::fss_client::sendMsgAll(std::shared_ptr<fss_transpo
     }
 }
 
+static auto
+server_list_matches (const std::list<std::shared_ptr<fss_server>> &servers, const std::string &address, uint16_t port) -> bool
+{
+    for(auto const &server: servers)
+    {
+        if (server->getAddress().compare(address) == 0 && server->getPort() == port)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 void
-flight_safety_system::client::fss_client::updateServers(std::shared_ptr<fss_transport::fss_message_server_list> msg)
+flight_safety_system::client::fss_client::updateServers(const std::shared_ptr<fss_transport::fss_message_server_list> &msg)
 {
     for (auto const &server_entry: msg->getServers())
     {
         bool exists = false;
-        for(auto const &server: this->servers)
-        {
-            if (server->getAddress().compare(server_entry.first) == 0 && server->getPort() == server_entry.second)
-            {
-                exists = true;
-                break;
-            }
-        }
+        exists = server_list_matches(this->servers, server_entry.first, server_entry.second);
         if (!exists)
         {
-            for(auto const &server: this->reconnect_servers)
-            {
-                if(server->getAddress().compare(server_entry.first) == 0 && server->getPort() == server_entry.second)
-                {
-                    exists = true;
-                    break;
-                }
-            }
+            exists = server_list_matches(this->reconnect_servers, server_entry.first, server_entry.second);
         }
         if (!exists)
         {
@@ -152,15 +151,6 @@ fss_server::fss_server(fss_client *t_client, std::string t_address, uint16_t t_p
     }
 }
 
-fss_server::~fss_server()
-{
-    if (this->conn != nullptr)
-    {
-        delete this->conn;
-        this->conn = nullptr;
-    }
-}
-
 void
 fss_server::sendIdentify()
 {
@@ -176,7 +166,6 @@ fss_server::reconnect() -> bool
 
     if (this->conn != nullptr)
     {
-        delete this->conn;
         this->conn = nullptr;
     }
 
@@ -188,10 +177,9 @@ fss_server::reconnect() -> bool
             this->retry_delay += this->retry_delay;
         }
         this->last_tried = ts;
-        this->conn = new fss_transport::fss_connection();
+        this->conn = std::make_shared<fss_transport::fss_connection>();
         if (!this->conn->connectTo(this->getAddress(), this->getPort()))
         {
-            delete this->conn;
             this->conn = nullptr;
         }
         else

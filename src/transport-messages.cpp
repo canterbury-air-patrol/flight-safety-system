@@ -1,6 +1,7 @@
 #include "fss-transport.hpp"
 
 #include <arpa/inet.h>
+#include <memory>
 #if __APPLE__
 /* Apple already has these defines */
 #else
@@ -12,7 +13,7 @@
 using namespace flight_safety_system::transport;
 
 void
-packString(buf_len *bl, std::string val)
+packString(std::shared_ptr<buf_len> bl, std::string val)
 {
     size_t str_len = val.length();
     uint16_t len = htons(str_len);
@@ -30,7 +31,7 @@ fss_message::headerLength()
 }
 
 void
-fss_message::createHeader(buf_len *bl)
+fss_message::createHeader(std::shared_ptr<buf_len> bl)
 {
     /* Make space for length, type, id */
     size_t length = this->headerLength();
@@ -45,7 +46,7 @@ fss_message::createHeader(buf_len *bl)
 }
 
 void
-fss_message::updateSize(buf_len *bl)
+fss_message::updateSize(std::shared_ptr<buf_len> bl)
 {
     uint16_t length = bl->getLength();
     if (length > sizeof(uint16_t))
@@ -60,10 +61,10 @@ fss_message::updateSize(buf_len *bl)
     }
 }
 
-buf_len *
-fss_message::getPacked()
+auto
+fss_message::getPacked() -> std::shared_ptr<buf_len>
 {
-    auto bl = new buf_len();
+    auto bl = std::make_shared<buf_len>();
 
     this->createHeader(bl);
 
@@ -75,13 +76,13 @@ fss_message::getPacked()
 }
 
 void
-fss_message_identity::packData(buf_len *bl)
+fss_message_identity::packData(std::shared_ptr<buf_len> bl)
 {
     bl->addData(this->name.c_str(), this->name.length());
 }
 
 void
-fss_message_identity::unpackData(buf_len *bl)
+fss_message_identity::unpackData(std::shared_ptr<buf_len> bl)
 {
     size_t offset = this->headerLength();
     char *data = bl->getData();
@@ -94,14 +95,14 @@ fss_message_identity::unpackData(buf_len *bl)
 }
 
 void
-fss_message_rtt_response::packData(buf_len *bl)
+fss_message_rtt_response::packData(std::shared_ptr<buf_len> bl)
 {
     uint64_t data = htonll(this->request_id);
     bl->addData((char *)&data, sizeof(uint64_t));
 }
 
 void
-fss_message_rtt_response::unpackData(buf_len *bl)
+fss_message_rtt_response::unpackData(std::shared_ptr<buf_len> bl)
 {
     size_t offset = this->headerLength();
     char *data = bl->getData();
@@ -117,7 +118,7 @@ fss_message_rtt_response::unpackData(buf_len *bl)
 }
 
 void
-fss_message_position_report::packData(buf_len *bl)
+fss_message_position_report::packData(std::shared_ptr<buf_len> bl)
 {
     uint64_t ts = htonll(this->getTimeStamp());
     /* Convert the lat/long to fixed decimal for transport */
@@ -147,7 +148,7 @@ fss_message_position_report::packData(buf_len *bl)
 }
 
 void
-fss_message_position_report::unpackData(buf_len *bl)
+fss_message_position_report::unpackData(std::shared_ptr<buf_len> bl)
 {
     size_t offset = this->headerLength();
     char *data = bl->getData();
@@ -229,7 +230,7 @@ fss_message_position_report::unpackData(buf_len *bl)
 }
 
 void
-fss_message_system_status::packData(buf_len *bl)
+fss_message_system_status::packData(std::shared_ptr<buf_len> bl)
 {
     uint8_t bat_percent_n = this->getBatRemaining();
     uint32_t mah_used_n = htonl(this->getBatMAHUsed());
@@ -238,7 +239,7 @@ fss_message_system_status::packData(buf_len *bl)
 }
 
 void
-fss_message_system_status::unpackData(buf_len *bl)
+fss_message_system_status::unpackData(std::shared_ptr<buf_len> bl)
 {
     size_t offset = this->headerLength();
     char *data = bl->getData();
@@ -254,7 +255,7 @@ fss_message_system_status::unpackData(buf_len *bl)
 }
 
 void
-fss_message_search_status::packData(buf_len *bl)
+fss_message_search_status::packData(std::shared_ptr<buf_len> bl)
 {
     uint64_t search_id_n = htonll(this->getSearchId());
     uint64_t point_completed_n = htonll(this->getSearchCompleted());
@@ -265,7 +266,7 @@ fss_message_search_status::packData(buf_len *bl)
 }
 
 void
-fss_message_search_status::unpackData(buf_len *bl)
+fss_message_search_status::unpackData(std::shared_ptr<buf_len> bl)
 {
     size_t offset = this->headerLength();
     char *data = bl->getData();
@@ -284,7 +285,7 @@ fss_message_search_status::unpackData(buf_len *bl)
 }
 
 void
-fss_message_asset_command::packData(buf_len *bl)
+fss_message_asset_command::packData(std::shared_ptr<buf_len> bl)
 {
     uint64_t ts = htonll(this->getTimeStamp());
     /* Convert the lat/long to fixed decimal for transport */
@@ -300,7 +301,7 @@ fss_message_asset_command::packData(buf_len *bl)
 }
 
 void
-fss_message_asset_command::unpackData(buf_len *bl)
+fss_message_asset_command::unpackData(std::shared_ptr<buf_len> bl)
 {
     size_t offset = this->headerLength();
     char *data = bl->getData();
@@ -326,7 +327,7 @@ fss_message_asset_command::unpackData(buf_len *bl)
 }
 
 void
-fss_message_smm_settings::packData(buf_len *bl)
+fss_message_smm_settings::packData(std::shared_ptr<buf_len> bl)
 {
     packString(bl, this->getServerURL());
     packString(bl, this->getUsername());
@@ -334,7 +335,7 @@ fss_message_smm_settings::packData(buf_len *bl)
 }
 
 void
-fss_message_smm_settings::unpackData(buf_len *bl)
+fss_message_smm_settings::unpackData(std::shared_ptr<buf_len> bl)
 {
     size_t offset = this->headerLength();
     char *data = bl->getData();
@@ -364,7 +365,7 @@ fss_message_smm_settings::unpackData(buf_len *bl)
 }
 
 void
-packServer(buf_len *bl, std::pair<std::string, uint16_t> server)
+packServer(std::shared_ptr<buf_len> bl, std::pair<std::string, uint16_t> server)
 {
     uint16_t port = htons(server.second);
     bl->addData((char *)&port, sizeof(port));
@@ -372,7 +373,7 @@ packServer(buf_len *bl, std::pair<std::string, uint16_t> server)
 }
 
 void
-fss_message_server_list::packData(buf_len *bl)
+fss_message_server_list::packData(std::shared_ptr<buf_len> bl)
 {
     for(auto server : this->servers)
     {
@@ -381,7 +382,7 @@ fss_message_server_list::packData(buf_len *bl)
 }
 
 void
-fss_message_server_list::unpackData(buf_len *bl)
+fss_message_server_list::unpackData(std::shared_ptr<buf_len> bl)
 {
     size_t offset = this->headerLength();
     char *data = bl->getData();
@@ -401,14 +402,14 @@ fss_message_server_list::unpackData(buf_len *bl)
 }
 
 void
-fss_message_identity_non_aircraft::packData(buf_len *bl)
+fss_message_identity_non_aircraft::packData(std::shared_ptr<buf_len> bl)
 {
     uint64_t caps = htonll(this->capabilities);
     bl->addData((char *)&caps, sizeof(uint64_t));
 }
 
 void
-fss_message_identity_non_aircraft::unpackData(buf_len *bl)
+fss_message_identity_non_aircraft::unpackData(std::shared_ptr<buf_len> bl)
 {
     size_t offset = this->headerLength();
     char *data = bl->getData();
@@ -433,7 +434,7 @@ fss_message_identity_non_aircraft::getCapability(uint8_t cap_id)
 }
 
 std::shared_ptr<fss_message>
-fss_message::decode(buf_len *bl)
+fss_message::decode(std::shared_ptr<buf_len> bl)
 {
     std::shared_ptr<fss_message> msg = nullptr;
     char *data = bl->getData();
