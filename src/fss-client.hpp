@@ -21,6 +21,8 @@ private:
     std::list<std::shared_ptr<fss_server>> reconnect_servers{};
     void notifyConnectionStatus();
     virtual void connectionStatusChange(flight_safety_system::client::connection_status status) {};
+protected:
+    virtual void addServer(const std::shared_ptr<fss_server> &server);
 public:
     explicit fss_client(const std::string &config_file);
     explicit fss_client() = default;

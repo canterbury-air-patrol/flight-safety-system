@@ -38,17 +38,23 @@ flight_safety_system::client::fss_client::fss_client(const std::string &t_fileNa
 }
 
 void
-flight_safety_system::client::fss_client::connectTo(const std::string &t_address, uint16_t t_port, bool connect)
+flight_safety_system::client::fss_client::addServer(const std::shared_ptr<fss_server> &server)
 {
-    auto server = std::make_shared<fss_server>(this, t_address, t_port, connect);
     if (server->connected())
     {
-        servers.push_back(server);
+        this->servers.push_back(server);
     }
     else
     {
-        reconnect_servers.push_back(server);
+        this->reconnect_servers.push_back(server);
     }
+}
+
+void
+flight_safety_system::client::fss_client::connectTo(const std::string &t_address, uint16_t t_port, bool connect)
+{
+    auto server = std::make_shared<fss_server>(this, t_address, t_port, connect);
+    this->addServer(server);
 }
 
 void
