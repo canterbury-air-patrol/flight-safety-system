@@ -1,5 +1,4 @@
-#ifndef __FLIGHT_SAFETY_SYSTEM_TRANSPORT_HPP__
-#define __FLIGHT_SAFETY_SYSTEM_TRANSPORT_HPP__
+#pragma once
 
 #include "fss.hpp"
 
@@ -12,7 +11,7 @@ class fss_message;
 
 using  fss_connect_cb = bool (*)(std::shared_ptr<fss_connection> conn);
 
-typedef enum {
+using fss_message_type = enum fss_message_type_e {
     message_type_unknown,
     /* Socket closed */
     message_type_closed,
@@ -35,9 +34,9 @@ typedef enum {
 
     /* Non-aircraft clients */
     message_type_identity_non_aircraft,
-} fss_message_type;
+};
 
-typedef enum {
+using fss_asset_command = enum fss_asset_command_e {
     asset_command_unknown,
     /* RTL */
     asset_command_rtl,
@@ -55,23 +54,28 @@ typedef enum {
     asset_command_altitude,
     /* Enter Manual Flight Mode */
     asset_command_manual,
-} fss_asset_command;
+};
 
 class buf_len {
 private:
-    char *data;
-    uint16_t length;
+    char *data{nullptr};
+    uint16_t length{0};
 public:
-    buf_len(buf_len &bl) : data((char *)malloc(bl.length)), length(bl.length)
+    buf_len(const buf_len &bl) : data(static_cast<char *>(malloc(bl.length))), length(bl.length)
     {
         memcpy (this->data, bl.data, this->length);
     }
-    buf_len() : data(NULL), length(0) {};
-    buf_len(const char *_data, uint16_t len) : data((char *)malloc(len)), length(len) {
+    buf_len(buf_len &&bl) : data(bl.data), length(bl.length)
+    {
+        bl.data = nullptr;
+        bl.length = 0;
+    }
+    buf_len() = default;
+    buf_len(const char *_data, uint16_t len) : data(static_cast<char *>(malloc(len))), length(len) {
         memcpy (this->data, _data, this->length);
     };
     ~buf_len() { free(this->data); };
-    buf_len &operator=(const buf_len &other)
+    auto operator=(const buf_len &other) -> buf_len &
     {
         if (this != &other)
         {
@@ -82,7 +86,7 @@ public:
         }
         return *this;
     }
-    bool isValid() { return this->data != NULL; };
+    auto isValid() -> bool { return this->data != NULL; };
     bool addData(const char *new_data, uint16_t len)
     {
         char *tmp_data = (char *)realloc(this->data, this->length + len);
@@ -368,5 +372,3 @@ public:
 };
 }
 }
-
-#endif
