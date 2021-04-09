@@ -130,6 +130,7 @@ public:
 
 class fss_connection {
 private:
+    bool run{false};
 protected:
     int fd;
     uint64_t last_msg_id;

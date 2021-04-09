@@ -19,56 +19,39 @@
 using namespace flight_safety_system::server;
 namespace fss_transport = flight_safety_system::transport;
 
-db_connection *dbc = nullptr;
+std::shared_ptr<db_connection> dbc = nullptr;
 
 class server_clients{
 private:
     std::mutex lock{};
-    std::list<fss_client *> clients{};
-    std::queue<fss_client *> disconnected{};
+    std::list<std::shared_ptr<fss_client>> clients{};
+    std::queue<std::shared_ptr<fss_client>> disconnected{};
     uint32_t total_clients{0};
+    bool shutting_down{false};
 public:
-    server_clients() {};
+    server_clients() = default;
     ~server_clients() {
-        std::queue<fss_client *> toDisconnect;
         /* Prevent changes while we empty the client list */
+        this->shutting_down = true;
         this->lock.lock();
-        for (auto c: this->clients)
+        for (const auto &c: this->clients)
         {
-            toDisconnect.push(c);
-        }
-        this->clients.clear();
-        this->lock.unlock();
-        /* Disconnect the clients that were still in the list */
-        while (!toDisconnect.empty())
-        {
-            auto c = toDisconnect.front();
-            toDisconnect.pop();
             c->disconnect();
         }
-        /* Wait for all clients to move to disconnected state */
-        while (total_clients > this->disconnected.size())
-        {
-            this->lock.unlock();
-            sleep (1);
-            this->lock.lock();
-        }
         this->lock.unlock();
-        this->cleanupRemovableClients();
     }
     void cleanupRemovableClients()
     {
         this->lock.lock();
         while(!this->disconnected.empty())
         {
-            fss_client *client = this->disconnected.front();
+            auto client = this->disconnected.front();
             this->disconnected.pop();
             total_clients--;
-            delete client;
         }
         this->lock.unlock();
     };
-    void clientConnected(fss_client *client)
+    void clientConnected(std::shared_ptr<fss_client> client)
     {
         this->lock.lock();
         this->total_clients++;
@@ -77,16 +60,25 @@ public:
     };
     void clientDisconnected(fss_client *client)
     {
+        /* If we are shutting down, don't worry */
+        if (this->shutting_down) return;
         this->lock.lock();
-        this->clients.remove(client);
-        this->disconnected.push(client);
+        for (const auto &c : this->clients)
+        {
+            if (c.get() == client)
+            {
+                this->clients.remove(c);
+                this->disconnected.push(c);
+                break;
+            }
+        }
         this->lock.unlock();
     };
-    void sendMsg(std::shared_ptr<fss_transport::fss_message> msg, fss_client *except = nullptr)
+    void sendMsg(const std::shared_ptr<fss_transport::fss_message> &msg, fss_client *except = nullptr)
     {
-        for (auto client : clients)
+        for (const auto &client : clients)
         {
-            if (client->isAircraft() && client != except)
+            if (client->isAircraft() && client.get() != except)
             {
                 client->sendMsg(msg);
             }
@@ -94,49 +86,38 @@ public:
     }
     void sendSMMSettings()
     {
-        for(auto client: clients)
+        for(const auto &client: clients)
         {
             client->sendSMMSettings();
         }
     };
-    void sendRTTRequest(std::shared_ptr<fss_transport::fss_message_rtt_request> rtt_req)
+    void sendRTTRequest(const std::shared_ptr<fss_transport::fss_message_rtt_request> &rtt_req)
     {
-        for(auto client: this->clients)
+        for(const auto &client: this->clients)
         {
             client->sendRTTRequest(rtt_req);
         }
     };
     void sendCommand()
     {
-        for(auto client: this->clients)
+        for(const auto &client: this->clients)
         {
             client->sendCommand();
         }
     };
 };
 
-server_clients *clients = nullptr;
+std::shared_ptr<server_clients> clients = nullptr;
 
-fss_client::fss_client(std::shared_ptr<fss_transport::fss_connection> t_conn) : fss_message_cb(t_conn)
+fss_client::fss_client(std::shared_ptr<fss_transport::fss_connection> t_conn) : fss_message_cb(std::move(t_conn))
 {
     conn->setHandler(this);
 }
 
-fss_client::~fss_client()
-{
-    if (this->conn != nullptr)
-    {
-        this->conn = nullptr;
-    }
-    for(auto rtt_req : this->outstanding_rtt_requests)
-    {
-        delete rtt_req;
-    }
-    this->outstanding_rtt_requests.clear();
-}
+fss_client::~fss_client() = default;
 
 void
-fss_client::sendMsg(std::shared_ptr<fss_transport::fss_message> msg)
+fss_client::sendMsg(const std::shared_ptr<fss_transport::fss_message> &msg)
 {
     this->conn->sendMsg(msg);
 }
@@ -167,7 +148,6 @@ fss_client::sendCommand()
         }
         this->conn->sendMsg(msg);
     }
-    delete ac;
 }
 
 void
@@ -182,19 +162,18 @@ fss_client::sendRTTRequest(std::shared_ptr<fss_transport::fss_message_rtt_reques
 {
     uint64_t ts = fss_current_timestamp();
     this->conn->sendMsg(rtt_req);
-    this->outstanding_rtt_requests.push_back(new fss_client_rtt(ts, rtt_req->getId()));
+    this->outstanding_rtt_requests.push_back(std::make_shared<fss_client_rtt>(ts, rtt_req->getId()));
 }
 
 void
 fss_client::sendSMMSettings()
 {
-    smm_settings *smm = dbc->asset_get_smm_settings(this->name);
+    auto smm = dbc->asset_get_smm_settings(this->name);
     if (smm != nullptr)
     {
         auto settings_msg = std::make_shared<fss_transport::fss_message_smm_settings>(smm->getAddress(), smm->getUsername(), smm->getPassword());
         this->conn->sendMsg(settings_msg);
     }
-    delete smm;
 }
 
 void
@@ -231,10 +210,9 @@ fss_client::processMessage(std::shared_ptr<fss_transport::fss_message> msg)
                 /* Send all the known fss servers */
                 auto known_servers = dbc->get_active_fss_servers();
                 auto server_list = std::make_shared<fss_transport::fss_message_server_list>();
-                for (auto server_details : known_servers)
+                for (const auto &server_details : known_servers)
                 {
                     server_list->addServer(server_details->getAddress(),server_details->getPort());
-                    delete server_details;
                 }
                 this->conn->sendMsg(server_list);
             }
@@ -264,12 +242,12 @@ fss_client::processMessage(std::shared_ptr<fss_transport::fss_message> msg)
             case fss_transport::message_type_rtt_response:
             {
                 /* Find the original message and calculate the response time */
-                fss_client_rtt *rtt_req = nullptr;
+                std::shared_ptr<fss_client_rtt> rtt_req = nullptr;
                 uint64_t current_ts = fss_current_timestamp();
                 auto rtt_resp_msg = std::dynamic_pointer_cast<fss_transport::fss_message_rtt_response>(msg);
                 if (rtt_resp_msg != nullptr)
                 {
-                    for(auto req : this->outstanding_rtt_requests)
+                    for(const auto &req : this->outstanding_rtt_requests)
                     {
                         if(req->getRequestId() == rtt_resp_msg->getRequestId())
                         {
@@ -277,14 +255,13 @@ fss_client::processMessage(std::shared_ptr<fss_transport::fss_message> msg)
                         }
                     }
                 }
-                if (rtt_req)
+                if (rtt_req != nullptr)
                 {
                     this->outstanding_rtt_requests.remove(rtt_req);
 #ifdef DEBUG
                     std::cout << "RTT for " << this->getName() << " is " << (current_ts - rtt_req->getTimeStamp()) << std::endl;
 #endif
                     dbc->asset_add_rtt(this->name, current_ts - rtt_req->getTimeStamp());
-                    delete rtt_req;
                 }
             }
                 break;
@@ -335,16 +312,18 @@ void sigIntHandler(int signum)
     running = false;
 }
 
-bool new_client_connect(std::shared_ptr<fss_transport::fss_connection> conn)
+auto
+new_client_connect(std::shared_ptr<fss_transport::fss_connection> conn) -> bool
 {
 #ifdef DEBUG
     std::cout << "New client connected" << std::endl;
 #endif
-    clients->clientConnected(new fss_client(conn));
+    clients->clientConnected(std::make_shared<fss_client>(conn));
     return true;
 }
 
-int main(int argc, char *argv[])
+auto
+main(int argc, char *argv[]) -> int
 {
     /* Watch out for sigint */
     signal (SIGINT, sigIntHandler);
@@ -362,13 +341,13 @@ int main(int argc, char *argv[])
     configfile >> config;
 
     /* Connect to database */
-    dbc = new db_connection(config["postgres"]["host"].asString(), config["postgres"]["user"].asString(), config["postgres"]["pass"].asString(), config["postgres"]["db"].asString());
+    dbc = std::make_shared<db_connection>(config["postgres"]["host"].asString(), config["postgres"]["user"].asString(), config["postgres"]["pass"].asString(), config["postgres"]["db"].asString());
     
     /* Create the clients tracking */
-    clients = new server_clients();
+    clients = std::make_shared<server_clients>();
 
     /* Open listen socket */
-    auto listen = new fss_transport::fss_listen(config["port"].asInt(), new_client_connect);
+    auto listen = std::make_shared<fss_transport::fss_listen>(config["port"].asInt(), new_client_connect);
     /* Process client messages:
        - Battery status
        - Position (reflect to other clients)
@@ -385,6 +364,7 @@ int main(int argc, char *argv[])
     int counter = 0;
     while (running)
     {
+        std::cout << listen.get() << std::endl;
         sleep (1);
         clients->cleanupRemovableClients();
         /* Send RTT messages to all clients */
@@ -399,24 +379,13 @@ int main(int argc, char *argv[])
             /* Send all the known fss servers */
             auto known_servers = dbc->get_active_fss_servers();
             auto server_list = std::make_shared<fss_transport::fss_message_server_list>();
-            for (auto server_details : known_servers)
+            for (const auto &server_details : known_servers)
             {
                 server_list->addServer(server_details->getAddress(),server_details->getPort());
-                delete server_details;
             }
             clients->sendMsg(server_list);
             clients->sendSMMSettings();
         }
         counter++;
     }
-    
-    /* Close the listen socket */
-    delete listen;
-    listen = nullptr;
-    /* Disconnect all the clients */
-    delete clients;
-    clients = nullptr;
-    /* Disconnect the database */
-    delete dbc;
-    dbc = nullptr;
 }

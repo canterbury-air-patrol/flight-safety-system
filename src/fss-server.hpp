@@ -12,10 +12,10 @@ private:
     std::string username;
     std::string password;
 public:
-    smm_settings(const std::string &t_address, const std::string &t_username, const std::string &t_password) : address(t_address), username(t_username), password(t_password) {};
-    std::string getAddress() { return this->address; };
-    std::string getUsername() { return this->username; };
-    std::string getPassword() { return this->password; };
+    smm_settings(std::string t_address, std::string t_username, std::string t_password) : address(std::move(t_address)), username(std::move(t_username)), password(std::move(t_password)) {};
+    auto getAddress() -> std::string { return this->address; };
+    auto getUsername() -> std::string { return this->username; };
+    auto getPassword() -> std::string { return this->password; };
 };
 
 class fss_server_details
@@ -24,9 +24,9 @@ private:
     std::string address;
     uint16_t port;
 public:
-    fss_server_details(const std::string &t_address, uint16_t t_port) : address(t_address), port(t_port) {};
-    std::string getAddress() { return this->address; };
-    uint16_t getPort() { return this->port; };
+    fss_server_details(std::string t_address, uint16_t t_port) : address(std::move(t_address)), port(t_port) {};
+    auto getAddress() -> std::string { return this->address; };
+    auto getPort() -> uint16_t { return this->port; };
 };
 
 class asset_command {
@@ -57,28 +57,28 @@ public:
             this->command = transport::asset_command_manual;
         }
     };
-    uint64_t getDBId() { return this->dbid; };
-    uint64_t getTimeStamp() { return this->timestamp; };
-    transport::fss_asset_command getCommand() { return this->command; };
-    double getLatitude() { return this->latitude; };
-    double getLongitude() { return this->longitude; };
-    uint16_t getAltitude() { return this->altitude; };
+    auto getDBId() -> uint64_t { return this->dbid; };
+    auto getTimeStamp() -> uint64_t { return this->timestamp; };
+    auto getCommand() -> transport::fss_asset_command { return this->command; };
+    auto getLatitude() -> double { return this->latitude; };
+    auto getLongitude() -> double { return this->longitude; };
+    auto getAltitude() -> uint16_t { return this->altitude; };
 };
 
 class db_connection {
 private:
     std::mutex db_lock;
 public:
-    db_connection(std::string host, std::string user, std::string pass, std::string db);
+    db_connection(const std::string &host, const std::string &user, const std::string &pass, const std::string &db);
     ~db_connection();
-    bool check_asset(std::string asset_name);
-    void asset_add_rtt(std::string asset_name, uint64_t rtt);
-    void asset_add_status(std::string asset_name, uint8_t bat_percent, uint32_t bat_mah_used);
-    void asset_add_search_status(std::string asset_name, uint64_t search_id, uint64_t search_completed, uint64_t search_total);
-    void asset_add_position(std::string asset_name, double latitude, double longitude, uint16_t altitude);
-    asset_command *asset_get_command(std::string asset_name);
-    smm_settings *asset_get_smm_settings(std::string asset_name);
-    std::list<fss_server_details *> get_active_fss_servers();
+    auto check_asset(const std::string &asset_name) -> bool;
+    void asset_add_rtt(const std::string &asset_name, uint64_t rtt);
+    void asset_add_status(const std::string &asset_name, uint8_t bat_percent, uint32_t bat_mah_used);
+    void asset_add_search_status(const std::string &asset_name, uint64_t search_id, uint64_t search_completed, uint64_t search_total);
+    void asset_add_position(const std::string &asset_name, double latitude, double longitude, uint16_t altitude);
+    auto asset_get_command(const std::string &asset_name) -> std::shared_ptr<asset_command>;
+    auto asset_get_smm_settings(const std::string &asset_name) -> std::shared_ptr<smm_settings>;
+    auto get_active_fss_servers() -> std::list<std::shared_ptr<fss_server_details>>;
 };
 
 class fss_client_rtt {
@@ -87,8 +87,8 @@ private:
     uint64_t reqid;
 public:
     fss_client_rtt(uint64_t t_timestamp, uint64_t t_reqid) : timestamp(t_timestamp), reqid(t_reqid) {};
-    uint64_t getTimeStamp() { return this->timestamp; };
-    uint64_t getRequestId() { return this->reqid; };
+    auto getTimeStamp() -> uint64_t { return this->timestamp; };
+    auto getRequestId() -> uint64_t { return this->reqid; };
 };
 
 class fss_client: public transport::fss_message_cb {
@@ -96,20 +96,20 @@ private:
     bool identified{false};
     bool aircraft{false};
     std::string name{};
-    std::list<fss_client_rtt *> outstanding_rtt_requests{};
-    std::string getName() { return this->name; };
+    std::list<std::shared_ptr<fss_client_rtt>> outstanding_rtt_requests{};
+    auto getName() -> std::string { return this->name; };
     uint64_t last_command_send_ts{0};
     uint64_t last_command_dbid{0};
 public:
     explicit fss_client(std::shared_ptr<transport::fss_connection> conn);
-    virtual ~fss_client();
-    virtual void processMessage(std::shared_ptr<transport::fss_message> message) override;
+    ~fss_client() override;
+    void processMessage(std::shared_ptr<transport::fss_message> message) override;
     void sendRTTRequest(std::shared_ptr<transport::fss_message_rtt_request> rtt_req);
-    void sendMsg(std::shared_ptr<transport::fss_message> msg);
+    void sendMsg(const std::shared_ptr<transport::fss_message> &msg);
     void sendSMMSettings();
     void sendCommand();
     void disconnect();
-    bool isAircraft() { return this->aircraft; };
+    auto isAircraft() -> bool { return this->aircraft; };
 };
 }
 }

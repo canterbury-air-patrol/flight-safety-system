@@ -84,13 +84,13 @@ auto fss_transport::fss_connection::getMessageId() -> uint64_t
 void
 fss_transport::fss_connection::processMessages()
 {
-    bool run = true;
-    while (run)
+    this->run = true;
+    while (this->run)
     {
         auto msg = this->recvMsg();
         if (msg && msg->getType() == message_type_closed)
         {
-            run = false;
+            this->run = false;
         }
         if (this->handler != nullptr)
         {
@@ -171,7 +171,7 @@ fss_transport::fss_connection::sendMsg(const std::shared_ptr<fss_message> &msg) 
 
 #ifdef DEBUG
 static void
-print_bl(std::shared_ptr<buf_len> bl)
+print_bl(std::shared_ptr<flight_safety_system::transport::buf_len> bl)
 {
     unsigned char *data = (unsigned char *)bl->getData();
     size_t len = bl->getLength();

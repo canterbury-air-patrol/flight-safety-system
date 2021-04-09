@@ -22,7 +22,7 @@ private:
     void notifyConnectionStatus();
     virtual void connectionStatusChange(flight_safety_system::client::connection_status status) {};
 protected:
-    virtual void addServer(const std::shared_ptr<fss_server> &server);
+    void addServer(const std::shared_ptr<fss_server> &server);
 public:
     explicit fss_client(const std::string &config_file);
     explicit fss_client() = default;
@@ -51,7 +51,7 @@ private:
 public:
     fss_server(fss_client *t_client, std::string t_address, uint16_t t_port, bool connect);
     fss_server(const fss_server &other) : flight_safety_system::transport::fss_message_cb(other.conn), client(other.client), address(other.address), port(other.port) {};
-    fss_server& operator=(const fss_server& other)
+    auto operator=(const fss_server& other) -> fss_server&
     {
         if (this != &other)
         {
@@ -65,8 +65,8 @@ public:
     }
     virtual ~fss_server() = default;
     virtual void processMessage(std::shared_ptr<flight_safety_system::transport::fss_message> message) override;
-    virtual std::string getAddress() { return this->address; };
-    virtual uint16_t getPort() { return this->port; };
+    virtual auto getAddress() -> std::string { return this->address; };
+    virtual auto getPort() -> uint16_t { return this->port; };
     virtual auto reconnect() -> bool;
     virtual auto connected() -> bool { return this->conn != nullptr; };
     virtual auto getClient() -> fss_client * { return this->client; };
