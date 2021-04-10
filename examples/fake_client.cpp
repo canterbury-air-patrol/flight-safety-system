@@ -57,5 +57,6 @@ int main(int argc, char *argv[])
         }
     }
 
+    client->disconnect();
     delete client;
 }

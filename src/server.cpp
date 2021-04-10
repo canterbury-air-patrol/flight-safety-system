@@ -67,8 +67,8 @@ public:
         {
             if (c.get() == client)
             {
+                this->disconnected.push(std::move(c));
                 this->clients.remove(c);
-                this->disconnected.push(c);
                 break;
             }
         }
@@ -364,7 +364,6 @@ main(int argc, char *argv[]) -> int
     int counter = 0;
     while (running)
     {
-        std::cout << listen.get() << std::endl;
         sleep (1);
         clients->cleanupRemovableClients();
         /* Send RTT messages to all clients */

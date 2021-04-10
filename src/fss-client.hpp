@@ -29,9 +29,10 @@ public:
     virtual ~fss_client() = default;
     void connectTo(const std::string &t_address, uint16_t t_port, bool connect);
     virtual void attemptReconnect();
+    virtual void disconnect();
     virtual void sendMsgAll(const std::shared_ptr<flight_safety_system::transport::fss_message> &msg);
     virtual auto getAssetName() -> std::string { return this->asset_name; };
-    virtual void serverRequiresReconnect(const std::shared_ptr<fss_server> &server);
+    virtual void serverRequiresReconnect(fss_server *server);
     virtual void updateServers(const std::shared_ptr<flight_safety_system::transport::fss_message_server_list> &msg);
     virtual void handleCommand(std::shared_ptr<flight_safety_system::transport::fss_message_asset_command> msg) {};
     virtual void handlePositionReport(std::shared_ptr<flight_safety_system::transport::fss_message_position_report> msg) {};
@@ -71,6 +72,8 @@ public:
     virtual auto connected() -> bool { return this->conn != nullptr; };
     virtual auto getClient() -> fss_client * { return this->client; };
     virtual void sendIdentify();
+    virtual void disconnect();
+    virtual void sendMsg(const std::shared_ptr<flight_safety_system::transport::fss_message> &msg);
 };
 }
 }

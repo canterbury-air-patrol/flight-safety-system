@@ -38,6 +38,15 @@ flight_safety_system::client::fss_client::fss_client(const std::string &t_fileNa
 }
 
 void
+flight_safety_system::client::fss_client::disconnect()
+{
+    for (auto server : this->servers)
+    {
+        server->disconnect();
+    }
+}
+
+void
 flight_safety_system::client::fss_client::addServer(const std::shared_ptr<fss_server> &server)
 {
     if (server->connected())
@@ -88,7 +97,7 @@ flight_safety_system::client::fss_client::sendMsgAll(const std::shared_ptr<fss_t
 {
     for (auto const &server: this->servers)
     {
-        server->getConnection()->sendMsg(msg);
+        server->sendMsg(msg);
     }
 }
 
@@ -141,10 +150,17 @@ flight_safety_system::client::fss_client::notifyConnectionStatus()
 }
 
 void
-flight_safety_system::client::fss_client::serverRequiresReconnect(const std::shared_ptr<fss_server> &server)
+flight_safety_system::client::fss_client::serverRequiresReconnect(fss_server *server)
 {
-    this->servers.remove(server);
-    this->reconnect_servers.push_back(server);
+    for (auto s : this->servers)
+    {
+        if (s.get() == server)
+        {
+            this->reconnect_servers.push_back(std::move(s));
+            this->servers.remove(s);
+            break;
+        }
+    }
     this->notifyConnectionStatus();
 }
 
@@ -214,7 +230,7 @@ fss_server::processMessage(std::shared_ptr<fss_transport::fss_message> msg)
     if (msg->getType() == fss_transport::message_type_closed)
     {
         /* Connection has been closed, schedule reconnection */
-        this->getClient()->serverRequiresReconnect(std::shared_ptr<fss_server>(this));
+        this->getClient()->serverRequiresReconnect(this);
         this->last_tried = 0;
         this->retry_count = 0;
         return;
@@ -277,5 +293,20 @@ fss_server::processMessage(std::shared_ptr<fss_transport::fss_message> msg)
                 }
             } break;
         }
+    }
+}
+
+void
+flight_safety_system::client::fss_server::disconnect()
+{
+    this->conn = nullptr;
+}
+
+void
+flight_safety_system::client::fss_server::sendMsg(const std::shared_ptr<flight_safety_system::transport::fss_message> &msg)
+{
+    if (this->conn != nullptr)
+    {
+        this->conn->sendMsg(msg);
     }
 }
