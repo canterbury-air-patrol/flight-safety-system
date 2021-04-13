@@ -20,7 +20,7 @@ private:
     std::list<std::shared_ptr<fss_server>> servers{};
     std::list<std::shared_ptr<fss_server>> reconnect_servers{};
     void notifyConnectionStatus();
-    virtual void connectionStatusChange(flight_safety_system::client::connection_status status) {};
+    virtual void connectionStatusChange(flight_safety_system::client::connection_status status __attribute__((unused))) {};
 protected:
     void addServer(const std::shared_ptr<fss_server> &server);
 public:
@@ -34,9 +34,9 @@ public:
     virtual auto getAssetName() -> std::string { return this->asset_name; };
     virtual void serverRequiresReconnect(fss_server *server);
     virtual void updateServers(const std::shared_ptr<flight_safety_system::transport::fss_message_server_list> &msg);
-    virtual void handleCommand(std::shared_ptr<flight_safety_system::transport::fss_message_asset_command> msg) {};
-    virtual void handlePositionReport(std::shared_ptr<flight_safety_system::transport::fss_message_position_report> msg) {};
-    virtual void handleSMMSettings(std::shared_ptr<flight_safety_system::transport::fss_message_smm_settings> msg) {};
+    virtual void handleCommand(const std::shared_ptr<flight_safety_system::transport::fss_message_asset_command> &msg __attribute__((unused))) {};
+    virtual void handlePositionReport(const std::shared_ptr<flight_safety_system::transport::fss_message_position_report> &msg __attribute__((unused))) {};
+    virtual void handleSMMSettings(const std::shared_ptr<flight_safety_system::transport::fss_message_smm_settings> &msg __attribute__((unused))) {};
 };
 
 class fss_server: public flight_safety_system::transport::fss_message_cb {
@@ -64,16 +64,13 @@ public:
         }
         return *this;
     }
-    virtual ~fss_server() = default;
-    virtual void processMessage(std::shared_ptr<flight_safety_system::transport::fss_message> message) override;
+    ~fss_server() override = default;
+    void processMessage(std::shared_ptr<flight_safety_system::transport::fss_message> message) override;
     virtual auto getAddress() -> std::string { return this->address; };
     virtual auto getPort() -> uint16_t { return this->port; };
     virtual auto reconnect() -> bool;
-    virtual auto connected() -> bool { return this->conn != nullptr; };
     virtual auto getClient() -> fss_client * { return this->client; };
     virtual void sendIdentify();
-    virtual void disconnect();
-    virtual void sendMsg(const std::shared_ptr<flight_safety_system::transport::fss_message> &msg);
 };
-}
-}
+} // namespace client
+} // namespace flight_safety_system

@@ -105,11 +105,9 @@ public:
     ~fss_client() override;
     void processMessage(std::shared_ptr<transport::fss_message> message) override;
     void sendRTTRequest(std::shared_ptr<transport::fss_message_rtt_request> rtt_req);
-    void sendMsg(const std::shared_ptr<transport::fss_message> &msg);
     void sendSMMSettings();
     void sendCommand();
-    void disconnect();
     auto isAircraft() -> bool { return this->aircraft; };
 };
-}
-}
+} // namespace server
+} // namespace flight_safety_system

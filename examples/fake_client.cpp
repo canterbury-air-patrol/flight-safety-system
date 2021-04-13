@@ -11,7 +11,8 @@ void sigIntHandler(int signum)
     running = false;
 }
 
-int main(int argc, char *argv[])
+auto
+main(int argc, char *argv[]) -> int
 {
     if (argc < 2)
     {
@@ -21,7 +22,7 @@ int main(int argc, char *argv[])
     /* Watch out for sigint */
     signal (SIGINT, sigIntHandler);
 
-    auto client = new flight_safety_system::client::fss_client(argv[1]);
+    auto client = std::make_shared<flight_safety_system::client::fss_client>(argv[1]);
     
     /* Connect to each server */
     /* Send reports:
@@ -58,5 +59,4 @@ int main(int argc, char *argv[])
     }
 
     client->disconnect();
-    delete client;
 }

@@ -86,11 +86,11 @@ public:
         }
         return *this;
     }
-    auto isValid() -> bool { return this->data != NULL; };
-    bool addData(const char *new_data, uint16_t len)
+    auto isValid() -> bool { return this->data != nullptr; };
+    auto addData(const char *new_data, uint16_t len) -> bool
     {
         char *tmp_data = (char *)realloc(this->data, this->length + len);
-        if (tmp_data == NULL)
+        if (tmp_data == nullptr)
         {
             return false;
         }
@@ -99,11 +99,11 @@ public:
         this->length += len;
         return true;
     }
-    char *getData()
+    auto getData() -> const char *
     {
         return this->data;
     }
-    size_t getLength()
+    auto getLength() -> size_t
     {
         return this->length;
     }
@@ -113,10 +113,10 @@ class fss_message_cb {
 protected:
     std::shared_ptr<fss_connection> conn;
 public:
-    explicit fss_message_cb(std::shared_ptr<fss_connection> t_conn) : conn(t_conn) {};
+    explicit fss_message_cb(std::shared_ptr<fss_connection> t_conn) : conn(std::move(t_conn)) {};
     fss_message_cb(fss_message_cb &from) : conn(from.conn) {};
-    virtual ~fss_message_cb() {};
-    fss_message_cb& operator=(const fss_message_cb& other)
+    virtual ~fss_message_cb() = default;
+    auto operator=(const fss_message_cb& other) -> fss_message_cb&
     {
         if (this != &other)
         {
@@ -126,6 +126,9 @@ public:
     }
     virtual void processMessage(std::shared_ptr<fss_message> message) = 0;
     virtual auto getConnection() -> std::shared_ptr<fss_connection> { return this->conn; };
+    virtual auto connected() -> bool { return this->conn != nullptr; };
+    virtual void disconnect();
+    virtual auto sendMsg(const std::shared_ptr<fss_message> &msg) -> bool;
 };
 
 class fss_connection {
@@ -141,7 +144,7 @@ protected:
     auto getMessageId() -> uint64_t;
     std::mutex send_lock;
     virtual auto sendMsg(const std::shared_ptr<buf_len> &bl) -> bool;
-    fss_connection& operator=(const fss_connection& other) { return *this; };
+    auto operator=(const fss_connection& other) -> fss_connection& { return *this; };
     fss_connection(const fss_connection &from) : fd(-1), last_msg_id(0), handler(nullptr), messages(), recv_thread(), send_lock() {};
 public:
     fss_connection() : fd(-1), last_msg_id(0), handler(nullptr), messages(), recv_thread(), send_lock() {};
@@ -158,7 +161,7 @@ public:
 class fss_listen : public fss_connection {
 private:
     uint16_t port;
-    bool startListening();
+    auto startListening() -> bool;
     fss_connect_cb cb;
     static constexpr int default_max_pending_conns = 10;
     int max_pending_connections{default_max_pending_conns};
@@ -175,28 +178,28 @@ private:
     uint64_t id;
     fss_message_type type;
 protected:
-    size_t headerLength();
+    auto headerLength() -> size_t;
     virtual void packData(std::shared_ptr<buf_len> bl) = 0;
 public:
     explicit fss_message(fss_message_type t_type) : id(0), type(t_type) {};
     fss_message(uint64_t t_id, fss_message_type t_type) : id(t_id), type(t_type) {};
     virtual ~fss_message() {};
     void setId(uint64_t t_id) { this->id = t_id; };
-    uint64_t getId() { return this->id; };
-    fss_message_type getType() { return this->type; };
-    virtual double getLatitude() { return NAN; };
-    virtual double getLongitude() { return NAN; };
-    virtual uint32_t getAltitude() { return 0; };
-    virtual uint64_t getTimeStamp() { return 0; };
-    virtual std::shared_ptr<buf_len> getPacked();
+    auto getId() -> uint64_t { return this->id; };
+    auto getType() -> fss_message_type { return this->type; };
+    virtual auto getLatitude() -> double { return NAN; };
+    virtual auto getLongitude() -> double { return NAN; };
+    virtual auto getAltitude() -> uint32_t { return 0; };
+    virtual auto getTimeStamp() -> uint64_t { return 0; };
+    virtual auto getPacked() -> std::shared_ptr<buf_len>;
     void createHeader(std::shared_ptr<buf_len> bl);
     void updateSize(std::shared_ptr<buf_len> bl);
-    static std::shared_ptr<fss_message> decode(std::shared_ptr<buf_len> bl);
+    static auto decode(std::shared_ptr<buf_len> bl) -> std::shared_ptr<fss_message>;
 };
 
 class fss_message_closed: public fss_message {
 protected:
-    virtual void packData(std::shared_ptr<buf_len>) override {};
+    void packData(std::shared_ptr<buf_len>) override {};
 public:
     fss_message_closed() : fss_message(message_type_closed) {};
 };
@@ -206,16 +209,16 @@ private:
     std::string name;
 protected:
     void unpackData(std::shared_ptr<buf_len> bl);
-    virtual void packData(std::shared_ptr<buf_len> bl) override;
+    void packData(std::shared_ptr<buf_len> bl) override;
 public:
     explicit fss_message_identity(const std::string &t_name) : fss_message(message_type_identity), name(t_name) {};
     fss_message_identity(uint64_t t_id, std::shared_ptr<buf_len> bl) : fss_message(t_id, message_type_identity), name() { this->unpackData(bl); };
-    virtual std::string getName() { return this->name; };
+    virtual auto getName() -> std::string { return this->name; };
 };
 
 class fss_message_rtt_request : public fss_message {
 protected:
-    virtual void packData(std::shared_ptr<buf_len> bl) override {};
+    void packData(std::shared_ptr<buf_len> bl) override {};
 public:
     fss_message_rtt_request() : fss_message(message_type_rtt_request) {};
     fss_message_rtt_request(uint64_t t_id, std::shared_ptr<buf_len> bl) : fss_message(t_id, message_type_rtt_request) {};
@@ -226,11 +229,11 @@ private:
     uint64_t request_id;
 protected:
     void unpackData(std::shared_ptr<buf_len> bl);
-    virtual void packData(std::shared_ptr<buf_len> bl) override;
+    void packData(std::shared_ptr<buf_len> bl) override;
 public:
     explicit fss_message_rtt_response(uint64_t t_request_id) : fss_message(message_type_rtt_response), request_id(t_request_id) {};
     fss_message_rtt_response(uint64_t t_id, std::shared_ptr<buf_len> bl) : fss_message(t_id, message_type_rtt_response), request_id(0) { this->unpackData(bl); };
-    virtual uint64_t getRequestId() { return this->request_id; };
+    virtual auto getRequestId() -> uint64_t { return this->request_id; };
 };
 
 class fss_message_position_report : public fss_message {
@@ -251,7 +254,7 @@ private:
     uint8_t emitter_type{0};
 protected:
     void unpackData(std::shared_ptr<buf_len> bl);
-    virtual void packData(std::shared_ptr<buf_len> bl) override;
+    void packData(std::shared_ptr<buf_len> bl) override;
 public:
     fss_message_position_report(double t_latitude, double t_longitude, uint32_t t_altitude,
                                 uint16_t t_heading, uint16_t t_hor_vel, int16_t t_ver_vel,
@@ -263,19 +266,19 @@ public:
         callsign(t_callsign), icao_address(t_icao_address), squawk(t_squawk), timestamp(t_timestamp),
         tslc(t_tslc), flags(t_flags), altitude_type(t_alt_type), emitter_type(t_emitter_type) {};
     fss_message_position_report(uint64_t t_id, std::shared_ptr<buf_len> bl) : fss_message(t_id, message_type_position_report) { this->unpackData(bl); };
-    virtual double getLatitude() override { return this->latitude; };
-    virtual double getLongitude() override { return this->longitude; };
-    virtual uint32_t getAltitude() override { return this->altitude; };
-    virtual uint64_t getTimeStamp() override { return this->timestamp; };
-    virtual uint32_t getICAOAddress() { return this->icao_address; };
-    virtual uint16_t getHeading() { return this->heading; };
-    virtual uint16_t getHorzVel() { return this->horizontal_velocity; };
-    virtual int16_t getVertVel() { return this->vertical_velocity; };
-    virtual std::string getCallSign() { return this->callsign; };
-    virtual uint16_t getSquawk() { return this->squawk; };
-    virtual uint16_t getFlags() { return this->flags; };
-    virtual uint8_t getAltitudeType() { return this->altitude_type; };
-    virtual uint8_t getEmitterType() { return this->emitter_type; };
+    auto getLatitude() -> double override { return this->latitude; };
+    auto getLongitude() -> double override { return this->longitude; };
+    auto getAltitude() -> uint32_t override { return this->altitude; };
+    auto getTimeStamp() -> uint64_t override { return this->timestamp; };
+    virtual auto getICAOAddress() -> uint32_t { return this->icao_address; };
+    virtual auto getHeading() -> uint16_t { return this->heading; };
+    virtual auto getHorzVel() -> uint16_t { return this->horizontal_velocity; };
+    virtual auto getVertVel() -> int16_t { return this->vertical_velocity; };
+    virtual auto getCallSign() -> std::string { return this->callsign; };
+    virtual auto getSquawk() -> uint16_t { return this->squawk; };
+    virtual auto getFlags() -> uint16_t { return this->flags; };
+    virtual auto getAltitudeType() -> uint8_t { return this->altitude_type; };
+    virtual auto getEmitterType() -> uint8_t { return this->emitter_type; };
 };
 
 class fss_message_system_status: public fss_message {
@@ -284,12 +287,12 @@ private:
     uint32_t mah_used;
 protected:
     void unpackData(std::shared_ptr<buf_len> bl);
-    virtual void packData(std::shared_ptr<buf_len> bl) override;
+    void packData(std::shared_ptr<buf_len> bl) override;
 public:
     fss_message_system_status(uint8_t bat_remaining_percent, uint32_t bat_mah_used) : fss_message(message_type_system_status), bat_percent(bat_remaining_percent), mah_used(bat_mah_used) {};
     fss_message_system_status(uint64_t t_id, std::shared_ptr<buf_len> bl) : fss_message(t_id, message_type_system_status), bat_percent(0), mah_used(0) { this->unpackData(bl); };
-    virtual uint8_t getBatRemaining() { return this->bat_percent; };
-    virtual uint32_t getBatMAHUsed() { return this->mah_used; };
+    virtual auto getBatRemaining() -> uint8_t { return this->bat_percent; };
+    virtual auto getBatMAHUsed() -> uint32_t { return this->mah_used; };
 };
 
 class fss_message_search_status: public fss_message {
@@ -299,13 +302,13 @@ private:
     uint64_t points_total;
 protected:
     void unpackData(std::shared_ptr<buf_len> bl);
-    virtual void packData(std::shared_ptr<buf_len> bl) override;
+    void packData(std::shared_ptr<buf_len> bl) override;
 public:
     fss_message_search_status(uint64_t t_search_id, uint64_t last_point_completed, uint64_t total_search_points) : fss_message(message_type_search_status), search_id(t_search_id), point_completed(last_point_completed), points_total(total_search_points) {};
     fss_message_search_status(uint64_t t_id, std::shared_ptr<buf_len> bl) : fss_message(t_id, message_type_search_status), search_id(0), point_completed(0), points_total(0) { this->unpackData(bl); };
-    virtual uint64_t getSearchId() { return this->search_id; };
-    virtual uint64_t getSearchCompleted() { return this->point_completed; };
-    virtual uint64_t getSearchTotal() { return this->points_total; };
+    virtual auto getSearchId() -> uint64_t { return this->search_id; };
+    virtual auto getSearchCompleted() -> uint64_t { return this->point_completed; };
+    virtual auto getSearchTotal() -> uint64_t { return this->points_total; };
 };
 
 class fss_message_asset_command: public fss_message {
@@ -317,17 +320,17 @@ private:
     uint64_t timestamp;
 protected:
     void unpackData(std::shared_ptr<buf_len> bl);
-    virtual void packData(std::shared_ptr<buf_len> bl) override;
+    void packData(std::shared_ptr<buf_len> bl) override;
 public:
     fss_message_asset_command(fss_asset_command t_command, uint64_t t_timestamp) : fss_message(message_type_command), command(t_command), latitude(NAN), longitude(NAN), altitude(0), timestamp(t_timestamp) {};
     fss_message_asset_command(fss_asset_command t_command, uint64_t t_timestamp, double t_latitude, double t_longitude) : fss_message(message_type_command), command(t_command), latitude(t_latitude), longitude(t_longitude), altitude(0), timestamp(t_timestamp) {};
     fss_message_asset_command(fss_asset_command t_command, uint64_t t_timestamp, uint32_t t_altitude) : fss_message(message_type_command), command(t_command), latitude(NAN), longitude(NAN), altitude(t_altitude), timestamp(t_timestamp) {};
     fss_message_asset_command(uint64_t t_id, std::shared_ptr<buf_len> bl) : fss_message(t_id, message_type_command), command(asset_command_unknown), latitude(NAN), longitude(NAN), altitude(0), timestamp(0) { this->unpackData(bl); };
-    virtual fss_asset_command getCommand() { return this->command; };
-    virtual double getLatitude() override { return this->latitude; };
-    virtual double getLongitude() override { return this->longitude; };
-    virtual uint32_t getAltitude() override { return this->altitude; };
-    virtual uint64_t getTimeStamp() override { return this->timestamp; };
+    virtual auto getCommand() -> fss_asset_command { return this->command; };
+    auto getLatitude() -> double override { return this->latitude; };
+    auto getLongitude() -> double override { return this->longitude; };
+    auto getAltitude() -> uint32_t override { return this->altitude; };
+    auto getTimeStamp() -> uint64_t override { return this->timestamp; };
 };
 
 class fss_message_smm_settings: public fss_message {
@@ -337,13 +340,13 @@ private:
     std::string password;
 protected:
     void unpackData(std::shared_ptr<buf_len> bl);
-    virtual void packData(std::shared_ptr<buf_len> bl) override;
+    void packData(std::shared_ptr<buf_len> bl) override;
 public:
     fss_message_smm_settings(const std::string &t_server_url, const std::string &t_username, const std::string &t_password) : fss_message(message_type_smm_settings), server_url(t_server_url), username(t_username), password(t_password) {};
     fss_message_smm_settings(uint64_t t_id, std::shared_ptr<buf_len> bl) : fss_message(t_id, message_type_smm_settings), server_url(), username(), password() { this->unpackData(bl); };
-    virtual std::string getServerURL() { return this->server_url; };
-    virtual std::string getUsername() { return this->username; };
-    virtual std::string getPassword() { return this->password; };
+    virtual auto getServerURL() -> std::string { return this->server_url; };
+    virtual auto getUsername() -> std::string { return this->username; };
+    virtual auto getPassword() -> std::string { return this->password; };
 };
 
 class fss_message_server_list: public fss_message {
@@ -351,12 +354,12 @@ private:
     std::vector<std::pair<std::string, uint16_t>> servers;
 protected:
     void unpackData(std::shared_ptr<buf_len> bl);
-    virtual void packData(std::shared_ptr<buf_len> bl) override;
+    void packData(std::shared_ptr<buf_len> bl) override;
 public:
     fss_message_server_list() : fss_message(message_type_server_list), servers() {};
     fss_message_server_list(uint64_t t_id, std::shared_ptr<buf_len> bl) : fss_message(t_id, message_type_server_list), servers() { this->unpackData(bl); };
     virtual void addServer(std::string server, uint16_t port) { this->servers.push_back(std::pair<std::string, uint16_t>(server, port)); };
-    virtual std::vector<std::pair<std::string, uint16_t>> getServers() { return this->servers; };
+    virtual auto getServers() -> std::vector<std::pair<std::string, uint16_t>> { return this->servers; };
 };
 
 class fss_message_identity_non_aircraft: public fss_message {
@@ -364,12 +367,12 @@ private:
     uint64_t capabilities{0};
 protected:
     void unpackData(std::shared_ptr<buf_len> bl);
-    virtual void packData(std::shared_ptr<buf_len> bl) override;
+    void packData(std::shared_ptr<buf_len> bl) override;
 public:
     fss_message_identity_non_aircraft() : fss_message(message_type_identity_non_aircraft) {};
     fss_message_identity_non_aircraft(uint64_t t_id, std::shared_ptr<buf_len> bl) : fss_message(t_id, message_type_identity_non_aircraft) { this->unpackData(bl); };
     void addCapability(uint8_t cap_id);
-    bool getCapability(uint8_t cap_id);
+    auto getCapability(uint8_t cap_id) -> bool;
 };
-}
-}
+} // namespace transport
+} // namespace flight_safety_system

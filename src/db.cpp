@@ -7,20 +7,18 @@ extern "C" {
 
 #include <string>
 
-using namespace flight_safety_system::server;
-
-db_connection::db_connection(const std::string &host, const std::string &user, const std::string &pass, const std::string &db) : db_lock()
+flight_safety_system::server::db_connection::db_connection(const std::string &host, const std::string &user, const std::string &pass, const std::string &db) : db_lock()
 {
     db_connect(host.c_str(), user.c_str(), pass.c_str(), db.c_str());
 }
 
-db_connection::~db_connection()
+flight_safety_system::server::db_connection::~db_connection()
 {
     db_disconnect();
 }
 
 auto
-db_connection::check_asset(const std::string &asset_name) -> bool
+flight_safety_system::server::db_connection::check_asset(const std::string &asset_name) -> bool
 {
     this->db_lock.lock();
     uint64_t asset_id = db_get_asset_id(asset_name.c_str());
@@ -29,7 +27,7 @@ db_connection::check_asset(const std::string &asset_name) -> bool
 }
 
 void
-db_connection::asset_add_rtt(const std::string &asset_name, uint64_t delta)
+flight_safety_system::server::db_connection::asset_add_rtt(const std::string &asset_name, uint64_t delta)
 {
     this->db_lock.lock();
     uint64_t asset_id = db_get_asset_id(asset_name.c_str());
@@ -41,7 +39,7 @@ db_connection::asset_add_rtt(const std::string &asset_name, uint64_t delta)
 }
 
 void
-db_connection::asset_add_status(const std::string &asset_name, uint8_t bat_percent, uint32_t bat_mah_used)
+flight_safety_system::server::db_connection::asset_add_status(const std::string &asset_name, uint8_t bat_percent, uint32_t bat_mah_used)
 {
     this->db_lock.lock();
     uint64_t asset_id = db_get_asset_id(asset_name.c_str());
@@ -53,7 +51,7 @@ db_connection::asset_add_status(const std::string &asset_name, uint8_t bat_perce
 }
 
 void
-db_connection::asset_add_search_status(const std::string &asset_name, uint64_t search_id, uint64_t search_completed, uint64_t search_total)
+flight_safety_system::server::db_connection::asset_add_search_status(const std::string &asset_name, uint64_t search_id, uint64_t search_completed, uint64_t search_total)
 {
     this->db_lock.lock();
     uint64_t asset_id = db_get_asset_id(asset_name.c_str());
@@ -65,7 +63,7 @@ db_connection::asset_add_search_status(const std::string &asset_name, uint64_t s
 }
 
 void
-db_connection::asset_add_position(const std::string &asset_name, double latitude, double longitude, uint16_t altitude)
+flight_safety_system::server::db_connection::asset_add_position(const std::string &asset_name, double latitude, double longitude, uint16_t altitude)
 {
     this->db_lock.lock();
     uint64_t asset_id = db_get_asset_id(asset_name.c_str());
@@ -77,7 +75,7 @@ db_connection::asset_add_position(const std::string &asset_name, double latitude
 }
 
 auto
-db_connection::asset_get_command(const std::string &asset_name) -> std::shared_ptr<asset_command>
+flight_safety_system::server::db_connection::asset_get_command(const std::string &asset_name) -> std::shared_ptr<asset_command>
 {
     this->db_lock.lock();
     uint64_t asset_id = db_get_asset_id(asset_name.c_str());
@@ -98,7 +96,7 @@ db_connection::asset_get_command(const std::string &asset_name) -> std::shared_p
 }
 
 auto
-db_connection::asset_get_smm_settings(const std::string &asset_name) -> std::shared_ptr<smm_settings>
+flight_safety_system::server::db_connection::asset_get_smm_settings(const std::string &asset_name) -> std::shared_ptr<smm_settings>
 {
     this->db_lock.lock();
     uint64_t asset_id = db_get_asset_id(asset_name.c_str());
@@ -121,7 +119,7 @@ db_connection::asset_get_smm_settings(const std::string &asset_name) -> std::sha
 }
 
 auto
-db_connection::get_active_fss_servers() -> std::list<std::shared_ptr<fss_server_details>>
+flight_safety_system::server::db_connection::get_active_fss_servers() -> std::list<std::shared_ptr<fss_server_details>>
 {
     std::list<std::shared_ptr<fss_server_details>> res;
     this->db_lock.lock();

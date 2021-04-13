@@ -14,8 +14,6 @@
 
 namespace fss_transport = flight_safety_system::transport;
 
-using namespace flight_safety_system::client;
-
 flight_safety_system::client::fss_client::fss_client(const std::string &t_fileName)
 {
     /* Open the config file */
@@ -40,7 +38,7 @@ flight_safety_system::client::fss_client::fss_client(const std::string &t_fileNa
 void
 flight_safety_system::client::fss_client::disconnect()
 {
-    for (auto server : this->servers)
+    for (const auto &server : this->servers)
     {
         server->disconnect();
     }
@@ -102,7 +100,7 @@ flight_safety_system::client::fss_client::sendMsgAll(const std::shared_ptr<fss_t
 }
 
 static auto
-server_list_matches (const std::list<std::shared_ptr<fss_server>> &servers, const std::string &address, uint16_t port) -> bool
+server_list_matches (const std::list<std::shared_ptr<flight_safety_system::client::fss_server>> &servers, const std::string &address, uint16_t port) -> bool
 {
     for(auto const &server: servers)
     {
@@ -164,7 +162,7 @@ flight_safety_system::client::fss_client::serverRequiresReconnect(fss_server *se
     this->notifyConnectionStatus();
 }
 
-fss_server::fss_server(fss_client *t_client, std::string t_address, uint16_t t_port, bool connect) : fss_message_cb(nullptr), client(t_client), address(std::move(t_address)), port(t_port)
+flight_safety_system::client::fss_server::fss_server(fss_client *t_client, std::string t_address, uint16_t t_port, bool connect) : fss_message_cb(nullptr), client(t_client), address(std::move(t_address)), port(t_port)
 {
     if (connect && this->reconnect())
     {
@@ -174,14 +172,14 @@ fss_server::fss_server(fss_client *t_client, std::string t_address, uint16_t t_p
 }
 
 void
-fss_server::sendIdentify()
+flight_safety_system::client::fss_server::sendIdentify()
 {
     auto ident_msg = std::make_shared<fss_transport::fss_message_identity>(this->client->getAssetName());
     conn->sendMsg(ident_msg);
 }
 
 auto
-fss_server::reconnect() -> bool
+flight_safety_system::client::fss_server::reconnect() -> bool
 {
     uint64_t ts = fss_current_timestamp();
     uint64_t elapsed_time = ts - this->last_tried;
@@ -218,7 +216,7 @@ fss_server::reconnect() -> bool
 }
 
 void
-fss_server::processMessage(std::shared_ptr<fss_transport::fss_message> msg)
+flight_safety_system::client::fss_server::processMessage(std::shared_ptr<fss_transport::fss_message> msg)
 {
     if (msg == nullptr)
     {
@@ -248,7 +246,7 @@ fss_server::processMessage(std::shared_ptr<fss_transport::fss_message> msg)
             {
                 /* Send a response */
                 auto reply_msg = std::make_shared<fss_transport::fss_message_rtt_response>(msg->getId());
-                conn->sendMsg(reply_msg);
+                this->sendMsg(reply_msg);
             }
                 break;
             case fss_transport::message_type_rtt_response:
@@ -293,20 +291,5 @@ fss_server::processMessage(std::shared_ptr<fss_transport::fss_message> msg)
                 }
             } break;
         }
-    }
-}
-
-void
-flight_safety_system::client::fss_server::disconnect()
-{
-    this->conn = nullptr;
-}
-
-void
-flight_safety_system::client::fss_server::sendMsg(const std::shared_ptr<flight_safety_system::transport::fss_message> &msg)
-{
-    if (this->conn != nullptr)
-    {
-        this->conn->sendMsg(msg);
     }
 }

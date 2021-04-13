@@ -111,16 +111,10 @@ std::shared_ptr<server_clients> clients = nullptr;
 
 fss_client::fss_client(std::shared_ptr<fss_transport::fss_connection> t_conn) : fss_message_cb(std::move(t_conn))
 {
-    conn->setHandler(this);
+    this->getConnection()->setHandler(this);
 }
 
 fss_client::~fss_client() = default;
-
-void
-fss_client::sendMsg(const std::shared_ptr<fss_transport::fss_message> &msg)
-{
-    this->conn->sendMsg(msg);
-}
 
 void
 fss_client::sendCommand()
@@ -146,22 +140,15 @@ fss_client::sendCommand()
                 msg = std::make_shared<fss_transport::fss_message_asset_command>(command, ac->getTimeStamp());
                 break;
         }
-        this->conn->sendMsg(msg);
+        this->getConnection()->sendMsg(msg);
     }
-}
-
-void
-fss_client::disconnect()
-{
-    this->conn->disconnect();
-    this->conn = nullptr;
 }
 
 void
 fss_client::sendRTTRequest(std::shared_ptr<fss_transport::fss_message_rtt_request> rtt_req)
 {
     uint64_t ts = fss_current_timestamp();
-    this->conn->sendMsg(rtt_req);
+    this->getConnection()->sendMsg(rtt_req);
     this->outstanding_rtt_requests.push_back(std::make_shared<fss_client_rtt>(ts, rtt_req->getId()));
 }
 
@@ -172,7 +159,7 @@ fss_client::sendSMMSettings()
     if (smm != nullptr)
     {
         auto settings_msg = std::make_shared<fss_transport::fss_message_smm_settings>(smm->getAddress(), smm->getUsername(), smm->getPassword());
-        this->conn->sendMsg(settings_msg);
+        this->getConnection()->sendMsg(settings_msg);
     }
 }
 
@@ -214,7 +201,7 @@ fss_client::processMessage(std::shared_ptr<fss_transport::fss_message> msg)
                 {
                     server_list->addServer(server_details->getAddress(),server_details->getPort());
                 }
-                this->conn->sendMsg(server_list);
+                this->getConnection()->sendMsg(server_list);
             }
         }
         else if(msg->getType() == fss_transport::message_type_identity_non_aircraft)
@@ -236,7 +223,7 @@ fss_client::processMessage(std::shared_ptr<fss_transport::fss_message> msg)
             {
                 /* Send a response */
                 auto reply_msg = std::make_shared<fss_transport::fss_message_rtt_response>(msg->getId());
-                conn->sendMsg(reply_msg);
+                this->getConnection()->sendMsg(reply_msg);
             }
                 break;
             case fss_transport::message_type_rtt_response:

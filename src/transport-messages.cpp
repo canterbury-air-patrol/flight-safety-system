@@ -24,6 +24,23 @@ packString(std::shared_ptr<buf_len> bl, std::string val)
     bl->addData((char *)&empty, sizeof(uint64_t) - (bl->getLength() % sizeof(uint64_t)));
 }
 
+void
+flight_safety_system::transport::fss_message_cb::disconnect()
+{
+    this->conn->disconnect();
+    this->conn = nullptr;
+}
+
+auto
+flight_safety_system::transport::fss_message_cb::sendMsg(const std::shared_ptr<fss_message> &msg) -> bool
+{
+    if (this->conn != nullptr)
+    {
+        return this->conn->sendMsg(msg);
+    }
+    return false;
+}
+
 size_t
 fss_message::headerLength()
 {
@@ -85,7 +102,7 @@ void
 fss_message_identity::unpackData(std::shared_ptr<buf_len> bl)
 {
     size_t offset = this->headerLength();
-    char *data = bl->getData();
+    const char *data = bl->getData();
     size_t length = bl->getLength();
     char *name_n = (char *)calloc(1, (length - offset) + 1);
     memcpy(name_n, data + offset, length - offset);
@@ -105,7 +122,7 @@ void
 fss_message_rtt_response::unpackData(std::shared_ptr<buf_len> bl)
 {
     size_t offset = this->headerLength();
-    char *data = bl->getData();
+    const char *data = bl->getData();
     size_t length = bl->getLength();
     if (length - offset >= sizeof(uint64_t))
     {
@@ -151,7 +168,7 @@ void
 fss_message_position_report::unpackData(std::shared_ptr<buf_len> bl)
 {
     size_t offset = this->headerLength();
-    char *data = bl->getData();
+    const char *data = bl->getData();
     size_t length = bl->getLength();
     int32_t lat = 0;
     int32_t lng = 0;
@@ -242,7 +259,7 @@ void
 fss_message_system_status::unpackData(std::shared_ptr<buf_len> bl)
 {
     size_t offset = this->headerLength();
-    char *data = bl->getData();
+    const char *data = bl->getData();
     size_t length = bl->getLength();
     this->bat_percent = 0;
     this->mah_used = 0;
@@ -269,7 +286,7 @@ void
 fss_message_search_status::unpackData(std::shared_ptr<buf_len> bl)
 {
     size_t offset = this->headerLength();
-    char *data = bl->getData();
+    const char *data = bl->getData();
     size_t length = bl->getLength();
     this->search_id = 0;
     this->point_completed = 0;
@@ -304,7 +321,7 @@ void
 fss_message_asset_command::unpackData(std::shared_ptr<buf_len> bl)
 {
     size_t offset = this->headerLength();
-    char *data = bl->getData();
+    const char *data = bl->getData();
     size_t length = bl->getLength();
     int32_t lat = 0;
     int32_t lng = 0;
@@ -338,7 +355,7 @@ void
 fss_message_smm_settings::unpackData(std::shared_ptr<buf_len> bl)
 {
     size_t offset = this->headerLength();
-    char *data = bl->getData();
+    const char *data = bl->getData();
     size_t length = bl->getLength();
     if (length - offset >= sizeof(uint16_t))
     {
@@ -385,7 +402,7 @@ void
 fss_message_server_list::unpackData(std::shared_ptr<buf_len> bl)
 {
     size_t offset = this->headerLength();
-    char *data = bl->getData();
+    const char *data = bl->getData();
     size_t length = bl->getLength();
     while (length - offset >= (sizeof(uint16_t) + sizeof(uint16_t)))
     {
@@ -412,7 +429,7 @@ void
 fss_message_identity_non_aircraft::unpackData(std::shared_ptr<buf_len> bl)
 {
     size_t offset = this->headerLength();
-    char *data = bl->getData();
+    const char *data = bl->getData();
     size_t length = bl->getLength();
     if (length - offset >= (sizeof(uint64_t)))
     {
@@ -437,7 +454,7 @@ std::shared_ptr<fss_message>
 fss_message::decode(std::shared_ptr<buf_len> bl)
 {
     std::shared_ptr<fss_message> msg = nullptr;
-    char *data = bl->getData();
+    const char *data = bl->getData();
     fss_message_type type = (fss_message_type) ntohs(*(uint16_t *)(data + sizeof(uint16_t)));
     uint64_t msg_id = ntohll (*(uint64_t *)(data + sizeof(uint16_t) + sizeof(uint16_t)));
 

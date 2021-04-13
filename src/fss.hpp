@@ -11,14 +11,12 @@
 
 #include <iostream>
 
-#include <stdbool.h>
-
 #include <sys/socket.h>
 #include <netinet/in.h>
 
 namespace flight_safety_system {
 
-uint64_t fss_current_timestamp();
-}
+auto fss_current_timestamp() -> uint64_t;
+} // namespace flight_safety_system
 
 #endif
