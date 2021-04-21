@@ -67,7 +67,7 @@ public:
         {
             if (c.get() == client)
             {
-                this->disconnected.push(std::move(c));
+                this->disconnected.push(c);
                 this->clients.remove(c);
                 break;
             }
@@ -145,7 +145,7 @@ fss_client::sendCommand()
 }
 
 void
-fss_client::sendRTTRequest(std::shared_ptr<fss_transport::fss_message_rtt_request> rtt_req)
+fss_client::sendRTTRequest(const std::shared_ptr<fss_transport::fss_message_rtt_request> &rtt_req)
 {
     uint64_t ts = fss_current_timestamp();
     this->getConnection()->sendMsg(rtt_req);

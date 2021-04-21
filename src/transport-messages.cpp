@@ -412,7 +412,7 @@ fss_message_server_list::unpackData(std::shared_ptr<buf_len> bl)
         offset += sizeof(uint16_t);
         std::string server_addr;
         server_addr.assign((char *)(data + offset), len);
-        this->servers.push_back(std::make_pair(server_addr, port));
+        this->servers.emplace_back(server_addr, port);
         offset += len;
         offset += (sizeof(uint64_t) - offset % sizeof(uint64_t));
     }

@@ -104,7 +104,7 @@ public:
     explicit fss_client(std::shared_ptr<transport::fss_connection> conn);
     ~fss_client() override;
     void processMessage(std::shared_ptr<transport::fss_message> message) override;
-    void sendRTTRequest(std::shared_ptr<transport::fss_message_rtt_request> rtt_req);
+    void sendRTTRequest(const std::shared_ptr<transport::fss_message_rtt_request> &rtt_req);
     void sendSMMSettings();
     void sendCommand();
     auto isAircraft() -> bool { return this->aircraft; };

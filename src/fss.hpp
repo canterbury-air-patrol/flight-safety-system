@@ -1,5 +1,4 @@
-#ifndef __FLIGHT_SAFETY_SYSTEM_HPP__
-#define __FLIGHT_SAFETY_SYSTEM_HPP__
+#pragma once
 
 #include <string>
 #include <cstring>
@@ -19,4 +18,3 @@ namespace flight_safety_system {
 auto fss_current_timestamp() -> uint64_t;
 } // namespace flight_safety_system
 
-#endif

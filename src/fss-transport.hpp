@@ -114,7 +114,7 @@ protected:
     std::shared_ptr<fss_connection> conn;
 public:
     explicit fss_message_cb(std::shared_ptr<fss_connection> t_conn) : conn(std::move(t_conn)) {};
-    fss_message_cb(fss_message_cb &from) : conn(from.conn) {};
+    fss_message_cb(const fss_message_cb &from) : conn(from.conn) {};
     virtual ~fss_message_cb() = default;
     auto operator=(const fss_message_cb& other) -> fss_message_cb&
     {
@@ -135,9 +135,9 @@ class fss_connection {
 private:
     bool run{false};
 protected:
-    int fd;
-    uint64_t last_msg_id;
-    fss_message_cb *handler;
+    int fd{-1};
+    uint64_t last_msg_id{0};
+    fss_message_cb *handler{nullptr};
     std::queue<std::shared_ptr<fss_message>> messages;
     std::thread recv_thread;
     auto recvMsg() -> std::shared_ptr<fss_message>;
@@ -145,9 +145,9 @@ protected:
     std::mutex send_lock;
     virtual auto sendMsg(const std::shared_ptr<buf_len> &bl) -> bool;
     auto operator=(const fss_connection& other) -> fss_connection& { return *this; };
-    fss_connection(const fss_connection &from) : fd(-1), last_msg_id(0), handler(nullptr), messages(), recv_thread(), send_lock() {};
+    fss_connection(const fss_connection &from) : messages(), recv_thread(), send_lock() {};
 public:
-    fss_connection() : fd(-1), last_msg_id(0), handler(nullptr), messages(), recv_thread(), send_lock() {};
+    fss_connection() : messages(), recv_thread(), send_lock() {};
     explicit fss_connection(int fd);
     virtual ~fss_connection();
     void setHandler(fss_message_cb *cb);
@@ -169,8 +169,8 @@ public:
     fss_listen(uint16_t t_port, fss_connect_cb t_cb) : fss_connection(), port(t_port), cb(t_cb) {
         this->startListening();
     };
-    ~fss_listen();
-    virtual void processMessages() override;
+    ~fss_listen() override;
+    void processMessages() override;
 };
 
 class fss_message {
@@ -183,7 +183,7 @@ protected:
 public:
     explicit fss_message(fss_message_type t_type) : id(0), type(t_type) {};
     fss_message(uint64_t t_id, fss_message_type t_type) : id(t_id), type(t_type) {};
-    virtual ~fss_message() {};
+    virtual ~fss_message() = default;
     void setId(uint64_t t_id) { this->id = t_id; };
     auto getId() -> uint64_t { return this->id; };
     auto getType() -> fss_message_type { return this->type; };
@@ -211,7 +211,7 @@ protected:
     void unpackData(std::shared_ptr<buf_len> bl);
     void packData(std::shared_ptr<buf_len> bl) override;
 public:
-    explicit fss_message_identity(const std::string &t_name) : fss_message(message_type_identity), name(t_name) {};
+    explicit fss_message_identity(std::string t_name) : fss_message(message_type_identity), name(std::move(t_name)) {};
     fss_message_identity(uint64_t t_id, std::shared_ptr<buf_len> bl) : fss_message(t_id, message_type_identity), name() { this->unpackData(bl); };
     virtual auto getName() -> std::string { return this->name; };
 };
@@ -263,7 +263,7 @@ public:
                                 uint8_t t_emitter_type, uint64_t t_timestamp) :
         fss_message(message_type_position_report), latitude(t_latitude), longitude(t_longitude),
         altitude(t_altitude), heading(t_heading), horizontal_velocity(t_hor_vel), vertical_velocity(t_ver_vel),
-        callsign(t_callsign), icao_address(t_icao_address), squawk(t_squawk), timestamp(t_timestamp),
+        callsign(std::move(t_callsign)), icao_address(t_icao_address), squawk(t_squawk), timestamp(t_timestamp),
         tslc(t_tslc), flags(t_flags), altitude_type(t_alt_type), emitter_type(t_emitter_type) {};
     fss_message_position_report(uint64_t t_id, std::shared_ptr<buf_len> bl) : fss_message(t_id, message_type_position_report) { this->unpackData(bl); };
     auto getLatitude() -> double override { return this->latitude; };
@@ -342,7 +342,7 @@ protected:
     void unpackData(std::shared_ptr<buf_len> bl);
     void packData(std::shared_ptr<buf_len> bl) override;
 public:
-    fss_message_smm_settings(const std::string &t_server_url, const std::string &t_username, const std::string &t_password) : fss_message(message_type_smm_settings), server_url(t_server_url), username(t_username), password(t_password) {};
+    fss_message_smm_settings(std::string t_server_url, std::string t_username, std::string t_password) : fss_message(message_type_smm_settings), server_url(std::move(t_server_url)), username(std::move(t_username)), password(std::move(t_password)) {};
     fss_message_smm_settings(uint64_t t_id, std::shared_ptr<buf_len> bl) : fss_message(t_id, message_type_smm_settings), server_url(), username(), password() { this->unpackData(bl); };
     virtual auto getServerURL() -> std::string { return this->server_url; };
     virtual auto getUsername() -> std::string { return this->username; };
@@ -358,7 +358,7 @@ protected:
 public:
     fss_message_server_list() : fss_message(message_type_server_list), servers() {};
     fss_message_server_list(uint64_t t_id, std::shared_ptr<buf_len> bl) : fss_message(t_id, message_type_server_list), servers() { this->unpackData(bl); };
-    virtual void addServer(std::string server, uint16_t port) { this->servers.push_back(std::pair<std::string, uint16_t>(server, port)); };
+    virtual void addServer(const std::string &server, uint16_t port) { this->servers.emplace_back(server, port); };
     virtual auto getServers() -> std::vector<std::pair<std::string, uint16_t>> { return this->servers; };
 };
 
