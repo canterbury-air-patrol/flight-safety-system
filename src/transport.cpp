@@ -341,3 +341,12 @@ fss_transport::fss_listen::startListening() -> bool
     this->recv_thread = std::thread(listen_thread, this);
     return true;
 }
+
+fss_transport::fss_message_cb::~fss_message_cb()
+{
+    if (this->conn != nullptr)
+    {
+        this->conn->setHandler(nullptr);
+        this->conn.reset();
+    }
+}

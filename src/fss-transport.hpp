@@ -115,7 +115,7 @@ protected:
 public:
     explicit fss_message_cb(std::shared_ptr<fss_connection> t_conn) : conn(std::move(t_conn)) {};
     fss_message_cb(const fss_message_cb &from) : conn(from.conn) {};
-    virtual ~fss_message_cb() = default;
+    virtual ~fss_message_cb();
     auto operator=(const fss_message_cb& other) -> fss_message_cb&
     {
         if (this != &other)
