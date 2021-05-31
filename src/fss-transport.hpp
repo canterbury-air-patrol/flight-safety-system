@@ -1,5 +1,7 @@
 #pragma once
 
+#include <memory>
+
 #include "fss.hpp"
 
 namespace flight_safety_system {

@@ -23,3 +23,7 @@ depcomp
 *.lo
 *.o
 *.pc
+*.gcda
+*.gcno
+*.gcov
+aminclude_static.am

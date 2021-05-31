@@ -1,7 +1,7 @@
 # Process this file with autoconf to produce a configure script.
 AC_PREREQ([2.69])
 AC_INIT([flight-safety-system], [0.5.2], [sjp@canterburyairpatrol.org])
-AM_INIT_AUTOMAKE([-Wall -Werror foreign])
+AM_INIT_AUTOMAKE([-Wall -Werror foreign -Wno-portability])
 
 m4_include([m4/ax_cxx_compile_stdcxx.m4])
 
@@ -14,6 +14,8 @@ AC_PROG_CC
 AM_PROG_AR
 
 AX_CXX_COMPILE_STDCXX([11],[],[mandatory])
+
+AX_CODE_COVERAGE
 
 LT_INIT([disable-static pic-only])
 

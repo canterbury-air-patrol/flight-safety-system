@@ -1,6 +1,15 @@
+include $(top_srcdir)/aminclude_static.am
+
 AUTOMAKE_OPTIONS = subdir-objects
 ACLOCAL_AMFLAGS = $(ACLOCAL_FLAGS)
+AM_LIBS =
+AM_CPPFLAGS =
+AM_CFLAGS =
 AM_CXXFLAGS = -pthread -fPIC -std=c++11 -I. -Werror -Wall -Wshadow -Wunused -Wnull-dereference -Wformat=2 -pedantic -Wnon-virtual-dtor -Woverloaded-virtual -Wpedantic -Weffc++ -I../src -include config.h
+AM_LIBS += $(CODE_COVERAGE_LIBS)
+AM_CFLAGS += $(CODE_COVERAGE_CFLAGS)
+AM_CXXFLAGS += $(CODE_COVERAGE_CXXFLAGS)
+AM_CPPFLAGS += $(CODE_COVERAGE_CPPFLAGS)
 
 if ENABLE_TESTS
 TESTS = messages_test connection_test
@@ -13,3 +22,6 @@ connection_test_SOURCES = connection.cpp
 connection_test_LDADD = ../src/libfss-transport.la
 
 endif
+
+clean-local: code-coverage-clean
+distclean-local: code-coverage-dist-clean
