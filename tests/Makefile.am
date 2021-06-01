@@ -12,14 +12,11 @@ AM_CXXFLAGS += $(CODE_COVERAGE_CXXFLAGS)
 AM_CPPFLAGS += $(CODE_COVERAGE_CPPFLAGS)
 
 if ENABLE_TESTS
-TESTS = messages_test connection_test
-check_PROGRAMS = messages_test connection_test
+TESTS = all_test
+check_PROGRAMS = all_test
 
-messages_test_SOURCES = messages.cpp
-messages_test_LDADD = ../src/libfss-transport.la
-
-connection_test_SOURCES = connection.cpp
-connection_test_LDADD = ../src/libfss-transport.la
+all_test_SOURCES = main.cpp messages.cpp connection.cpp
+all_test_LDADD = ../src/libfss-transport.la
 
 endif
 

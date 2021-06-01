@@ -3,6 +3,11 @@ ACLOCAL_AMFLAGS = $(ACLOCAL_FLAGS)
 
 AM_CXXFLAGS = -pthread -fPIC -std=c++11 -I. -Werror -Wall -Wshadow -Wunused -Wnull-dereference -Wformat=2 -pedantic -Wnon-virtual-dtor -Woverloaded-virtual -Wpedantic -Weffc++
 AM_CFLAGS = -pthread -fPIC -std=c99 -I. -Werror -Wall -Wshadow -Wunused -Wnull-dereference -Wformat=2 -pedantic -D_GNU_SOURCE
+AM_CPPFLAGS =
+
+AM_CFLAGS += $(CODE_COVERAGE_CFLAGS)
+AM_CXXFLAGS += $(CODE_COVERAGE_CXXFLAGS)
+AM_CPPFLAGS += $(CODE_COVERAGE_CPPFLAGS)
 
 bin_PROGRAMS =
 sbin_PROGRAMS =

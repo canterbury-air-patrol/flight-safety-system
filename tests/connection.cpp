@@ -1,4 +1,5 @@
-#define CATCH_CONFIG_MAIN  // This tells Catch to provide a main() - only do this in one cpp file
+#include <cstddef>
+#include <memory>
 #ifdef HAVE_CATCH2_CATCH_HPP
 #include <catch2/catch.hpp>
 #elif HAVE_CATCH_CATCH_HPP
@@ -8,6 +9,8 @@
 #else
 #error No catch header
 #endif
+
+#include <unistd.h>
 
 #include "fss-transport.hpp"
 using namespace flight_safety_system;
@@ -57,7 +60,63 @@ TEST_CASE("Listen Socket") {
     REQUIRE(msg != nullptr);
     REQUIRE(msg->getType() == transport::message_type_closed);
 
+    msg = client_conn->getMsg();
+    REQUIRE(msg == nullptr);
+
     client_conn = nullptr;
 
     delete listen;
+}
+
+class test_message_cb: public transport::fss_message_cb
+{
+    private:
+        std::shared_ptr<transport::fss_message> first{};
+    public:
+        test_message_cb(std::shared_ptr<flight_safety_system::transport::fss_connection> t_conn) : fss_message_cb(t_conn) {};
+        auto getFirstMsg() -> std::shared_ptr<transport::fss_message> {
+            return this->first;
+        }
+        virtual void processMessage(std::shared_ptr<transport::fss_message> message) override {
+            this->first = std::move(message);
+        }
+};
+
+
+TEST_CASE("Listen - Callback")
+{
+    auto listen = new transport::fss_listen(20203, test_client_connect_cb);
+    REQUIRE(listen != nullptr);
+
+    auto conn = new transport::fss_connection();
+    REQUIRE(conn != nullptr);
+    REQUIRE(conn->connectTo("localhost", 20203));
+
+    conn->sendMsg(std::make_shared<transport::fss_message_identity>("testClient"));
+
+    sleep (1);
+
+    REQUIRE(client_conn != nullptr);
+
+    auto cb = new test_message_cb(client_conn);
+    REQUIRE(cb->connected());
+    REQUIRE(cb->getConnection() == client_conn);
+    client_conn->setHandler(cb);
+
+    REQUIRE(client_conn->getMsg() == nullptr);
+
+    cb->sendMsg(std::make_shared<transport::fss_message_rtt_request>());
+
+    sleep(1);
+
+    REQUIRE(cb->getFirstMsg() != nullptr);
+
+    cb->disconnect();
+    REQUIRE(!cb->connected());
+
+    client_conn = nullptr;
+
+    delete listen;
+    delete cb;
+    delete conn;
 }
