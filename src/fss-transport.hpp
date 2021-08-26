@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <sys/types.h>
 
 #include "fss.hpp"
 
@@ -140,20 +141,21 @@ protected:
     int fd{-1};
     uint64_t last_msg_id{0};
     fss_message_cb *handler{nullptr};
-    std::queue<std::shared_ptr<fss_message>> messages;
-    std::thread recv_thread;
+    std::queue<std::shared_ptr<fss_message>> messages{};
+    std::thread recv_thread{};
     auto recvMsg() -> std::shared_ptr<fss_message>;
     auto getMessageId() -> uint64_t;
-    std::mutex send_lock;
-    virtual auto sendMsg(const std::shared_ptr<buf_len> &bl) -> bool;
+    std::mutex send_lock{};
+    virtual auto sendMsg(const std::shared_ptr<flight_safety_system::transport::buf_len> &bl) -> bool;
+    virtual auto recvBytes(void *bytes, size_t max_bytes) -> ssize_t;
     auto operator=(const fss_connection& other) -> fss_connection& { return *this; };
     fss_connection(const fss_connection &from) : messages(), recv_thread(), send_lock() {};
 public:
-    fss_connection() : messages(), recv_thread(), send_lock() {};
+    fss_connection() {};
     explicit fss_connection(int fd);
     virtual ~fss_connection();
     void setHandler(fss_message_cb *cb);
-    auto connectTo(const std::string &address, uint16_t port) -> bool;
+    virtual auto connectTo(const std::string &address, uint16_t port) -> bool;
     auto sendMsg(const std::shared_ptr<fss_message> &msg) -> bool;
     auto getMsg() -> std::shared_ptr<fss_message>;
     virtual void processMessages();
@@ -167,6 +169,8 @@ private:
     fss_connect_cb cb;
     static constexpr int default_max_pending_conns = 10;
     int max_pending_connections{default_max_pending_conns};
+protected:
+    virtual auto newConnection(int fd) -> std::shared_ptr<flight_safety_system::transport::fss_connection>;
 public:
     fss_listen(uint16_t t_port, fss_connect_cb t_cb) : fss_connection(), port(t_port), cb(t_cb) {
         this->startListening();

@@ -1,4 +1,6 @@
 #include <bits/stdint-uintn.h>
+#include <memory>
+#include <mutex>
 #include <string>
 #include <cstring>
 #include "fss-transport.hpp"
@@ -154,7 +156,7 @@ fss_transport::fss_connection::connectTo(const std::string &address, uint16_t po
 auto
 fss_transport::fss_connection::sendMsg(const std::shared_ptr<fss_message> &msg) -> bool
 {
-    this->send_lock.lock();
+    std::lock_guard<std::mutex> lock_holder(this->send_lock);
     msg->setId(this->getMessageId());
     auto bl = msg->getPacked();
 #ifdef DEBUG
@@ -165,7 +167,6 @@ fss_transport::fss_connection::sendMsg(const std::shared_ptr<fss_message> &msg) 
         return false;
     }
     bool ret = this->sendMsg(bl);
-    this->send_lock.unlock();
     return ret;
 }
 
@@ -217,12 +218,18 @@ fss_transport::fss_connection::setHandler(fss_message_cb *cb)
 }
 
 auto
+fss_transport::fss_connection::recvBytes(void *t_bytes, size_t t_max_bytes) -> ssize_t
+{
+    return recv(this->fd, t_bytes, t_max_bytes, 0);
+}
+
+auto
 fss_transport::fss_connection::recvMsg() -> std::shared_ptr<fss_transport::fss_message>
 {
     std::shared_ptr<fss_transport::fss_message> msg = nullptr;
     std::string data;
     data.resize(sizeof (uint16_t));
-    ssize_t received = recv(this->fd, &data[0], data.size(), 0);
+    ssize_t received = this->recvBytes(&data[0], data.size());
     if (received == static_cast<ssize_t>(data.size()))
     {
         uint16_t data_length = ntohs(*(uint16_t *)&data[0]);
@@ -305,7 +312,7 @@ fss_transport::fss_listen::processMessages()
 #endif
         if (this->cb != nullptr)
         {
-            auto conn = std::make_shared<fss_transport::fss_connection>(newfd);
+            auto conn = this->newConnection(newfd);
             this->cb(conn);
         }
         else
@@ -314,6 +321,12 @@ fss_transport::fss_listen::processMessages()
             close(newfd);
         }
     }
+}
+
+auto
+fss_transport::fss_listen::newConnection(int t_newfd) -> std::shared_ptr<fss_transport::fss_connection>
+{
+    return std::make_shared<fss_transport::fss_connection>(t_newfd);
 }
 
 auto

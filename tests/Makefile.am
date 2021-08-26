@@ -9,4 +9,9 @@ check_PROGRAMS = all_test
 all_test_SOURCES = main.cpp messages.cpp connection.cpp client.cpp
 all_test_LDADD = ../src/libfss-transport.la ../src/libfss-client.la ../src/libfss.la $(JSONCPP_LIBS)
 
+if SSL
+all_test_SOURCES += connection-ssl.cpp
+all_test_LDADD += ../src/libfss-transport-ssl.la $(GNUTLS_LIBS)
+endif
+
 endif

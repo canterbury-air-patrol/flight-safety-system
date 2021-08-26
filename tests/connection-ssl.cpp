@@ -12,11 +12,18 @@
 
 #include <unistd.h>
 
-#include "fss-transport.hpp"
+#include "fss-transport-ssl.hpp"
 using namespace flight_safety_system;
 
-TEST_CASE("Connection Create (failure)") {
-    auto conn = new transport::fss_connection();
+#define CA_PUBLIC_FILE "ca.public.pem"
+#define SERVER_PRIVATE_FILE "server.private.pem"
+#define SERVER_PUBLIC_FILE "server.public.pem"
+#define CLIENT_PRIVATE_FILE "client.private.pem"
+#define CLIENT_PUBLIC_FILE "client.public.pem"
+
+
+TEST_CASE("SSL - Connection Create (failure)") {
+    auto conn = new transport_ssl::fss_connection_client(CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE);
     REQUIRE(conn != nullptr);
 
     REQUIRE(!conn->connectTo("localhost", 1));
@@ -36,11 +43,11 @@ static bool test_client_connect_cb (std::shared_ptr<transport::fss_connection> n
 }
 
 
-TEST_CASE("Listen Socket") {
-    auto listen = new transport::fss_listen(20202, test_client_connect_cb);
+TEST_CASE("SSL - Listen Socket") {
+    auto listen = new transport_ssl::fss_listen(20202, test_client_connect_cb, CA_PUBLIC_FILE, SERVER_PRIVATE_FILE, SERVER_PUBLIC_FILE);
     REQUIRE(listen != nullptr);
 
-    auto conn = new transport::fss_connection();
+    transport::fss_connection *conn = new transport_ssl::fss_connection_client(CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE);
     REQUIRE(conn != nullptr);
     REQUIRE(conn->connectTo("localhost", 20202));
     auto send_msg = std::make_shared<transport::fss_message_identity>("testClient");
@@ -68,12 +75,12 @@ TEST_CASE("Listen Socket") {
     delete listen;
 }
 
-class test_message_cb: public transport::fss_message_cb
+class test_ssl_message_cb: public transport::fss_message_cb
 {
     private:
         std::shared_ptr<transport::fss_message> first{};
     public:
-        test_message_cb(std::shared_ptr<flight_safety_system::transport::fss_connection> t_conn) : fss_message_cb(t_conn) {};
+        test_ssl_message_cb(std::shared_ptr<flight_safety_system::transport::fss_connection> t_conn) : fss_message_cb(t_conn) {};
         auto getFirstMsg() -> std::shared_ptr<transport::fss_message> {
             return this->first;
         }
@@ -83,12 +90,12 @@ class test_message_cb: public transport::fss_message_cb
 };
 
 
-TEST_CASE("Listen - Callback")
+TEST_CASE("SSL - Listen - Callback")
 {
-    auto listen = new transport::fss_listen(20203, test_client_connect_cb);
+    auto listen = new transport_ssl::fss_listen(20203, test_client_connect_cb, CA_PUBLIC_FILE, SERVER_PRIVATE_FILE, SERVER_PUBLIC_FILE);
     REQUIRE(listen != nullptr);
 
-    auto conn = new transport::fss_connection();
+    transport::fss_connection *conn = new transport_ssl::fss_connection_client(CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE);
     REQUIRE(conn != nullptr);
     REQUIRE(conn->connectTo("localhost", 20203));
 
@@ -98,7 +105,7 @@ TEST_CASE("Listen - Callback")
 
     REQUIRE(client_conn != nullptr);
 
-    auto cb = new test_message_cb(client_conn);
+    auto cb = new test_ssl_message_cb(client_conn);
     REQUIRE(cb->connected());
     REQUIRE(cb->getConnection() == client_conn);
     client_conn->setHandler(cb);
