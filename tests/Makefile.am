@@ -15,8 +15,8 @@ if ENABLE_TESTS
 TESTS = all_test
 check_PROGRAMS = all_test
 
-all_test_SOURCES = main.cpp messages.cpp connection.cpp
-all_test_LDADD = ../src/libfss-transport.la
+all_test_SOURCES = main.cpp messages.cpp connection.cpp client.cpp
+all_test_LDADD = ../src/libfss-transport.la ../src/libfss-client.la ../src/libfss.la $(JSONCPP_LIBS)
 
 endif
 
