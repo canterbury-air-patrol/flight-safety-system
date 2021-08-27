@@ -135,9 +135,8 @@ public:
 };
 
 class fss_connection {
-private:
-    bool run{false};
 protected:
+    bool run{false};
     int fd{-1};
     uint64_t last_msg_id{0};
     fss_message_cb *handler{nullptr};

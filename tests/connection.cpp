@@ -77,7 +77,7 @@ class test_message_cb: public transport::fss_message_cb
         auto getFirstMsg() -> std::shared_ptr<transport::fss_message> {
             return this->first;
         }
-        virtual void processMessage(std::shared_ptr<transport::fss_message> message) override {
+        void processMessage(std::shared_ptr<transport::fss_message> message) override {
             this->first = std::move(message);
         }
 };

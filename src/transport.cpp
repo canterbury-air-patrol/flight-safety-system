@@ -48,7 +48,7 @@ recv_msg_thread(fss_transport::fss_connection *conn)
     conn->processMessages();
 }
 
-fss_transport::fss_connection::fss_connection(int t_fd) : fd(t_fd), last_msg_id(0), handler(nullptr), messages(), recv_thread(std::thread(recv_msg_thread, this)), send_lock()
+fss_transport::fss_connection::fss_connection(int t_fd) : fd(t_fd), recv_thread(std::thread(recv_msg_thread, this))
 {
 }
 
@@ -90,8 +90,13 @@ fss_transport::fss_connection::processMessages()
     while (this->run)
     {
         auto msg = this->recvMsg();
+        if (msg == nullptr)
+        {
+            std::cerr << "Got a null msg" << std::endl;
+        }
         if (msg && msg->getType() == message_type_closed)
         {
+            std::cerr << "Remote closed the connection" << std::endl;
             this->run = false;
         }
         if (this->handler != nullptr)
@@ -209,11 +214,14 @@ void
 fss_transport::fss_connection::setHandler(fss_message_cb *cb)
 {
     this->handler = cb;
-    while(!this->messages.empty())
+    if (this->handler != nullptr)
     {
-        auto msg = this->messages.front();
-        this->messages.pop();
-        cb->processMessage(msg);
+        while(!this->messages.empty())
+        {
+            auto msg = this->messages.front();
+            this->messages.pop();
+            cb->processMessage(msg);
+        }
     }
 }
 
@@ -242,7 +250,7 @@ fss_transport::fss_connection::recvMsg() -> std::shared_ptr<fss_transport::fss_m
         data.resize(total_length);
         while (received != total_length)
         {
-            ssize_t this_time = recv(this->fd, &data[received], total_length - received, 0);
+            ssize_t this_time = this->recvBytes(&data[received], total_length - received);
             if (this_time < 0)
             {
                 perror("Error receiving data");

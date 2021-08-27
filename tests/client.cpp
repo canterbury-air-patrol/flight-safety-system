@@ -23,12 +23,12 @@ static bool test_client_connect_cb (std::shared_ptr<transport::fss_connection> n
 }
 
 TEST_CASE("Client Base") {
-    auto listen = new transport::fss_listen(20302, test_client_connect_cb);
+    auto listen = new transport::fss_listen(20402, test_client_connect_cb);
     REQUIRE(listen != nullptr);
 
     auto client = new client::fss_client();
     REQUIRE(client != nullptr);
-    client->connectTo("localhost", 20302, true);
+    client->connectTo("localhost", 20402, true);
 
     sleep (1);
 

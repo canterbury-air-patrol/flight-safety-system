@@ -25,13 +25,13 @@ public:
 
 class fss_connection_client : public fss_connection {
 public:
-    fss_connection_client(std::string t_ca, std::string t_private_key, std::string t_public_key) : fss_connection(GNUTLS_CLIENT, t_ca, t_private_key, t_public_key) {};
+    fss_connection_client(std::string t_ca, std::string t_private_key, std::string t_public_key) : fss_connection(GNUTLS_CLIENT, std::move(t_ca), std::move(t_private_key), std::move(t_public_key)) {};
 };
 
 
 class fss_connection_server : public fss_connection {
 public:
-    fss_connection_server(int t_fd, std::string t_ca, std::string t_private_key, std::string t_public_key) : fss_connection(t_fd, GNUTLS_SERVER, t_ca, t_private_key, t_public_key) {};
+    fss_connection_server(int t_fd, std::string t_ca, std::string t_private_key, std::string t_public_key) : fss_connection(t_fd, GNUTLS_SERVER, std::move(t_ca), std::move(t_private_key), std::move(t_public_key)) {};
 };
 
 class fss_listen : public flight_safety_system::transport::fss_listen {
@@ -41,7 +41,7 @@ protected:
     std::string public_key_file;
     auto newConnection(int fd) -> std::shared_ptr<flight_safety_system::transport::fss_connection> override;
 public:
-    fss_listen(uint16_t t_port, flight_safety_system::transport::fss_connect_cb t_cb, std::string t_ca, std::string t_private_key, std::string t_public_key) : flight_safety_system::transport::fss_listen(t_port, t_cb), ca_file(t_ca), private_key_file(t_private_key), public_key_file(t_public_key) {};
+    fss_listen(uint16_t t_port, flight_safety_system::transport::fss_connect_cb t_cb, std::string t_ca, std::string t_private_key, std::string t_public_key) : flight_safety_system::transport::fss_listen(t_port, t_cb), ca_file(std::move(t_ca)), private_key_file(std::move(t_private_key)), public_key_file(std::move(t_public_key)) {};
 };
-};
-};
+}; /* transport_ssl */
+}; /* flight_safety_system */
