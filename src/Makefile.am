@@ -1,7 +1,7 @@
 AUTOMAKE_OPTIONS = subdir-objects
 ACLOCAL_AMFLAGS = $(ACLOCAL_FLAGS)
 
-AM_CXXFLAGS = -pthread -fPIC -std=c++11 -I. -Werror -Wall -Wshadow -Wunused -Wnull-dereference -Wformat=2 -pedantic -Wnon-virtual-dtor -Woverloaded-virtual -Wpedantic -Weffc++
+AM_CXXFLAGS = -pthread -fPIC -std=c++11 -I. -Werror -Wall -Wshadow -Wunused -Wnull-dereference -Wformat=2 -pedantic -Wnon-virtual-dtor -Woverloaded-virtual -Wpedantic -Weffc++ -include config.h
 AM_CFLAGS = -pthread -fPIC -std=c99 -I. -Werror -Wall -Wshadow -Wunused -Wnull-dereference -Wformat=2 -pedantic -D_GNU_SOURCE
 AM_CPPFLAGS =
 
@@ -52,5 +52,9 @@ fss_server_SOURCES = server.cpp fss-server.hpp db.cpp server-db.pgc server-db.h
 fss_server_CXXFLAGS = $(AM_CXXFLAGS) $(JSONCPP_CFLAGS)
 fss_server_CFLAGS = $(AM_CFLAGS) $(ECPG_CFLAGS)
 fss_server_LDADD = libfss.la libfss-transport.la $(JSONCPP_LIBS) $(ECPG_LIBS)
+
+if SSL
+fss_server_LDADD += libfss-transport-ssl.la
+endif
 
 endif

@@ -57,6 +57,7 @@ AS_IF([test "x$enable_server" == "xyes"], [
 
 AS_IF([test "x$enable_ssl" == "xyes"], [
     PKG_CHECK_MODULES([GNUTLS], [gnutls >= 3.3.0])
+    AC_DEFINE([HAVE_SSL],[],[Enable SSL Support])
 ])
 
 AS_IF([test "x$enable_tests" == "xyes"], [

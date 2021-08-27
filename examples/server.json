@@ -2,7 +2,12 @@
     "port": 20202,
     "postgres": {
        "host": "localhost",
-       "user": "fss",
+       "user": "scott",
        "db": "fss"
+    },
+    "ssl": {
+       "ca_public_key": "certs/ca.public.pem",
+       "server_private_key": "certs/server.private.pem",
+       "server_public_key": "certs/server.public.pem"
     }
 }
