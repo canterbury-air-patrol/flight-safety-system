@@ -1,3 +1,4 @@
+#include <memory>
 #ifdef HAVE_CATCH2_CATCH_HPP
 #include <catch2/catch.hpp>
 #elif HAVE_CATCH_CATCH_HPP
@@ -13,29 +14,25 @@
 #include "fss-transport.hpp"
 #include "fss-client.hpp"
 
-using namespace flight_safety_system;
-
-static std::shared_ptr<transport::fss_connection> client_conn = nullptr;
-static bool test_client_connect_cb (std::shared_ptr<transport::fss_connection> new_conn)
+static std::shared_ptr<flight_safety_system::transport::fss_connection> client_conn = nullptr;
+static auto test_client_connect_cb (std::shared_ptr<flight_safety_system::transport::fss_connection> new_conn) -> bool
 {
-    client_conn = new_conn;
+    client_conn = std::move(new_conn);
     return true;
 }
 
 TEST_CASE("Client Base") {
-    auto listen = new transport::fss_listen(20402, test_client_connect_cb);
+    constexpr int listen_port = 20402;
+    auto listen = std::make_shared<flight_safety_system::transport::fss_listen>(listen_port, test_client_connect_cb);
     REQUIRE(listen != nullptr);
 
-    auto client = new client::fss_client();
+    auto client = std::make_shared<flight_safety_system::client::fss_client>();
     REQUIRE(client != nullptr);
-    client->connectTo("localhost", 20402, true);
+    client->connectTo("localhost", listen_port, true);
 
     sleep (1);
 
     REQUIRE(client_conn != nullptr);
 
     client_conn = nullptr;
-
-    delete client;
-    delete listen;
 }
