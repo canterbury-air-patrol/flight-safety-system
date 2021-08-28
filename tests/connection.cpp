@@ -13,10 +13,9 @@
 #include <unistd.h>
 
 #include "fss-transport.hpp"
-using namespace flight_safety_system;
 
 TEST_CASE("Connection Create (failure)") {
-    auto conn = new transport::fss_connection();
+    auto conn = std::make_shared<flight_safety_system::transport::fss_connection>();
     REQUIRE(conn != nullptr);
 
     REQUIRE(!conn->connectTo("localhost", 1));
@@ -24,29 +23,28 @@ TEST_CASE("Connection Create (failure)") {
     REQUIRE(!conn->connectTo("::1", 1));
 
     REQUIRE(!conn->connectTo("this.host.does.not.exist", 1));
-
-    delete conn;
 }
 
-static std::shared_ptr<transport::fss_connection> client_conn = nullptr;
-static bool test_client_connect_cb (std::shared_ptr<transport::fss_connection> new_conn)
+static std::shared_ptr<flight_safety_system::transport::fss_connection> client_conn = nullptr;
+static auto test_client_connect_cb (std::shared_ptr<flight_safety_system::transport::fss_connection> new_conn) -> bool
 {
-    client_conn = new_conn;
+    client_conn = std::move(new_conn);
     return true;
 }
 
 
 TEST_CASE("Listen Socket") {
-    auto listen = new transport::fss_listen(20202, test_client_connect_cb);
+    constexpr int listen_port = 20202;
+    auto listen = std::make_shared<flight_safety_system::transport::fss_listen>(listen_port, test_client_connect_cb);
     REQUIRE(listen != nullptr);
 
-    auto conn = new transport::fss_connection();
+    auto conn = std::make_shared<flight_safety_system::transport::fss_connection>();
     REQUIRE(conn != nullptr);
-    REQUIRE(conn->connectTo("localhost", 20202));
-    auto send_msg = std::make_shared<transport::fss_message_identity>("testClient");
+    REQUIRE(conn->connectTo("localhost", listen_port));
+    auto send_msg = std::make_shared<flight_safety_system::transport::fss_message_identity>("testClient");
     conn->sendMsg(send_msg);
 
-    delete conn;
+    conn = nullptr;
 
     sleep(1);
 
@@ -54,30 +52,28 @@ TEST_CASE("Listen Socket") {
     auto msg = client_conn->getMsg();
 
     REQUIRE(msg != nullptr);
-    REQUIRE(msg->getType() == transport::message_type_identity);
+    REQUIRE(msg->getType() == flight_safety_system::transport::message_type_identity);
 
     msg = client_conn->getMsg();
     REQUIRE(msg != nullptr);
-    REQUIRE(msg->getType() == transport::message_type_closed);
+    REQUIRE(msg->getType() == flight_safety_system::transport::message_type_closed);
 
     msg = client_conn->getMsg();
     REQUIRE(msg == nullptr);
 
     client_conn = nullptr;
-
-    delete listen;
 }
 
-class test_message_cb: public transport::fss_message_cb
+class test_message_cb: public flight_safety_system::transport::fss_message_cb
 {
     private:
-        std::shared_ptr<transport::fss_message> first{};
+        std::shared_ptr<flight_safety_system::transport::fss_message> first{};
     public:
-        test_message_cb(std::shared_ptr<flight_safety_system::transport::fss_connection> t_conn) : fss_message_cb(t_conn) {};
-        auto getFirstMsg() -> std::shared_ptr<transport::fss_message> {
+        explicit test_message_cb(std::shared_ptr<flight_safety_system::transport::fss_connection> t_conn) : fss_message_cb(std::move(t_conn)) {};
+        auto getFirstMsg() -> std::shared_ptr<flight_safety_system::transport::fss_message> {
             return this->first;
         }
-        void processMessage(std::shared_ptr<transport::fss_message> message) override {
+        void processMessage(std::shared_ptr<flight_safety_system::transport::fss_message> message) override {
             this->first = std::move(message);
         }
 };
@@ -85,27 +81,29 @@ class test_message_cb: public transport::fss_message_cb
 
 TEST_CASE("Listen - Callback")
 {
-    auto listen = new transport::fss_listen(20203, test_client_connect_cb);
+    constexpr int listen_port = 20203;
+
+    auto listen = std::make_shared<flight_safety_system::transport::fss_listen>(listen_port, test_client_connect_cb);
     REQUIRE(listen != nullptr);
 
-    auto conn = new transport::fss_connection();
+    auto conn = std::make_shared<flight_safety_system::transport::fss_connection>();
     REQUIRE(conn != nullptr);
-    REQUIRE(conn->connectTo("localhost", 20203));
+    REQUIRE(conn->connectTo("localhost", listen_port));
 
-    conn->sendMsg(std::make_shared<transport::fss_message_identity>("testClient"));
+    conn->sendMsg(std::make_shared<flight_safety_system::transport::fss_message_identity>("testClient"));
 
     sleep (1);
 
     REQUIRE(client_conn != nullptr);
 
-    auto cb = new test_message_cb(client_conn);
+    auto cb = std::make_shared<test_message_cb>(client_conn);
     REQUIRE(cb->connected());
     REQUIRE(cb->getConnection() == client_conn);
-    client_conn->setHandler(cb);
+    client_conn->setHandler(cb.get());
 
     REQUIRE(client_conn->getMsg() == nullptr);
 
-    cb->sendMsg(std::make_shared<transport::fss_message_rtt_request>());
+    cb->sendMsg(std::make_shared<flight_safety_system::transport::fss_message_rtt_request>());
 
     sleep(1);
 
@@ -115,8 +113,4 @@ TEST_CASE("Listen - Callback")
     REQUIRE(!cb->connected());
 
     client_conn = nullptr;
-
-    delete listen;
-    delete cb;
-    delete conn;
 }
