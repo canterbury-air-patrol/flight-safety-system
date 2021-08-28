@@ -3,9 +3,9 @@
 CA_PRIVATE_PEM=ca.private.pem
 CA_PUBLIC_PEM=ca.public.pem
 
-SERVER_TMPL=server.tmpl
-SERVER_PRIVATE_PEM=server.private.pem
-SERVER_PUBLIC_PEM=server.public.pem
+SERVER_TMPL=${1}.tmpl
+SERVER_PRIVATE_PEM=${1}.private.pem
+SERVER_PUBLIC_PEM=${1}.public.pem
 
 certtool --generate-privkey > ${SERVER_PRIVATE_PEM}
 
