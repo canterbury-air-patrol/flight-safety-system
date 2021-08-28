@@ -1,3 +1,4 @@
+#include <cstdlib>
 #include <memory>
 
 #ifdef HAVE_CATCH2_CATCH_HPP
@@ -13,18 +14,19 @@
 #include <cmath>
 
 #include "fss-transport.hpp"
-using namespace flight_safety_system::transport;
 
 TEST_CASE("Close Connection Check") {
+    auto msg_id = static_cast<uint64_t>(random());
+
     /* Create a test closed connection */
-    auto msg = new fss_message_closed();
+    auto msg = std::make_shared<flight_safety_system::transport::fss_message_closed>();
     /* Check the type */
-    REQUIRE(msg->getType() == message_type_closed);
+    REQUIRE(msg->getType() == flight_safety_system::transport::message_type_closed);
     /* Convert to bl */
-    msg->setId(2563);
+    msg->setId(msg_id);
     auto bl = msg->getPacked();
     REQUIRE(bl != nullptr);
-    auto decoded_generic = fss_message::decode(bl);
+    auto decoded_generic = flight_safety_system::transport::fss_message::decode(bl);
     REQUIRE(decoded_generic == nullptr);
 
     /* Check the base fss_message functionality */
@@ -32,425 +34,446 @@ TEST_CASE("Close Connection Check") {
     REQUIRE(std::isnan(msg->getLongitude()));
     REQUIRE(msg->getAltitude() == 0);
     REQUIRE(msg->getTimeStamp() == 0);
-
-    delete msg;
 }
 
 TEST_CASE("Identity Message Check") {
+    auto msg_id = static_cast<uint64_t>(random());
+
     /* Create a test identity */
-    auto msg = new fss_message_identity("test1");
+    auto msg = std::make_shared<flight_safety_system::transport::fss_message_identity>("test1");
     /* Check the type */
-    REQUIRE(msg->getType() == message_type_identity);
+    REQUIRE(msg->getType() == flight_safety_system::transport::message_type_identity);
     /* Get the name */
     REQUIRE(msg->getName() == "test1");
     /* Convert to bl and back */
-    msg->setId(2563);
+    msg->setId(msg_id);
     auto bl = msg->getPacked();
     REQUIRE(bl != nullptr);
-    auto decoded = new fss_message_identity(2563, bl);
+    auto decoded = std::make_shared<flight_safety_system::transport::fss_message_identity>(msg_id, bl);
     /* Check the type */
-    REQUIRE(decoded->getType() == message_type_identity);
+    REQUIRE(decoded->getType() == flight_safety_system::transport::message_type_identity);
     /* Check input == output */
-    REQUIRE(decoded->getId() == 2563);
+    REQUIRE(decoded->getId() == msg_id);
     REQUIRE(decoded->getName() == "test1");
-    delete decoded;
-    auto decoded_generic = fss_message::decode(bl);
-    REQUIRE(decoded_generic->getType() == message_type_identity);
-    REQUIRE(decoded_generic->getId() == 2563);
-    auto decoded_generic_identity = std::dynamic_pointer_cast<fss_message_identity>(decoded_generic);
+    auto decoded_generic = flight_safety_system::transport::fss_message::decode(bl);
+    REQUIRE(decoded_generic->getType() == flight_safety_system::transport::message_type_identity);
+    REQUIRE(decoded_generic->getId() == msg_id);
+    auto decoded_generic_identity = std::dynamic_pointer_cast<flight_safety_system::transport::fss_message_identity>(decoded_generic);
     REQUIRE(decoded_generic_identity != nullptr);
     REQUIRE(decoded_generic_identity->getName() == "test1");
-
-    delete msg;
 }
 
 TEST_CASE("RTT Request Message Check") {
+    auto msg_id = static_cast<uint64_t>(random());
+
     /* Create a test rtt request */
-    auto msg = new fss_message_rtt_request();
+    auto msg = std::make_shared<flight_safety_system::transport::fss_message_rtt_request>();
     /* Check the type */
-    REQUIRE(msg->getType() == message_type_rtt_request);
+    REQUIRE(msg->getType() == flight_safety_system::transport::message_type_rtt_request);
     /* Convert to bl and back */
-    msg->setId(2563);
+    msg->setId(msg_id);
     auto bl = msg->getPacked();
     REQUIRE(bl != nullptr);
-    auto decoded = new fss_message_rtt_request(2563, bl);
+    auto decoded = std::make_shared<flight_safety_system::transport::fss_message_rtt_request>(msg_id, bl);
     /* Check the type */
-    REQUIRE(decoded->getType() == message_type_rtt_request);
+    REQUIRE(decoded->getType() == flight_safety_system::transport::message_type_rtt_request);
     /* Check input == output */
-    REQUIRE(decoded->getId() == 2563);
-    delete decoded;
-    auto decoded_generic = fss_message::decode(bl);
+    REQUIRE(decoded->getId() == msg_id);
+    auto decoded_generic = flight_safety_system::transport::fss_message::decode(bl);
     /* Check the type */
-    REQUIRE(decoded_generic->getType() == message_type_rtt_request);
+    REQUIRE(decoded_generic->getType() == flight_safety_system::transport::message_type_rtt_request);
     /* Check the id */
-    REQUIRE(decoded_generic->getId() == 2563);
-
-    delete msg;
+    REQUIRE(decoded_generic->getId() == msg_id);
 }
 
 TEST_CASE("RTT Response Message Check") {
+    auto msg_id = static_cast<uint64_t>(random());
+    auto request_id = static_cast<uint64_t>(random());
+
     /* Create a test rtt response */
-    auto msg = new fss_message_rtt_response(8765);
+    auto msg = std::make_shared<flight_safety_system::transport::fss_message_rtt_response>(request_id);
     /* Check the type */
-    REQUIRE(msg->getType() == message_type_rtt_response);
+    REQUIRE(msg->getType() == flight_safety_system::transport::message_type_rtt_response);
     /* Check the message id */
-    REQUIRE(msg->getRequestId() == 8765);
+    REQUIRE(msg->getRequestId() == request_id);
     /* Convert to bl and back */
-    msg->setId(2563);
+    msg->setId(msg_id);
     auto bl = msg->getPacked();
     REQUIRE(bl != nullptr);
-    auto decoded = new fss_message_rtt_response(2563, bl);
+    auto decoded = std::make_shared<flight_safety_system::transport::fss_message_rtt_response>(msg_id, bl);
     /* Check the type */
-    REQUIRE(decoded->getType() == message_type_rtt_response);
+    REQUIRE(decoded->getType() == flight_safety_system::transport::message_type_rtt_response);
     /* Check input == output */
-    REQUIRE(decoded->getId() == 2563);
-    REQUIRE(decoded->getRequestId() == 8765);
-    delete decoded;
-    auto decoded_generic = fss_message::decode(bl);
+    REQUIRE(decoded->getId() == msg_id);
+    REQUIRE(decoded->getRequestId() == request_id);
+    auto decoded_generic = flight_safety_system::transport::fss_message::decode(bl);
     /* Check the type */
-    REQUIRE(decoded_generic->getType() == message_type_rtt_response);
+    REQUIRE(decoded_generic->getType() == flight_safety_system::transport::message_type_rtt_response);
     /* Check input == output */
-    REQUIRE(decoded_generic->getId() == 2563);
-    auto decoded_generic_rtt_resp = std::dynamic_pointer_cast<fss_message_rtt_response>(decoded_generic);
-    REQUIRE((decoded_generic_rtt_resp)->getRequestId() == 8765);
-
-    delete msg;
+    REQUIRE(decoded_generic->getId() == msg_id);
+    auto decoded_generic_rtt_resp = std::dynamic_pointer_cast<flight_safety_system::transport::fss_message_rtt_response>(decoded_generic);
+    REQUIRE((decoded_generic_rtt_resp)->getRequestId() == request_id);
 }
 
 TEST_CASE("Position Report Message Check") {
+    auto msg_id = static_cast<uint64_t>(random());
+    constexpr double pos_lat = -43.5;
+    constexpr double pos_lng = 172.0;
+    constexpr int max_altitude = 10000;
+    auto altitude = random() % max_altitude;
+    auto timestamp = static_cast<uint64_t>(random());
+    constexpr int icao_24bit_address = 0x00FFFFFF;
+    auto icao_address = random() & icao_24bit_address;
+    constexpr int circle_degrees = 360;
+    auto heading = random() % circle_degrees;
+    constexpr int vel_max = 1000;
+    auto hor_vel = random() % vel_max;
+    auto vert_vel = random() % vel_max;
+    constexpr int vfr_squawk = 01200;
+    constexpr int flags = 0xAA55;
+    constexpr int emitter_type = 14;
+
     /* Create a test position report */
-    auto msg = new fss_message_position_report(-43.5, 172.0, 1234, 240, 200, 1, 217573, "ZK-ABC", 01200, 0, 0xAA55, 1, 14, 5678);
+    auto msg = std::make_shared<flight_safety_system::transport::fss_message_position_report>(pos_lat, pos_lng, altitude, heading, hor_vel, vert_vel, icao_address, "ZK-ABC", vfr_squawk, 0, flags, 1, emitter_type, timestamp);
     /* Check the type */
-    REQUIRE(msg->getType() == message_type_position_report);
+    REQUIRE(msg->getType() == flight_safety_system::transport::message_type_position_report);
     /* Check the parameters */
-    REQUIRE(msg->getLatitude() == -43.5);
-    REQUIRE(msg->getLongitude() == 172.0);
-    REQUIRE(msg->getAltitude() == 1234);
-    REQUIRE(msg->getTimeStamp() == 5678);
-    REQUIRE(msg->getICAOAddress() == 217573);
-    REQUIRE(msg->getHeading() == 240);
-    REQUIRE(msg->getHorzVel() == 200);
-    REQUIRE(msg->getVertVel() == 1);
+    REQUIRE(msg->getLatitude() == pos_lat);
+    REQUIRE(msg->getLongitude() == pos_lng);
+    REQUIRE(msg->getAltitude() == altitude);
+    REQUIRE(msg->getTimeStamp() == timestamp);
+    REQUIRE(msg->getICAOAddress() == icao_address);
+    REQUIRE(msg->getHeading() == heading);
+    REQUIRE(msg->getHorzVel() == hor_vel);
+    REQUIRE(msg->getVertVel() == vert_vel);
     REQUIRE(msg->getCallSign() == "ZK-ABC");
-    REQUIRE(msg->getSquawk() == 01200);
-    REQUIRE(msg->getFlags() == 0xAA55);
+    REQUIRE(msg->getSquawk() == vfr_squawk);
+    REQUIRE(msg->getFlags() == flags);
     REQUIRE(msg->getAltitudeType() == 1);
-    REQUIRE(msg->getEmitterType() == 14);
+    REQUIRE(msg->getEmitterType() == emitter_type);
     /* Convert to bl and back */
-    msg->setId(2563);
+    msg->setId(msg_id);
     auto bl = msg->getPacked();
     REQUIRE(bl != nullptr);
-    auto decoded = new fss_message_position_report(2563, bl);
+    auto decoded = std::make_shared<flight_safety_system::transport::fss_message_position_report>(msg_id, bl);
     /* Check the type */
-    REQUIRE(msg->getType() == message_type_position_report);
+    REQUIRE(msg->getType() == flight_safety_system::transport::message_type_position_report);
     /* Check input == output */
-    REQUIRE(decoded->getId() == 2563);
-    REQUIRE(decoded->getLatitude() == -43.5);
-    REQUIRE(decoded->getLongitude() == 172.0);
-    REQUIRE(decoded->getAltitude() == 1234);
-    REQUIRE(decoded->getTimeStamp() == 5678);
-    REQUIRE(decoded->getICAOAddress() == 217573);
-    REQUIRE(decoded->getHeading() == 240);
-    REQUIRE(decoded->getHorzVel() == 200);
-    REQUIRE(decoded->getVertVel() == 1);
+    REQUIRE(decoded->getId() == msg_id);
+    REQUIRE(decoded->getLatitude() == pos_lat);
+    REQUIRE(decoded->getLongitude() == pos_lng);
+    REQUIRE(decoded->getAltitude() == altitude);
+    REQUIRE(decoded->getTimeStamp() == timestamp);
+    REQUIRE(decoded->getICAOAddress() == icao_address);
+    REQUIRE(decoded->getHeading() == heading);
+    REQUIRE(decoded->getHorzVel() == hor_vel);
+    REQUIRE(decoded->getVertVel() == vert_vel);
     REQUIRE(decoded->getCallSign() == "ZK-ABC");
-    REQUIRE(decoded->getSquawk() == 01200);
-    REQUIRE(decoded->getFlags() == 0xAA55);
+    REQUIRE(decoded->getSquawk() == vfr_squawk);
+    REQUIRE(decoded->getFlags() == flags);
     REQUIRE(decoded->getAltitudeType() == 1);
-    REQUIRE(decoded->getEmitterType() == 14);
-    auto decoded_generic = fss_message::decode(bl);
+    REQUIRE(decoded->getEmitterType() == emitter_type);
+    auto decoded_generic = flight_safety_system::transport::fss_message::decode(bl);
     /* Check the type */
-    REQUIRE(decoded_generic->getType() == message_type_position_report);
+    REQUIRE(decoded_generic->getType() == flight_safety_system::transport::message_type_position_report);
     /* Check input == output */
-    REQUIRE(decoded_generic->getId() == 2563);
-    REQUIRE(decoded_generic->getLatitude() == -43.5);
-    REQUIRE(decoded_generic->getLongitude() == 172.0);
-    REQUIRE(decoded_generic->getAltitude() == 1234);
-    REQUIRE(decoded_generic->getTimeStamp() == 5678);
-
-    delete decoded;
-    delete msg;
+    REQUIRE(decoded_generic->getId() == msg_id);
+    REQUIRE(decoded_generic->getLatitude() == pos_lat);
+    REQUIRE(decoded_generic->getLongitude() == pos_lng);
+    REQUIRE(decoded_generic->getAltitude() == altitude);
+    REQUIRE(decoded_generic->getTimeStamp() == timestamp);
 }
 
 TEST_CASE("System Status Message Check") {
+    auto msg_id = static_cast<uint64_t>(random());
+    constexpr int max_bat_level = 100;
+    auto bat_level = random() % max_bat_level;
+    constexpr int max_bat_used = 5000;
+    auto bat_used = random() % max_bat_used;
+
     /* Create a test system status */
-    auto msg = new fss_message_system_status(99, 1200);
+    auto msg = std::make_shared<flight_safety_system::transport::fss_message_system_status>(bat_level, bat_used);
     /* Check the type */
-    REQUIRE(msg->getType() == message_type_system_status);
+    REQUIRE(msg->getType() == flight_safety_system::transport::message_type_system_status);
     /* Check the parameters */
-    REQUIRE(msg->getBatRemaining() == 99);
-    REQUIRE(msg->getBatMAHUsed() == 1200);
+    REQUIRE(msg->getBatRemaining() == bat_level);
+    REQUIRE(msg->getBatMAHUsed() == bat_used);
     /* Convert to bl and back */
-    msg->setId(2563);
+    msg->setId(msg_id);
     auto bl = msg->getPacked();
     REQUIRE(bl != nullptr);
-    auto decoded = new fss_message_system_status(2563, bl);
+    auto decoded = std::make_shared<flight_safety_system::transport::fss_message_system_status>(msg_id, bl);
     /* Check the type */
-    REQUIRE(decoded->getType() == message_type_system_status);
+    REQUIRE(decoded->getType() == flight_safety_system::transport::message_type_system_status);
     /* Check input == output */
-    REQUIRE(decoded->getId() == 2563);
-    REQUIRE(decoded->getBatRemaining() == 99);
-    REQUIRE(decoded->getBatMAHUsed() == 1200);
-    auto decoded_generic = fss_message::decode(bl);
+    REQUIRE(decoded->getId() == msg_id);
+    REQUIRE(decoded->getBatRemaining() == bat_level);
+    REQUIRE(decoded->getBatMAHUsed() == bat_used);
+    auto decoded_generic = flight_safety_system::transport::fss_message::decode(bl);
     /* Check the type */
-    REQUIRE(decoded_generic->getType() == message_type_system_status);
+    REQUIRE(decoded_generic->getType() == flight_safety_system::transport::message_type_system_status);
     /* Check input == output */
-    REQUIRE(decoded_generic->getId() == 2563);
-    auto decoded_generic_status = std::dynamic_pointer_cast<fss_message_system_status>(decoded_generic);
+    REQUIRE(decoded_generic->getId() == msg_id);
+    auto decoded_generic_status = std::dynamic_pointer_cast<flight_safety_system::transport::fss_message_system_status>(decoded_generic);
     REQUIRE(decoded_generic_status != nullptr);
-    REQUIRE(decoded_generic_status->getBatRemaining() == 99);
-    REQUIRE(decoded_generic_status->getBatMAHUsed() == 1200);
-
-    delete decoded;
-    delete msg;
+    REQUIRE(decoded_generic_status->getBatRemaining() == bat_level);
+    REQUIRE(decoded_generic_status->getBatMAHUsed() == bat_used);
 }
 
 
 TEST_CASE("Search Status Message Check") {
+    auto msg_id = static_cast<uint64_t>(random());
+    constexpr int max_search_values = 1000;
+    auto search_id = static_cast<uint64_t>(random() % max_search_values);
+    auto search_total = static_cast<uint64_t>(random() % max_search_values + 1);
+    auto search_progress = static_cast<uint64_t>(random() % search_total);
+
     /* Create a test search status */
-    auto msg = new fss_message_search_status(1234, 5678, 91011);
+    auto msg = std::make_shared<flight_safety_system::transport::fss_message_search_status>(search_id, search_progress, search_total);
     /* Check the type */
-    REQUIRE(msg->getType() == message_type_search_status);
+    REQUIRE(msg->getType() == flight_safety_system::transport::message_type_search_status);
     /* Check the parameters */
-    REQUIRE(msg->getSearchId() == 1234);
-    REQUIRE(msg->getSearchCompleted() == 5678);
-    REQUIRE(msg->getSearchTotal() == 91011);
+    REQUIRE(msg->getSearchId() == search_id);
+    REQUIRE(msg->getSearchCompleted() == search_progress);
+    REQUIRE(msg->getSearchTotal() == search_total);
     /* Convert to bl and back */
-    msg->setId(2563);
+    msg->setId(msg_id);
     auto bl = msg->getPacked();
     REQUIRE(bl != nullptr);
-    auto decoded = new fss_message_search_status(2563, bl);
+    auto decoded = std::make_shared<flight_safety_system::transport::fss_message_search_status>(msg_id, bl);
     /* Check the type */
-    REQUIRE(decoded->getType() == message_type_search_status);
+    REQUIRE(decoded->getType() == flight_safety_system::transport::message_type_search_status);
     /* Check input == output */
-    REQUIRE(decoded->getId() == 2563);
-    REQUIRE(decoded->getSearchId() == 1234);
-    REQUIRE(decoded->getSearchCompleted() == 5678);
-    REQUIRE(decoded->getSearchTotal() == 91011);
-    auto decoded_generic = fss_message::decode(bl);
+    REQUIRE(decoded->getId() == msg_id);
+    REQUIRE(decoded->getSearchId() == search_id);
+    REQUIRE(decoded->getSearchCompleted() == search_progress);
+    REQUIRE(decoded->getSearchTotal() == search_total);
+    auto decoded_generic = flight_safety_system::transport::fss_message::decode(bl);
     /* Check the type */
-    REQUIRE(decoded_generic->getType() == message_type_search_status);
+    REQUIRE(decoded_generic->getType() == flight_safety_system::transport::message_type_search_status);
     /* Check input == output */
-    REQUIRE(decoded_generic->getId() == 2563);
-    auto decoded_generic_search = std::dynamic_pointer_cast<fss_message_search_status>(decoded_generic);
+    REQUIRE(decoded_generic->getId() == msg_id);
+    auto decoded_generic_search = std::dynamic_pointer_cast<flight_safety_system::transport::fss_message_search_status>(decoded_generic);
     REQUIRE(decoded_generic_search != nullptr);
-    REQUIRE(decoded_generic_search->getSearchId() == 1234);
-    REQUIRE(decoded_generic_search->getSearchCompleted() == 5678);
-    REQUIRE(decoded_generic_search->getSearchTotal() == 91011);
-
-    delete decoded;
-    delete msg;
+    REQUIRE(decoded_generic_search->getSearchId() == search_id);
+    REQUIRE(decoded_generic_search->getSearchCompleted() == search_progress);
+    REQUIRE(decoded_generic_search->getSearchTotal() == search_total);
 }
 
 TEST_CASE("Asset Command Message Check - Basic") {
+    auto msg_id = static_cast<uint64_t>(random());
+    auto timestamp = static_cast<uint64_t>(random());
+
     /* Create a test asset command */
-    auto msg = new fss_message_asset_command(asset_command_rtl, 1234);
+    auto msg = std::make_shared<flight_safety_system::transport::fss_message_asset_command>(flight_safety_system::transport::asset_command_rtl, timestamp);
     /* Check the type */
-    REQUIRE(msg->getType() == message_type_command);
+    REQUIRE(msg->getType() == flight_safety_system::transport::message_type_command);
     /* Check the parameters */
-    REQUIRE(msg->getCommand() == asset_command_rtl);
-    REQUIRE(msg->getTimeStamp() == 1234);
+    REQUIRE(msg->getCommand() == flight_safety_system::transport::asset_command_rtl);
+    REQUIRE(msg->getTimeStamp() == timestamp);
     /* Convert to bl and back */
-    msg->setId(2563);
+    msg->setId(msg_id);
     auto bl = msg->getPacked();
     REQUIRE(bl != nullptr);
-    auto decoded = new fss_message_asset_command(2563, bl);
+    auto decoded = std::make_shared<flight_safety_system::transport::fss_message_asset_command>(msg_id, bl);
     /* Check the type */
-    REQUIRE(decoded->getType() == message_type_command);
+    REQUIRE(decoded->getType() == flight_safety_system::transport::message_type_command);
     /* Check input == output */
-    REQUIRE(decoded->getId() == 2563);
-    REQUIRE(decoded->getCommand() == asset_command_rtl);
-    REQUIRE(decoded->getTimeStamp() == 1234);
-    auto decoded_generic = fss_message::decode(bl);
+    REQUIRE(decoded->getId() == msg_id);
+    REQUIRE(decoded->getCommand() == flight_safety_system::transport::asset_command_rtl);
+    REQUIRE(decoded->getTimeStamp() == timestamp);
+    auto decoded_generic = flight_safety_system::transport::fss_message::decode(bl);
     /* Check the type */
-    REQUIRE(decoded_generic->getType() == message_type_command);
+    REQUIRE(decoded_generic->getType() == flight_safety_system::transport::message_type_command);
     /* Check input == output */
-    REQUIRE(decoded_generic->getId() == 2563);
-    auto decoded_generic_command = std::dynamic_pointer_cast<fss_message_asset_command>(decoded_generic);
-    REQUIRE(decoded_generic_command->getCommand() == asset_command_rtl);
-    REQUIRE(decoded_generic_command->getTimeStamp() == 1234);
-
-    delete decoded;
-    delete msg;
+    REQUIRE(decoded_generic->getId() == msg_id);
+    auto decoded_generic_command = std::dynamic_pointer_cast<flight_safety_system::transport::fss_message_asset_command>(decoded_generic);
+    REQUIRE(decoded_generic_command->getCommand() == flight_safety_system::transport::asset_command_rtl);
+    REQUIRE(decoded_generic_command->getTimeStamp() == timestamp);
 }
 
 TEST_CASE("Asset Command Message Check - Position") {
+    auto msg_id = static_cast<uint64_t>(random());
+    auto timestamp = static_cast<uint64_t>(random());
+    constexpr double goto_lat = -43.5;
+    constexpr double goto_lng = 172.0;
+
     /* Create a test asset command */
-    auto msg = new fss_message_asset_command(asset_command_goto, 1234, -43.5, 172.0);
+    auto msg = std::make_shared<flight_safety_system::transport::fss_message_asset_command>(flight_safety_system::transport::asset_command_goto, timestamp, goto_lat, goto_lng);
     /* Check the type */
-    REQUIRE(msg->getType() == message_type_command);
+    REQUIRE(msg->getType() == flight_safety_system::transport::message_type_command);
     /* Check the parameters */
-    REQUIRE(msg->getCommand() == asset_command_goto);
-    REQUIRE(msg->getTimeStamp() == 1234);
-    REQUIRE(msg->getLatitude() == -43.5);
-    REQUIRE(msg->getLongitude() == 172.0);
+    REQUIRE(msg->getCommand() == flight_safety_system::transport::asset_command_goto);
+    REQUIRE(msg->getTimeStamp() == timestamp);
+    REQUIRE(msg->getLatitude() == goto_lat);
+    REQUIRE(msg->getLongitude() == goto_lng);
     /* Convert to bl and back */
-    msg->setId(2563);
+    msg->setId(msg_id);
     auto bl = msg->getPacked();
     REQUIRE(bl != nullptr);
-    auto decoded = new fss_message_asset_command(2563, bl);
+    auto decoded = std::make_shared<flight_safety_system::transport::fss_message_asset_command>(msg_id, bl);
     /* Check the type */
-    REQUIRE(decoded->getType() == message_type_command);
+    REQUIRE(decoded->getType() == flight_safety_system::transport::message_type_command);
     /* Check input == output */
-    REQUIRE(decoded->getId() == 2563);
-    REQUIRE(decoded->getCommand() == asset_command_goto);
-    REQUIRE(decoded->getTimeStamp() == 1234);
-    REQUIRE(decoded->getLatitude() == -43.5);
-    REQUIRE(decoded->getLongitude() == 172.0);
-    auto decoded_generic = fss_message::decode(bl);
+    REQUIRE(decoded->getId() == msg_id);
+    REQUIRE(decoded->getCommand() == flight_safety_system::transport::asset_command_goto);
+    REQUIRE(decoded->getTimeStamp() ==  timestamp);
+    REQUIRE(decoded->getLatitude() == goto_lat);
+    REQUIRE(decoded->getLongitude() == goto_lng);
+    auto decoded_generic = flight_safety_system::transport::fss_message::decode(bl);
     /* Check the type */
-    REQUIRE(decoded->getType() == message_type_command);
+    REQUIRE(decoded->getType() == flight_safety_system::transport::message_type_command);
     /* Check input == output */
-    REQUIRE(decoded_generic->getId() == 2563);
-    auto decoded_generic_command = std::dynamic_pointer_cast<fss_message_asset_command>(decoded_generic);
+    REQUIRE(decoded_generic->getId() == msg_id);
+    auto decoded_generic_command = std::dynamic_pointer_cast<flight_safety_system::transport::fss_message_asset_command>(decoded_generic);
     REQUIRE(decoded_generic_command != nullptr);
-    REQUIRE(decoded_generic_command->getCommand() == asset_command_goto);
-    REQUIRE(decoded_generic->getTimeStamp() == 1234);
-    REQUIRE(decoded_generic->getLatitude() == -43.5);
-    REQUIRE(decoded_generic->getLongitude() == 172.0);
-
-    delete decoded;
-    delete msg;
+    REQUIRE(decoded_generic_command->getCommand() == flight_safety_system::transport::asset_command_goto);
+    REQUIRE(decoded_generic->getTimeStamp() == timestamp);
+    REQUIRE(decoded_generic->getLatitude() == goto_lat);
+    REQUIRE(decoded_generic->getLongitude() == goto_lng);
 }
 
 TEST_CASE("Asset Command Message Check - Altitude") {
+    auto msg_id = static_cast<uint64_t>(random());
+    auto timestamp = static_cast<uint64_t>(random());
+    auto altitude = random();
+
     /* Create a test asset command */
-    auto msg = new fss_message_asset_command(asset_command_altitude, 1234, 5678);
+    auto msg = std::make_shared<flight_safety_system::transport::fss_message_asset_command>(flight_safety_system::transport::asset_command_altitude, timestamp, altitude);
     /* Check the type */
-    REQUIRE(msg->getType() == message_type_command);
+    REQUIRE(msg->getType() == flight_safety_system::transport::message_type_command);
     /* Check the parameters */
-    REQUIRE(msg->getCommand() == asset_command_altitude);
-    REQUIRE(msg->getTimeStamp() == 1234);
-    REQUIRE(msg->getAltitude() == 5678);
+    REQUIRE(msg->getCommand() == flight_safety_system::transport::asset_command_altitude);
+    REQUIRE(msg->getTimeStamp() == timestamp);
+    REQUIRE(msg->getAltitude() == altitude);
     /* Convert to bl and back */
-    msg->setId(2563);
+    msg->setId(msg_id);
     auto bl = msg->getPacked();
     REQUIRE(bl != nullptr);
-    auto decoded = new fss_message_asset_command(2563, bl);
+    auto decoded = std::make_shared<flight_safety_system::transport::fss_message_asset_command>(msg_id, bl);
     /* Check the type */
-    REQUIRE(decoded->getType() == message_type_command);
+    REQUIRE(decoded->getType() == flight_safety_system::transport::message_type_command);
     /* Check input == output */
-    REQUIRE(decoded->getId() == 2563);
-    REQUIRE(decoded->getCommand() == asset_command_altitude);
-    REQUIRE(decoded->getTimeStamp() == 1234);
-    REQUIRE(decoded->getAltitude() == 5678);
-    auto decoded_generic = fss_message::decode(bl);
+    REQUIRE(decoded->getId() == msg_id);
+    REQUIRE(decoded->getCommand() == flight_safety_system::transport::asset_command_altitude);
+    REQUIRE(decoded->getTimeStamp() == timestamp);
+    REQUIRE(decoded->getAltitude() == altitude);
+    auto decoded_generic = flight_safety_system::transport::fss_message::decode(bl);
     /* Check the type */
-    REQUIRE(decoded_generic->getType() == message_type_command);
+    REQUIRE(decoded_generic->getType() == flight_safety_system::transport::message_type_command);
     /* Check input == output */
-    REQUIRE(decoded_generic->getId() == 2563);
-    auto decoded_generic_command = std::dynamic_pointer_cast<fss_message_asset_command>(decoded_generic);
-    REQUIRE(decoded_generic_command->getCommand() == asset_command_altitude);
-    REQUIRE(decoded_generic->getTimeStamp() == 1234);
-    REQUIRE(decoded_generic->getAltitude() == 5678);
-
-    delete decoded;
-    delete msg;
+    REQUIRE(decoded_generic->getId() == msg_id);
+    auto decoded_generic_command = std::dynamic_pointer_cast<flight_safety_system::transport::fss_message_asset_command>(decoded_generic);
+    REQUIRE(decoded_generic_command->getCommand() == flight_safety_system::transport::asset_command_altitude);
+    REQUIRE(decoded_generic->getTimeStamp() == timestamp);
+    REQUIRE(decoded_generic->getAltitude() == altitude);
 }
 
 TEST_CASE("SMM Settings Message Check") {
+    auto msg_id = static_cast<uint64_t>(random());
+
     /* Create a test asset command */
-    auto msg = new fss_message_smm_settings("https://localhost/", "asset", "password1");
+    auto msg = std::make_shared<flight_safety_system::transport::fss_message_smm_settings>("https://localhost/", "asset", "password1");
     /* Check the type */
-    REQUIRE(msg->getType() == message_type_smm_settings);
+    REQUIRE(msg->getType() == flight_safety_system::transport::message_type_smm_settings);
     /* Check the parameters */
     REQUIRE(msg->getServerURL() == "https://localhost/");
     REQUIRE(msg->getUsername() == "asset");
     REQUIRE(msg->getPassword() == "password1");
     /* Convert to bl and back */
-    msg->setId(2563);
+    msg->setId(msg_id);
     auto bl = msg->getPacked();
     REQUIRE(bl != nullptr);
-    auto decoded = new fss_message_smm_settings(2563, bl);
+    auto decoded = std::make_shared<flight_safety_system::transport::fss_message_smm_settings>(msg_id, bl);
     /* Check the type */
-    REQUIRE(decoded->getType() == message_type_smm_settings);
+    REQUIRE(decoded->getType() == flight_safety_system::transport::message_type_smm_settings);
     /* Check input == output */
-    REQUIRE(decoded->getId() == 2563);
+    REQUIRE(decoded->getId() == msg_id);
     REQUIRE(decoded->getServerURL() == "https://localhost/");
     REQUIRE(decoded->getUsername() == "asset");
     REQUIRE(decoded->getPassword() == "password1");
-    auto decoded_generic = fss_message::decode(bl);
+    auto decoded_generic = flight_safety_system::transport::fss_message::decode(bl);
     /* Check the type */
-    REQUIRE(decoded_generic->getType() == message_type_smm_settings);
+    REQUIRE(decoded_generic->getType() == flight_safety_system::transport::message_type_smm_settings);
     /* Check input == output */
-    REQUIRE(decoded_generic->getId() == 2563);
-    auto decoded_generic_smm = std::dynamic_pointer_cast<fss_message_smm_settings>(decoded_generic);
+    REQUIRE(decoded_generic->getId() == msg_id);
+    auto decoded_generic_smm = std::dynamic_pointer_cast<flight_safety_system::transport::fss_message_smm_settings>(decoded_generic);
     REQUIRE(decoded_generic_smm != nullptr);
     REQUIRE(decoded_generic_smm->getServerURL() == "https://localhost/");
     REQUIRE(decoded_generic_smm->getUsername() == "asset");
     REQUIRE(decoded_generic_smm->getPassword() == "password1");
-
-    delete decoded;
-    delete msg;
 }
 
 TEST_CASE("Server List Message Check") {
+    auto msg_id = static_cast<uint64_t>(random());
+    constexpr int port_max = 65535;
+    auto server_port = random() % port_max;
+
     /* Create a test asset command */
-    auto msg = new fss_message_server_list();
+    auto msg = std::make_shared<flight_safety_system::transport::fss_message_server_list>();
     /* Check the type */
-    REQUIRE(msg->getType() == message_type_server_list);
+    REQUIRE(msg->getType() == flight_safety_system::transport::message_type_server_list);
     /* Check the parameters */
     REQUIRE(msg->getServers().empty());
-    msg->addServer("localhost", 20202);
+    msg->addServer("localhost", server_port);
     auto sl = msg->getServers();
     REQUIRE(!sl.empty());
     REQUIRE(sl[0].first == "localhost");
-    REQUIRE(sl[0].second == 20202);
+    REQUIRE(sl[0].second == server_port);
     /* Convert to bl and back */
-    msg->setId(2563);
+    msg->setId(msg_id);
     auto bl = msg->getPacked();
     REQUIRE(bl != nullptr);
-    auto decoded = new fss_message_server_list(2563, bl);
+    auto decoded = std::make_shared<flight_safety_system::transport::fss_message_server_list>(msg_id, bl);
     /* Check the type */
-    REQUIRE(decoded->getType() == message_type_server_list);
+    REQUIRE(decoded->getType() == flight_safety_system::transport::message_type_server_list);
     /* Check input == output */
-    REQUIRE(decoded->getId() == 2563);
+    REQUIRE(decoded->getId() == msg_id);
     auto sl2 = decoded->getServers();
     REQUIRE(!sl2.empty());
     REQUIRE(sl2[0].first == "localhost");
-    REQUIRE(sl2[0].second == 20202);
-    auto decoded_generic = fss_message::decode(bl);
+    REQUIRE(sl2[0].second == server_port);
+    auto decoded_generic = flight_safety_system::transport::fss_message::decode(bl);
     /* Check the type */
-    REQUIRE(decoded_generic->getType() == message_type_server_list);
+    REQUIRE(decoded_generic->getType() == flight_safety_system::transport::message_type_server_list);
     /* Check input == output */
-    REQUIRE(decoded_generic->getId() == 2563);
-    auto decoded_generic_servers = std::dynamic_pointer_cast<fss_message_server_list>(decoded_generic);
+    REQUIRE(decoded_generic->getId() == msg_id);
+    auto decoded_generic_servers = std::dynamic_pointer_cast<flight_safety_system::transport::fss_message_server_list>(decoded_generic);
     REQUIRE(decoded_generic_servers != nullptr);
     auto sl3 = decoded_generic_servers->getServers();
     REQUIRE(!sl3.empty());
     REQUIRE(sl3[0].first == "localhost");
-    REQUIRE(sl3[0].second == 20202);
-
-    delete decoded;
-    delete msg;
+    REQUIRE(sl3[0].second == server_port);
 }
 
 TEST_CASE("Identity (Non-Aircraft) Message Check") {
+    auto msg_id = static_cast<uint64_t>(random());
+    constexpr int bit_1 = 13;
+    constexpr int bit_2 = 12;
+    constexpr int bit_3 = 11;
+
     /* Create a test identity */
-    auto msg = new fss_message_identity_non_aircraft();
+    auto msg = std::make_shared<flight_safety_system::transport::fss_message_identity_non_aircraft>();
     /* Check the type */
-    REQUIRE(msg->getType() == message_type_identity_non_aircraft);
+    REQUIRE(msg->getType() == flight_safety_system::transport::message_type_identity_non_aircraft);
     /* Checking the capabilities */
-    msg->addCapability(12);
-    REQUIRE(msg->getCapability(13) == false);
-    REQUIRE(msg->getCapability(12) == true);
-    REQUIRE(msg->getCapability(11) == false);
+    msg->addCapability(bit_2);
+    REQUIRE(msg->getCapability(bit_1) == false);
+    REQUIRE(msg->getCapability(bit_2) == true);
+    REQUIRE(msg->getCapability(bit_3) == false);
     /* Convert to bl and back */
-    msg->setId(2563);
+    msg->setId(msg_id);
     auto bl = msg->getPacked();
     REQUIRE(bl != nullptr);
-    auto decoded = new fss_message_identity_non_aircraft(2563, bl);
+    auto decoded = std::make_shared<flight_safety_system::transport::fss_message_identity_non_aircraft>(msg_id, bl);
     /* Check the type */
-    REQUIRE(decoded->getType() == message_type_identity_non_aircraft);
+    REQUIRE(decoded->getType() == flight_safety_system::transport::message_type_identity_non_aircraft);
     /* Check input == output */
-    REQUIRE(decoded->getId() == 2563);
-    REQUIRE(decoded->getCapability(13) == false);
-    REQUIRE(decoded->getCapability(12) == true);
-    REQUIRE(decoded->getCapability(11) == false);
-    delete decoded;
-    auto decoded_generic = fss_message::decode(bl);
-    REQUIRE(decoded_generic->getType() == message_type_identity_non_aircraft);
-    REQUIRE(decoded_generic->getId() == 2563);
-
-    delete msg;
+    REQUIRE(decoded->getId() == msg_id);
+    REQUIRE(decoded->getCapability(bit_1) == false);
+    REQUIRE(decoded->getCapability(bit_2) == true);
+    REQUIRE(decoded->getCapability(bit_3) == false);
+    auto decoded_generic = flight_safety_system::transport::fss_message::decode(bl);
+    REQUIRE(decoded_generic->getType() == flight_safety_system::transport::message_type_identity_non_aircraft);
+    REQUIRE(decoded_generic->getId() == msg_id);
 }
