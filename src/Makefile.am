@@ -40,6 +40,14 @@ libfss_transport_ssl_la_CXXFLAGS = $(AM_CXXFLAGS) $(GNUTLS_CFLAGS)
 libfss_transport_ssl_la_LIBADD = $(GNUTLS_LIBS) -L. libfss-transport.la -lgnutlsxx
 include_HEADERS += fss-transport-ssl.hpp
 pkgconfig_DATA += fss-transport-ssl.pc
+
+lib_LTLIBRARIES += libfss-client-ssl.la
+libfss_client_ssl_la_LDFLAGS = -version-info 0:0:0
+libfss_client_ssl_la_SOURCES = client-ssl.cpp
+libfss_client_ssl_la_CXXFLAGS = $(AM_CXXFLAGS)
+libfss_client_ssl_la_LIBADD = $(GNUTLS_LIBS) -L. libfss-client.la libfss-transport-ssl.la
+include_HEADERS += fss-client-ssl.hpp
+pkgconfig_DATA += fss-client-ssl.pc
 endif
 
 .pgc.c:

@@ -1,5 +1,10 @@
 {
-    "name": "test-1",
+    "name": "test1",
+    "ssl": {
+        "ca_public_key": "certs/ca.public.pem",
+        "client_private_key": "certs/client.private.pem",
+        "client_public_key": "certs/client.public.pem"
+    },
     "servers": [
         {
             "address": "127.0.0.1",

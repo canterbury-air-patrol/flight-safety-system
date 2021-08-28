@@ -22,12 +22,13 @@ private:
     void notifyConnectionStatus();
     virtual void connectionStatusChange(flight_safety_system::client::connection_status status __attribute__((unused))) {};
 protected:
+    void setAssetName(std::string t_asset_name) { this->asset_name = std::move(t_asset_name); };
     void addServer(const std::shared_ptr<fss_server> &server);
 public:
     explicit fss_client(const std::string &config_file);
     explicit fss_client() = default;
     virtual ~fss_client() = default;
-    void connectTo(const std::string &t_address, uint16_t t_port, bool connect);
+    virtual void connectTo(const std::string &t_address, uint16_t t_port, bool connect);
     virtual void attemptReconnect();
     virtual void disconnect();
     virtual void sendMsgAll(const std::shared_ptr<flight_safety_system::transport::fss_message> &msg);
@@ -69,6 +70,7 @@ public:
     virtual auto getAddress() -> std::string { return this->address; };
     virtual auto getPort() -> uint16_t { return this->port; };
     virtual auto reconnect() -> bool;
+    virtual auto reconnect_to() -> bool;
     virtual auto getClient() -> fss_client * { return this->client; };
     virtual void sendIdentify();
 };

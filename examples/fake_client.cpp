@@ -1,4 +1,8 @@
+#ifdef HAVE_SSL
+#include "fss-client-ssl.hpp"
+#else
 #include "fss-client.hpp"
+#endif
 
 #include <csignal>
 
@@ -22,8 +26,12 @@ main(int argc, char *argv[]) -> int
     /* Watch out for sigint */
     signal (SIGINT, sigIntHandler);
 
+#ifdef HAVE_SSL
+    auto client = std::make_shared<flight_safety_system::client_ssl::fss_client>(argv[1]);
+#else
     auto client = std::make_shared<flight_safety_system::client::fss_client>(argv[1]);
-    
+#endif
+
     /* Connect to each server */
     /* Send reports:
        - Battery status

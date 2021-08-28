@@ -179,6 +179,13 @@ flight_safety_system::client::fss_server::sendIdentify()
 }
 
 auto
+flight_safety_system::client::fss_server::reconnect_to() -> bool
+{
+    this->conn = std::make_shared<fss_transport::fss_connection>();
+    return this->conn->connectTo(this->getAddress(), this->getPort());
+}
+
+auto
 flight_safety_system::client::fss_server::reconnect() -> bool
 {
     uint64_t ts = fss_current_timestamp();
@@ -197,8 +204,7 @@ flight_safety_system::client::fss_server::reconnect() -> bool
             this->retry_delay += this->retry_delay;
         }
         this->last_tried = ts;
-        this->conn = std::make_shared<fss_transport::fss_connection>();
-        if (!this->conn->connectTo(this->getAddress(), this->getPort()))
+        if (!this->reconnect_to())
         {
             this->conn = nullptr;
         }
