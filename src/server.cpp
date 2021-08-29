@@ -43,6 +43,10 @@ public:
         }
         this->lock.unlock();
     }
+    server_clients(server_clients&) = delete;
+    server_clients(server_clients&&) = delete;
+    auto operator=(server_clients&) -> server_clients& = delete;
+    auto operator=(server_clients&&) -> server_clients& = delete;
     void cleanupRemovableClients()
     {
         this->lock.lock();

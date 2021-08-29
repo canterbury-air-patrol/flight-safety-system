@@ -28,6 +28,10 @@ public:
     explicit fss_client(const std::string &config_file);
     explicit fss_client() = default;
     virtual ~fss_client() = default;
+    fss_client(fss_client&) = delete;
+    auto operator=(fss_client&) -> fss_client& = delete;
+    fss_client(fss_client&&) = delete;
+    auto operator=(fss_client&&) -> fss_client& = delete;
     virtual void connectTo(const std::string &t_address, uint16_t t_port, bool connect);
     virtual void attemptReconnect();
     virtual void disconnect();
@@ -53,6 +57,7 @@ private:
 public:
     fss_server(fss_client *t_client, std::string t_address, uint16_t t_port, bool connect);
     fss_server(const fss_server &other) : flight_safety_system::transport::fss_message_cb(other.conn), client(other.client), address(other.address), port(other.port) {};
+    fss_server(fss_server&&) = delete;
     auto operator=(const fss_server& other) -> fss_server&
     {
         if (this != &other)
@@ -65,6 +70,7 @@ public:
         }
         return *this;
     }
+    auto operator=(const fss_server&&) -> fss_server& = delete;
     ~fss_server() override = default;
     void processMessage(std::shared_ptr<flight_safety_system::transport::fss_message> message) override;
     virtual auto getAddress() -> std::string { return this->address; };

@@ -77,6 +77,7 @@ public:
     buf_len(const char *_data, uint16_t len) : data(static_cast<char *>(malloc(len))), length(len) {
         memcpy (this->data, _data, this->length);
     };
+    auto operator=(buf_len &&) -> buf_len& = delete;
     ~buf_len() { free(this->data); };
     auto operator=(const buf_len &other) -> buf_len &
     {
@@ -118,6 +119,9 @@ protected:
 public:
     explicit fss_message_cb(std::shared_ptr<fss_connection> t_conn) : conn(std::move(t_conn)) {};
     fss_message_cb(const fss_message_cb &from) : conn(from.conn) {};
+    fss_message_cb(fss_message_cb&&) = delete;
+    auto operator=(fss_message_cb &) -> fss_message_cb& = delete;
+    auto operator=(fss_message_cb &&) -> fss_message_cb& = delete;
     virtual ~fss_message_cb();
     auto operator=(const fss_message_cb& other) -> fss_message_cb&
     {
@@ -150,8 +154,12 @@ protected:
     auto operator=(const fss_connection& other) -> fss_connection& { return *this; };
     fss_connection(const fss_connection &from) : messages(), recv_thread(), send_lock() {};
 public:
-    fss_connection() {};
+    fss_connection() = default;
     explicit fss_connection(int fd);
+    fss_connection(fss_connection&) = delete;
+    fss_connection(fss_connection&&) = delete;
+    auto operator=(fss_connection &) -> fss_connection& = delete;
+    auto operator=(fss_connection &&) -> fss_connection& = delete;
     virtual ~fss_connection();
     void setHandler(fss_message_cb *cb);
     virtual auto connectTo(const std::string &address, uint16_t port) -> bool;
@@ -174,6 +182,10 @@ public:
     fss_listen(uint16_t t_port, fss_connect_cb t_cb) : fss_connection(), port(t_port), cb(t_cb) {
         this->startListening();
     };
+    fss_listen(fss_listen &) = delete;
+    fss_listen(fss_listen &&) = delete;
+    auto operator=(fss_listen &) -> fss_listen& = delete;
+    auto operator=(fss_listen &&) -> fss_listen& = delete;
     ~fss_listen() override;
     void processMessages() override;
 };
@@ -188,6 +200,10 @@ protected:
 public:
     explicit fss_message(fss_message_type t_type) : id(0), type(t_type) {};
     fss_message(uint64_t t_id, fss_message_type t_type) : id(t_id), type(t_type) {};
+    fss_message(fss_message &) = delete;
+    fss_message(fss_message &&) = delete;
+    auto operator=(fss_message &) -> fss_message& = delete;
+    auto operator=(fss_message &&) -> fss_message& = delete;
     virtual ~fss_message() = default;
     void setId(uint64_t t_id) { this->id = t_id; };
     auto getId() -> uint64_t { return this->id; };

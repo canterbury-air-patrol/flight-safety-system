@@ -70,6 +70,10 @@ private:
     std::mutex db_lock;
 public:
     db_connection(const std::string &host, const std::string &user, const std::string &pass, const std::string &db);
+    db_connection(db_connection&) = delete;
+    db_connection(db_connection&&) = delete;
+    auto operator=(db_connection&) -> db_connection& = delete;
+    auto operator=(db_connection&&) -> db_connection& = delete;
     ~db_connection();
     auto check_asset(const std::string &asset_name) -> bool;
     void asset_add_rtt(const std::string &asset_name, uint64_t rtt);
@@ -102,6 +106,10 @@ private:
     uint64_t last_command_dbid{0};
 public:
     explicit fss_client(std::shared_ptr<transport::fss_connection> conn);
+    fss_client(fss_client&) = delete;
+    fss_client(fss_client&&) = delete;
+    auto operator=(fss_client&) -> fss_client& = delete;
+    auto operator=(fss_client&&) -> fss_client& = delete;
     ~fss_client() override;
     void processMessage(std::shared_ptr<transport::fss_message> message) override;
     void sendRTTRequest(const std::shared_ptr<transport::fss_message_rtt_request> &rtt_req);
