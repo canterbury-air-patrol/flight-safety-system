@@ -151,8 +151,6 @@ protected:
     std::mutex send_lock{};
     virtual auto sendMsg(const std::shared_ptr<flight_safety_system::transport::buf_len> &bl) -> bool;
     virtual auto recvBytes(void *bytes, size_t max_bytes) -> ssize_t;
-    auto operator=(const fss_connection& other) -> fss_connection& { return *this; };
-    fss_connection(const fss_connection &from) : messages(), recv_thread(), send_lock() {};
 public:
     fss_connection() = default;
     explicit fss_connection(int fd);
@@ -239,10 +237,10 @@ public:
 
 class fss_message_rtt_request : public fss_message {
 protected:
-    void packData(std::shared_ptr<buf_len> bl) override {};
+    void packData(std::shared_ptr<buf_len> bl __attribute__((unused))) override {};
 public:
     fss_message_rtt_request() : fss_message(message_type_rtt_request) {};
-    fss_message_rtt_request(uint64_t t_id, std::shared_ptr<buf_len> bl) : fss_message(t_id, message_type_rtt_request) {};
+    fss_message_rtt_request(uint64_t t_id, std::shared_ptr<buf_len> bl __attribute__((unused))) : fss_message(t_id, message_type_rtt_request) {};
 };
 
 class fss_message_rtt_response : public fss_message {

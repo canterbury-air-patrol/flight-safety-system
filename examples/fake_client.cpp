@@ -10,7 +10,7 @@
 
 bool running = true;
 
-void sigIntHandler(int signum)
+void sigIntHandler(int signum __attribute__((unused)))
 {
     running = false;
 }

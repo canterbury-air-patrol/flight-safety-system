@@ -301,7 +301,7 @@ fss_client::processMessage(std::shared_ptr<fss_transport::fss_message> msg)
 
 bool running = true;
 
-void sigIntHandler(int signum)
+void sigIntHandler(int signum __attribute__((unused)))
 {
     running = false;
 }
