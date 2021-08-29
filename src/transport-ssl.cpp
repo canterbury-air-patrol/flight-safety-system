@@ -19,11 +19,11 @@ recv_msg_thread(flight_safety_system::transport_ssl::fss_connection *conn)
 
 flight_safety_system::transport_ssl::fss_connection::fss_connection(int t_fd, unsigned int t_session_flags, std::string t_ca, std::string t_private_key, std::string t_public_key) : flight_safety_system::transport::fss_connection(), session(t_session_flags), ca_file(std::move(t_ca)), private_key_file(std::move(t_private_key)), public_key_file(std::move(t_public_key))
 {
-    this->fd = t_fd;
+    this->setFd(t_fd);
     this->usable = this->setupSSL();
     if (this->usable)
     {
-        this->recv_thread = std::thread(recv_msg_thread, this);
+        this->startRecvThread(std::thread(recv_msg_thread, this));
     }
 }
 
@@ -62,12 +62,12 @@ flight_safety_system::transport_ssl::fss_connection::connectTo(const std::string
         std::cout << "Trying to connect to " << address << " (" << addr_str << "):" << port << std::endl;
 #endif
 
-    if (this->fd == -1)
+    if (this->getFd() == -1)
     {
-        this->fd = socket(remote.ss_family == AF_INET ? PF_INET : PF_INET6, SOCK_STREAM, IPPROTO_TCP);
+        this->setFd(socket(remote.ss_family == AF_INET ? PF_INET : PF_INET6, SOCK_STREAM, IPPROTO_TCP));
     }
 
-    if (connect(this->fd, (struct sockaddr *)&remote, remote.ss_family == AF_INET ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6)) < 0)
+    if (connect(this->getFd(), (struct sockaddr *)&remote, remote.ss_family == AF_INET ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6)) < 0)
     {
         perror(("Failed to connect to " + address).c_str());
         return false;
@@ -77,7 +77,7 @@ flight_safety_system::transport_ssl::fss_connection::connectTo(const std::string
 
     if (this->usable)
     {
-        this->recv_thread = std::thread(recv_msg_thread, this);
+        this->startRecvThread(std::thread(recv_msg_thread, this));
     }
 
     return this->usable;
@@ -92,7 +92,7 @@ flight_safety_system::transport_ssl::fss_connection::setupSSL() -> bool
     this->credentials.set_x509_key_file(this->public_key_file.c_str(), this->private_key_file.c_str(), GNUTLS_X509_FMT_PEM);
     this->session.set_credentials(this->credentials);
 
-    this->session.set_transport_ptr((gnutls_transport_ptr_t)(intptr_t)this->fd);
+    this->session.set_transport_ptr((gnutls_transport_ptr_t)(intptr_t)this->getFd());
 
     int ret = this->session.handshake();
     if (ret < 0)

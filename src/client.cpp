@@ -166,7 +166,7 @@ flight_safety_system::client::fss_server::fss_server(fss_client *t_client, std::
 {
     if (connect && this->reconnect())
     {
-        this->conn->setHandler(this);
+        this->getConnection()->setHandler(this);
         this->sendIdentify();
     }
 }
@@ -175,14 +175,14 @@ void
 flight_safety_system::client::fss_server::sendIdentify()
 {
     auto ident_msg = std::make_shared<fss_transport::fss_message_identity>(this->client->getAssetName());
-    conn->sendMsg(ident_msg);
+    this->getConnection()->sendMsg(ident_msg);
 }
 
 auto
 flight_safety_system::client::fss_server::reconnect_to() -> bool
 {
-    this->conn = std::make_shared<fss_transport::fss_connection>();
-    return this->conn->connectTo(this->getAddress(), this->getPort());
+    this->setConnection(std::make_shared<fss_transport::fss_connection>());
+    return this->getConnection()->connectTo(this->getAddress(), this->getPort());
 }
 
 auto
@@ -191,9 +191,9 @@ flight_safety_system::client::fss_server::reconnect() -> bool
     uint64_t ts = fss_current_timestamp();
     uint64_t elapsed_time = ts - this->last_tried;
 
-    if (this->conn != nullptr)
+    if (this->getConnection() != nullptr)
     {
-        this->conn = nullptr;
+        this->clearConnection();
     }
 
     if (elapsed_time > this->retry_delay)
@@ -206,11 +206,11 @@ flight_safety_system::client::fss_server::reconnect() -> bool
         this->last_tried = ts;
         if (!this->reconnect_to())
         {
-            this->conn = nullptr;
+            this->clearConnection();
         }
         else
         {
-            conn->setHandler(this);
+            this->getConnection()->setHandler(this);
             this->sendIdentify();
             this->retry_count = 0;
             this->last_tried = 0;

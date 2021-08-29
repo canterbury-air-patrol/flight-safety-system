@@ -298,11 +298,11 @@ listen_thread(fss_transport::fss_listen *listen)
 void
 fss_transport::fss_listen::processMessages()
 {
-    while (this->fd >= 0)
+    while (this->getFd() >= 0)
     {
         struct sockaddr_storage sa = {};
         socklen_t sa_len = sizeof(sockaddr_storage);
-        int newfd = accept(this->fd, (struct sockaddr *)&sa, &sa_len);
+        int newfd = accept(this->getFd(), (struct sockaddr *)&sa, &sa_len);
         if (newfd < 0)
         {
             if (errno == EBADF)
@@ -341,25 +341,25 @@ auto
 fss_transport::fss_listen::startListening() -> bool
 {
     /* open the socket */
-    if (this->fd < 0)
+    if (this->getFd() < 0)
     {
-        this->fd = socket(PF_INET6, SOCK_STREAM, IPPROTO_TCP);
+        this->setFd(socket(PF_INET6, SOCK_STREAM, IPPROTO_TCP));
     }
     struct sockaddr_in6 bind_addr = {};
     memset(&bind_addr, 0, sizeof (struct sockaddr_in6));
     bind_addr.sin6_family = AF_INET6;
     bind_addr.sin6_port = htons(this->port);
-    if (bind(this->fd, (struct sockaddr *)&bind_addr, sizeof(bind_addr)) < 0)
+    if (bind(this->getFd(), (struct sockaddr *)&bind_addr, sizeof(bind_addr)) < 0)
     {
         perror("Failed to bind socket: ");
         return false;
     }
-    if(listen(this->fd, this->max_pending_connections) < 0)
+    if(listen(this->getFd(), this->max_pending_connections) < 0)
     {
         perror("Failed to listen on socket: ");
         return false;
     }
-    this->recv_thread = std::thread(listen_thread, this);
+    this->startRecvThread(std::thread(listen_thread, this));
     return true;
 }
 

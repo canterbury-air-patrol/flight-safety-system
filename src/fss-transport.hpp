@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <sys/types.h>
+#include <thread>
 
 #include "fss.hpp"
 
@@ -114,8 +115,11 @@ public:
 };
 
 class fss_message_cb {
-protected:
+private:
     std::shared_ptr<fss_connection> conn;
+protected:
+    void setConnection(std::shared_ptr<fss_connection> t_conn) { this->conn = t_conn; };
+    void clearConnection() { this->conn = nullptr; };
 public:
     explicit fss_message_cb(std::shared_ptr<fss_connection> t_conn) : conn(std::move(t_conn)) {};
     fss_message_cb(const fss_message_cb &from) : conn(from.conn) {};
@@ -139,18 +143,21 @@ public:
 };
 
 class fss_connection {
-protected:
     bool run{false};
     int fd{-1};
     uint64_t last_msg_id{0};
     fss_message_cb *handler{nullptr};
     std::queue<std::shared_ptr<fss_message>> messages{};
     std::thread recv_thread{};
+    std::mutex send_lock{};
+protected:
     auto recvMsg() -> std::shared_ptr<fss_message>;
     auto getMessageId() -> uint64_t;
-    std::mutex send_lock{};
     virtual auto sendMsg(const std::shared_ptr<flight_safety_system::transport::buf_len> &bl) -> bool;
     virtual auto recvBytes(void *bytes, size_t max_bytes) -> ssize_t;
+    auto getFd() -> int { return this->fd; };
+    void setFd(int new_fd) { this->fd = new_fd; };
+    void startRecvThread(std::thread t_recv_thread) { this->recv_thread = std::move(t_recv_thread); };
 public:
     fss_connection() = default;
     explicit fss_connection(int fd);

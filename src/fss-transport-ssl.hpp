@@ -6,13 +6,14 @@
 namespace flight_safety_system {
 namespace transport_ssl {
 class fss_connection : public flight_safety_system::transport::fss_connection {
-protected:
+private:
     bool usable{false};
     gnutls::session session;
     gnutls::certificate_credentials credentials{};
     std::string ca_file;
     std::string private_key_file;
     std::string public_key_file;
+protected:
     auto setupSSL() -> bool;
     auto sendMsg(const std::shared_ptr<flight_safety_system::transport::buf_len> &bl) -> bool override;
     auto recvBytes(void *bytes, size_t max_bytes) -> ssize_t override;
@@ -39,10 +40,11 @@ public:
 };
 
 class fss_listen : public flight_safety_system::transport::fss_listen {
-protected:
+private:
     std::string ca_file;
     std::string private_key_file;
     std::string public_key_file;
+protected:
     auto newConnection(int fd) -> std::shared_ptr<flight_safety_system::transport::fss_connection> override;
 public:
     fss_listen(uint16_t t_port, flight_safety_system::transport::fss_connect_cb t_cb, std::string t_ca, std::string t_private_key, std::string t_public_key) : flight_safety_system::transport::fss_listen(t_port, t_cb), ca_file(std::move(t_ca)), private_key_file(std::move(t_private_key)), public_key_file(std::move(t_public_key)) {};

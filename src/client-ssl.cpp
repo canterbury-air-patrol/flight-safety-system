@@ -44,6 +44,6 @@ flight_safety_system::client_ssl::fss_client::connectTo(const std::string &t_add
 auto
 flight_safety_system::client_ssl::fss_server::reconnect_to() -> bool
 {
-    this->conn = std::make_shared<flight_safety_system::transport_ssl::fss_connection_client>(this->ca_file, this->private_key_file, this->public_key_file);
-    return this->conn->connectTo(this->getAddress(), this->getPort());
+    this->setConnection(std::make_shared<flight_safety_system::transport_ssl::fss_connection_client>(this->ca_file, this->private_key_file, this->public_key_file));
+    return this->getConnection()->connectTo(this->getAddress(), this->getPort());
 }

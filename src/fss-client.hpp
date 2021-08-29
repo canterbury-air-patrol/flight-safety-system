@@ -56,7 +56,7 @@ private:
     uint64_t retry_delay{retry_delay_start};
 public:
     fss_server(fss_client *t_client, std::string t_address, uint16_t t_port, bool connect);
-    fss_server(const fss_server &other) : flight_safety_system::transport::fss_message_cb(other.conn), client(other.client), address(other.address), port(other.port) {};
+    fss_server(fss_server &other) : flight_safety_system::transport::fss_message_cb(other.getConnection()), client(other.client), address(other.address), port(other.port) {};
     fss_server(fss_server&&) = delete;
     auto operator=(const fss_server& other) -> fss_server&
     {
