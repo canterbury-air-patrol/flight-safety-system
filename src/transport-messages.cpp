@@ -13,7 +13,7 @@
 using namespace flight_safety_system::transport;
 
 void
-packString(std::shared_ptr<buf_len> bl, std::string val)
+packString(const std::shared_ptr<buf_len> &bl, const std::string &val)
 {
     size_t str_len = val.length();
     uint16_t len = htons(str_len);
@@ -48,7 +48,7 @@ fss_message::headerLength()
 }
 
 void
-fss_message::createHeader(std::shared_ptr<buf_len> bl)
+fss_message::createHeader(const std::shared_ptr<buf_len> &bl)
 {
     /* Make space for length, type, id */
     size_t length = this->headerLength();
@@ -63,7 +63,7 @@ fss_message::createHeader(std::shared_ptr<buf_len> bl)
 }
 
 void
-fss_message::updateSize(std::shared_ptr<buf_len> bl)
+fss_message::updateSize(const std::shared_ptr<buf_len> &bl)
 {
     uint16_t length = bl->getLength();
     if (length > sizeof(uint16_t))
@@ -99,7 +99,7 @@ fss_message_identity::packData(std::shared_ptr<buf_len> bl)
 }
 
 void
-fss_message_identity::unpackData(std::shared_ptr<buf_len> bl)
+fss_message_identity::unpackData(const std::shared_ptr<buf_len> &bl)
 {
     size_t offset = this->headerLength();
     const char *data = bl->getData();
@@ -119,7 +119,7 @@ fss_message_rtt_response::packData(std::shared_ptr<buf_len> bl)
 }
 
 void
-fss_message_rtt_response::unpackData(std::shared_ptr<buf_len> bl)
+fss_message_rtt_response::unpackData(const std::shared_ptr<buf_len> &bl)
 {
     size_t offset = this->headerLength();
     const char *data = bl->getData();
@@ -165,7 +165,7 @@ fss_message_position_report::packData(std::shared_ptr<buf_len> bl)
 }
 
 void
-fss_message_position_report::unpackData(std::shared_ptr<buf_len> bl)
+fss_message_position_report::unpackData(const std::shared_ptr<buf_len> &bl)
 {
     size_t offset = this->headerLength();
     const char *data = bl->getData();
@@ -256,7 +256,7 @@ fss_message_system_status::packData(std::shared_ptr<buf_len> bl)
 }
 
 void
-fss_message_system_status::unpackData(std::shared_ptr<buf_len> bl)
+fss_message_system_status::unpackData(const std::shared_ptr<buf_len> &bl)
 {
     size_t offset = this->headerLength();
     const char *data = bl->getData();
@@ -283,7 +283,7 @@ fss_message_search_status::packData(std::shared_ptr<buf_len> bl)
 }
 
 void
-fss_message_search_status::unpackData(std::shared_ptr<buf_len> bl)
+fss_message_search_status::unpackData(const std::shared_ptr<buf_len> &bl)
 {
     size_t offset = this->headerLength();
     const char *data = bl->getData();
@@ -318,7 +318,7 @@ fss_message_asset_command::packData(std::shared_ptr<buf_len> bl)
 }
 
 void
-fss_message_asset_command::unpackData(std::shared_ptr<buf_len> bl)
+fss_message_asset_command::unpackData(const std::shared_ptr<buf_len> &bl)
 {
     size_t offset = this->headerLength();
     const char *data = bl->getData();
@@ -352,7 +352,7 @@ fss_message_smm_settings::packData(std::shared_ptr<buf_len> bl)
 }
 
 void
-fss_message_smm_settings::unpackData(std::shared_ptr<buf_len> bl)
+fss_message_smm_settings::unpackData(const std::shared_ptr<buf_len> &bl)
 {
     size_t offset = this->headerLength();
     const char *data = bl->getData();
@@ -382,7 +382,7 @@ fss_message_smm_settings::unpackData(std::shared_ptr<buf_len> bl)
 }
 
 void
-packServer(std::shared_ptr<buf_len> bl, std::pair<std::string, uint16_t> server)
+packServer(const std::shared_ptr<buf_len> &bl, const std::pair<std::string, uint16_t> &server)
 {
     uint16_t port = htons(server.second);
     bl->addData((char *)&port, sizeof(port));
@@ -399,7 +399,7 @@ fss_message_server_list::packData(std::shared_ptr<buf_len> bl)
 }
 
 void
-fss_message_server_list::unpackData(std::shared_ptr<buf_len> bl)
+fss_message_server_list::unpackData(const std::shared_ptr<buf_len> &bl)
 {
     size_t offset = this->headerLength();
     const char *data = bl->getData();
@@ -426,7 +426,7 @@ fss_message_identity_non_aircraft::packData(std::shared_ptr<buf_len> bl)
 }
 
 void
-fss_message_identity_non_aircraft::unpackData(std::shared_ptr<buf_len> bl)
+fss_message_identity_non_aircraft::unpackData(const std::shared_ptr<buf_len> &bl)
 {
     size_t offset = this->headerLength();
     const char *data = bl->getData();
@@ -451,7 +451,7 @@ fss_message_identity_non_aircraft::getCapability(uint8_t cap_id)
 }
 
 std::shared_ptr<fss_message>
-fss_message::decode(std::shared_ptr<buf_len> bl)
+fss_message::decode(const std::shared_ptr<buf_len> &bl)
 {
     std::shared_ptr<fss_message> msg = nullptr;
     const char *data = bl->getData();

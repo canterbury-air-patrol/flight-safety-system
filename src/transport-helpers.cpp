@@ -9,7 +9,7 @@
 #include <netdb.h>
 
 auto
-convert_str_to_sa(std::string addr, uint16_t port, struct sockaddr_storage *sa) -> bool
+convert_str_to_sa(const std::string &addr, uint16_t port, struct sockaddr_storage *sa) -> bool
 {
     int family = AF_UNSPEC;
     /* Try converting an IP(v4) address first */

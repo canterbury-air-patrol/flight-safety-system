@@ -62,7 +62,7 @@ public:
     {
         this->lock.lock();
         this->total_clients++;
-        this->clients.push_back(client);
+        this->clients.push_back(std::move(client));
         this->lock.unlock();
     };
     void clientDisconnected(fss_client *client)
@@ -312,7 +312,7 @@ new_client_connect(std::shared_ptr<fss_transport::fss_connection> conn) -> bool
 #ifdef DEBUG
     std::cout << "New client connected" << std::endl;
 #endif
-    clients->clientConnected(std::make_shared<fss_client>(conn));
+    clients->clientConnected(std::make_shared<fss_client>(std::move(conn)));
     return true;
 }
 

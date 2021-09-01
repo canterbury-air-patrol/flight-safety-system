@@ -18,7 +18,7 @@ protected:
     auto sendMsg(const std::shared_ptr<flight_safety_system::transport::buf_len> &bl) -> bool override;
     auto recvBytes(void *bytes, size_t max_bytes) -> ssize_t override;
 public:
-    fss_connection(unsigned int t_session_flags, std::string t_ca, std::string t_private_key, std::string t_public_key) : flight_safety_system::transport::fss_connection(), session(t_session_flags), ca_file(t_ca), private_key_file(t_private_key), public_key_file(t_public_key) {};
+    fss_connection(unsigned int t_session_flags, std::string t_ca, std::string t_private_key, std::string t_public_key) : flight_safety_system::transport::fss_connection(), session(t_session_flags), ca_file(std::move(t_ca)), private_key_file(std::move(t_private_key)), public_key_file(std::move(t_public_key)) {};
     fss_connection(int t_fd, unsigned int t_session_flags, std::string t_ca, std::string t_private_key, std::string t_public_key);
     fss_connection(fss_connection&) = delete;
     fss_connection(fss_connection&&) = delete;
