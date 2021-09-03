@@ -15,8 +15,6 @@ AM_PROG_AR
 
 AX_CXX_COMPILE_STDCXX([11],[],[mandatory])
 
-AX_CODE_COVERAGE
-
 LT_INIT([disable-static pic-only])
 
 # Setup so we can install pkg-config

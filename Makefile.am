@@ -1,7 +1,3 @@
-if CODE_COVERAGE_ENABLED
-include $(top_srcdir)/aminclude_static.am
-endif
-
 AUTOMAKE_OPTIONS = foreign
 ACLOCAL_AMFLAGS = -I m4
 SUBDIRS = src examples tests
