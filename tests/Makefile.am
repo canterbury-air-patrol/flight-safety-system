@@ -1,4 +1,6 @@
+if CODE_COVERAGE_ENABLED
 include $(top_srcdir)/aminclude_static.am
+endif
 
 AUTOMAKE_OPTIONS = subdir-objects
 ACLOCAL_AMFLAGS = $(ACLOCAL_FLAGS)

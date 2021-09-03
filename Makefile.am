@@ -1,6 +1,8 @@
+if CODE_COVERAGE_ENABLED
 include $(top_srcdir)/aminclude_static.am
+endif
 
 AUTOMAKE_OPTIONS = foreign
 ACLOCAL_AMFLAGS = -I m4
 SUBDIRS = src examples tests
-EXTRA_DIST = debian aminclude_static.am
+EXTRA_DIST = debian
