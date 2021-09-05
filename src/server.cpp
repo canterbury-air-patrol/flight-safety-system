@@ -19,6 +19,8 @@
 
 #include <unistd.h>
 
+constexpr int sec_to_msec = 1000;
+
 using namespace flight_safety_system::server;
 namespace fss_transport = flight_safety_system::transport;
 
@@ -128,7 +130,8 @@ fss_client::sendCommand()
 {
     uint64_t ts = fss_current_timestamp();
     auto ac = dbc->asset_get_command(this->name);
-    if (ac != nullptr && (ac->getDBId() != this->last_command_dbid || ts > (this->last_command_send_ts + 10000)))
+    constexpr int timeout_time = 10 * sec_to_msec;
+    if (ac != nullptr && (ac->getDBId() != this->last_command_dbid || ts > (this->last_command_send_ts + timeout_time)))
     {
         /* New command or time to re-send */
         this->last_command_send_ts = ts;
@@ -376,6 +379,7 @@ main(int argc, char *argv[]) -> int
      */
 
     int counter = 0;
+    constexpr int send_config_period = 15;
     while (running)
     {
         sleep (1);
@@ -387,7 +391,7 @@ main(int argc, char *argv[]) -> int
             clients->sendCommand();
         }
         /* Send Config settings to all clients */
-        if ((counter % 15) == 0)
+        if ((counter % send_config_period) == 0)
         {
             /* Send all the known fss servers */
             auto known_servers = dbc->get_active_fss_servers();

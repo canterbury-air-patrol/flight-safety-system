@@ -2,6 +2,11 @@
 
 #include <stdlib.h>
 
+#define COMMAND_LEN 7
+#define SMM_LOGIN_LEN 51
+#define SMM_SERVER_LEN 256
+#define SMM_PASSWORD_LEN 256
+
 void db_connect(const char *host, const char *user, const char *pass, const char *db)
 {
     char *target = NULL;
@@ -95,7 +100,7 @@ db_asset_command_get(unsigned long long asset_id_arg)
     unsigned long long asset_id = asset_id_arg;
     unsigned long long id = 0;
     unsigned long long ts;
-    char command[7];
+    char command[COMMAND_LEN];
     double lat;
     double lng;
     int alt;
@@ -122,17 +127,20 @@ db_asset_command_get(unsigned long long asset_id_arg)
     return res;
 }
 
+#define HTTP_PORT 80
+#define HTTPS_PORT 443
+
 char *
 convert_to_http(const char *address, int port, bool https)
 {
     bool default_port = false;
     if (https)
     {
-        default_port = (port == 443);
+        default_port = (port == HTTPS_PORT);
     }
     else
     {
-        default_port = (port == 80);
+        default_port = (port == HTTP_PORT);
     }
     char *result = NULL;
     if (default_port)
@@ -157,11 +165,11 @@ db_asset_smm_settings_get(unsigned long long asset_id_arg)
 {
     EXEC SQL BEGIN DECLARE SECTION;
     unsigned long long asset_id = asset_id_arg;
-    char server_address[256];
+    char server_address[SMM_SERVER_LEN];
     int server_port;
     bool server_https;
-    char smm_login[51];
-    char smm_password[256];
+    char smm_login[SMM_LOGIN_LEN];
+    char smm_password[SMM_PASSWORD_LEN];
     int success = 0;
     EXEC SQL END DECLARE SECTION;
 
@@ -187,7 +195,7 @@ db_active_fss_servers_get(void)
     res[len] = NULL;
 
     EXEC SQL BEGIN DECLARE SECTION;
-    char server_address[256];
+    char server_address[SMM_SERVER_LEN];
     int server_port;
     EXEC SQL END DECLARE SECTION;
 

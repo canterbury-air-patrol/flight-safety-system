@@ -134,13 +134,14 @@ fss_message_rtt_response::unpackData(const std::shared_ptr<buf_len> &bl)
     }
 }
 
+constexpr float flt_to_int = 0.000001;
 void
 fss_message_position_report::packData(std::shared_ptr<buf_len> bl)
 {
     uint64_t ts = htonll(this->getTimeStamp());
     /* Convert the lat/long to fixed decimal for transport */
-    int32_t lat = htonl((int32_t) (this->getLatitude() / 0.000001));
-    int32_t lng = htonl((int32_t) (this->getLongitude() / 0.000001));
+    int32_t lat = htonl((int32_t) (this->getLatitude() / flt_to_int));
+    int32_t lng = htonl((int32_t) (this->getLongitude() / flt_to_int));
     uint32_t alt = htonl(this->getAltitude());
     uint32_t icao_id = htonl(this->getICAOAddress());
     uint16_t head = htons(this->getHeading());
@@ -183,13 +184,13 @@ fss_message_position_report::unpackData(const std::shared_ptr<buf_len> &bl)
     {
         lat = ntohl(*(int32_t *)(data + offset));
         offset += sizeof(int32_t);
-        this->latitude = ((double)lat) * 0.000001;
+        this->latitude = ((double)lat) * flt_to_int;
     }
     if (length - offset >= sizeof(int32_t))
     {
         lng = ntohl(*(int32_t *)(data + offset));
         offset += sizeof(int32_t);
-        this->longitude = ((double)lng) * 0.000001;
+        this->longitude = ((double)lng) * flt_to_int;
     }
     if (length - offset >= sizeof(uint32_t))
     {
@@ -306,8 +307,8 @@ fss_message_asset_command::packData(std::shared_ptr<buf_len> bl)
 {
     uint64_t ts = htonll(this->getTimeStamp());
     /* Convert the lat/long to fixed decimal for transport */
-    int32_t lat = htonl((int32_t) (this->getLatitude() / 0.000001));
-    int32_t lng = htonl((int32_t) (this->getLongitude() / 0.000001));
+    int32_t lat = htonl((int32_t) (this->getLatitude() / flt_to_int));
+    int32_t lng = htonl((int32_t) (this->getLongitude() / flt_to_int));
     uint32_t alt = htonl(this->getAltitude());
     uint8_t cmd = (uint8_t) this->getCommand();
     bl->addData((char *)&ts, sizeof(uint64_t));
@@ -339,8 +340,8 @@ fss_message_asset_command::unpackData(const std::shared_ptr<buf_len> &bl)
         offset += sizeof(uint32_t);
         this->command = (fss_asset_command) *(uint8_t *)(data + offset);
     }
-    this->latitude = lat * 0.000001;
-    this->longitude = lng * 0.000001;
+    this->latitude = lat * flt_to_int;
+    this->longitude = lng * flt_to_int;
 }
 
 void

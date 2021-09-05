@@ -48,23 +48,41 @@ main(int argc, char *argv[]) -> int
        - Server reset
      */
     
+    constexpr int send_interval = 5;
     int counter = 0;
     while (running)
     {
         sleep (1);
         client->attemptReconnect();
         counter++;
-        if (counter % 5 == 0)
+        if (counter % send_interval == 0)
         {
             /* Send each server some fake details */
-            auto msg_status = std::make_shared<flight_safety_system::transport::fss_message_system_status>(75, 1000);
-            auto msg_search = std::make_shared<flight_safety_system::transport::fss_message_search_status>(1, 23, 100);
-            auto msg_pos = std::make_shared<flight_safety_system::transport::fss_message_position_report>(-43.5, 172.5, 300, 1800, 200, 0, 0, "example", 01200, 0, 1 | 2 | 4 | 8 | 16 | 32, 1, 14, flight_safety_system::fss_current_timestamp());
+            constexpr int bat_remaining = 75;
+            constexpr int bat_mah_used = 1000;
+            auto msg_status = std::make_shared<flight_safety_system::transport::fss_message_system_status>(bat_remaining, bat_mah_used);
+            constexpr int search_number = 1;
+            constexpr int search_current_point = 23;
+            constexpr int search_total_points = 100;
+            auto msg_search = std::make_shared<flight_safety_system::transport::fss_message_search_status>(search_number, search_current_point, search_total_points);
+            constexpr double lat = -43.5;
+            constexpr double lng = 172.5;
+            constexpr int alt = 300;
+            constexpr int heading_cdeg = 1800;
+            constexpr int hor_vel = 200;
+            constexpr int vert_vel = 0;
+            constexpr int icao_address = 0;
+            constexpr const char *callsign = "example";
+            constexpr int squawk_code = 01200;
+            constexpr int time_since_last_contact = 0;
+            constexpr int flags = 1 | 2 | 4 | 8 | 16 | 32;
+            constexpr int alt_type = 1;
+            constexpr int emitter_type = 14;
+            auto msg_pos = std::make_shared<flight_safety_system::transport::fss_message_position_report>(lat, lng, alt, heading_cdeg, hor_vel, vert_vel, icao_address, callsign, squawk_code, time_since_last_contact, flags, alt_type, emitter_type, flight_safety_system::fss_current_timestamp());
             client->sendMsgAll(msg_status);
             client->sendMsgAll(msg_search);
             client->sendMsgAll(msg_pos);
         }
     }
-
     client->disconnect();
 }

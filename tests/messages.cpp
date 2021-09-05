@@ -160,8 +160,9 @@ TEST_CASE("Position Report Message Check") {
     REQUIRE(msg->getType() == flight_safety_system::transport::message_type_position_report);
     /* Check input == output */
     REQUIRE(decoded->getId() == msg_id);
-    REQUIRE(decoded->getLatitude() == pos_lat);
-    REQUIRE(decoded->getLongitude() == pos_lng);
+    constexpr double lat_lng_tolerance = 0.000001;
+    REQUIRE(std::fabs(decoded->getLatitude() - pos_lat) < lat_lng_tolerance);
+    REQUIRE(std::fabs(decoded->getLongitude() - pos_lng) < lat_lng_tolerance);
     REQUIRE(decoded->getAltitude() == altitude);
     REQUIRE(decoded->getTimeStamp() == timestamp);
     REQUIRE(decoded->getICAOAddress() == icao_address);
@@ -178,8 +179,8 @@ TEST_CASE("Position Report Message Check") {
     REQUIRE(decoded_generic->getType() == flight_safety_system::transport::message_type_position_report);
     /* Check input == output */
     REQUIRE(decoded_generic->getId() == msg_id);
-    REQUIRE(decoded_generic->getLatitude() == pos_lat);
-    REQUIRE(decoded_generic->getLongitude() == pos_lng);
+    REQUIRE(std::fabs(decoded_generic->getLatitude() - pos_lat) < lat_lng_tolerance);
+    REQUIRE(std::fabs(decoded_generic->getLongitude() - pos_lng) < lat_lng_tolerance);
     REQUIRE(decoded_generic->getAltitude() == altitude);
     REQUIRE(decoded_generic->getTimeStamp() == timestamp);
 }
