@@ -39,8 +39,8 @@ flight_safety_system::transport::fss_message_cb::sendMsg(const std::shared_ptr<f
     return false;
 }
 
-size_t
-flight_safety_system::transport::fss_message::headerLength()
+auto
+flight_safety_system::transport::fss_message::headerLength() -> size_t
 {
     return sizeof(uint16_t) + sizeof(uint16_t) + sizeof(uint64_t);
 }
@@ -308,7 +308,7 @@ flight_safety_system::transport::fss_message_asset_command::packData(std::shared
     int32_t lat = htonl((int32_t) (this->getLatitude() / flt_to_int));
     int32_t lng = htonl((int32_t) (this->getLongitude() / flt_to_int));
     uint32_t alt = htonl(this->getAltitude());
-    uint8_t cmd = (uint8_t) this->getCommand();
+    auto cmd = (uint8_t) this->getCommand();
     bl->addData((char *)&ts, sizeof(uint64_t));
     bl->addData((char *)&lat, sizeof(int32_t));
     bl->addData((char *)&lng, sizeof(int32_t));
@@ -443,18 +443,18 @@ flight_safety_system::transport::fss_message_identity_non_aircraft::addCapabilit
     this->capabilities |= ((uint64_t)(1) << cap_id);
 }
 
-bool
-flight_safety_system::transport::fss_message_identity_non_aircraft::getCapability(uint8_t cap_id)
+auto
+flight_safety_system::transport::fss_message_identity_non_aircraft::getCapability(uint8_t cap_id) -> bool
 {
     return !!(this->capabilities & ((uint64_t)(1) << cap_id));
 }
 
-std::shared_ptr<flight_safety_system::transport::fss_message>
-flight_safety_system::transport::fss_message::decode(const std::shared_ptr<buf_len> &bl)
+auto
+flight_safety_system::transport::fss_message::decode(const std::shared_ptr<buf_len> &bl) -> std::shared_ptr<flight_safety_system::transport::fss_message>
 {
     std::shared_ptr<fss_message> msg = nullptr;
     const char *data = bl->getData();
-    fss_message_type type = (fss_message_type) ntohs(*(uint16_t *)(data + sizeof(uint16_t)));
+    auto type = (fss_message_type) ntohs(*(uint16_t *)(data + sizeof(uint16_t)));
     uint64_t msg_id = ntohll (*(uint64_t *)(data + sizeof(uint16_t) + sizeof(uint16_t)));
 
     switch (type)
