@@ -25,8 +25,11 @@ packString(const std::shared_ptr<flight_safety_system::transport::buf_len> &bl, 
 void
 flight_safety_system::transport::fss_message_cb::disconnect()
 {
-    this->conn->disconnect();
-    this->conn = nullptr;
+    if (this->conn != nullptr)
+    {
+        this->conn->disconnect();
+        this->conn = nullptr;
+    }
 }
 
 auto
