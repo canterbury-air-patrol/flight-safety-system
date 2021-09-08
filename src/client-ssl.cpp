@@ -30,14 +30,19 @@ flight_safety_system::client_ssl::fss_client::fss_client(const std::string &t_fi
     /* Load all the known servers from the config */
     for (unsigned int idx = 0; idx < config["servers"].size(); idx++)
     {
-        this->connectTo(config["servers"][idx]["address"].asString(), config["servers"][idx]["port"].asInt(), false);
+        auto server = std::make_shared<flight_safety_system::client_ssl::fss_server>(this, config["servers"][idx]["address"].asString(), config["servers"][idx]["port"].asInt(), this->ca_file, this->private_key_file, this->public_key_file);
+        this->addServer(server);
     }
 }
 
 void
-flight_safety_system::client_ssl::fss_client::connectTo(const std::string &t_address, uint16_t t_port, bool connect)
+flight_safety_system::client_ssl::fss_client::connectTo(const std::string &t_address, uint16_t t_port, bool t_connect)
 {
-    auto server = std::make_shared<flight_safety_system::client_ssl::fss_server>(this, t_address, t_port, connect, this->ca_file, this->private_key_file, this->public_key_file);
+    auto server = std::make_shared<flight_safety_system::client_ssl::fss_server>(this, t_address, t_port, this->ca_file, this->private_key_file, this->public_key_file);
+    if (t_connect)
+    {
+        server->reconnect();
+    }
     this->addServer(server);
 }
 

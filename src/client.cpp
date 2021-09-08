@@ -31,7 +31,8 @@ flight_safety_system::client::fss_client::fss_client(const std::string &t_fileNa
     /* Load all the known servers from the config */
     for (unsigned int idx = 0; idx < config["servers"].size(); idx++)
     {
-        this->connectTo(config["servers"][idx]["address"].asString(), config["servers"][idx]["port"].asInt(), false);
+        auto server = std::make_shared<fss_server>(this, config["servers"][idx]["address"].asString(), config["servers"][idx]["port"].asInt());
+        this->addServer(server);
     }
 }
 
@@ -58,9 +59,13 @@ flight_safety_system::client::fss_client::addServer(const std::shared_ptr<fss_se
 }
 
 void
-flight_safety_system::client::fss_client::connectTo(const std::string &t_address, uint16_t t_port, bool connect)
+flight_safety_system::client::fss_client::connectTo(const std::string &t_address, uint16_t t_port, bool t_connect)
 {
-    auto server = std::make_shared<fss_server>(this, t_address, t_port, connect);
+    auto server = std::make_shared<fss_server>(this, t_address, t_port);
+    if (t_connect)
+    {
+        server->reconnect();
+    }
     this->addServer(server);
 }
 
@@ -162,13 +167,8 @@ flight_safety_system::client::fss_client::serverRequiresReconnect(fss_server *se
     this->notifyConnectionStatus();
 }
 
-flight_safety_system::client::fss_server::fss_server(fss_client *t_client, std::string t_address, uint16_t t_port, bool connect) : fss_message_cb(nullptr), client(t_client), address(std::move(t_address)), port(t_port)
+flight_safety_system::client::fss_server::fss_server(fss_client *t_client, std::string t_address, uint16_t t_port) : fss_message_cb(nullptr), client(t_client), address(std::move(t_address)), port(t_port)
 {
-    if (connect && this->reconnect())
-    {
-        this->getConnection()->setHandler(this);
-        this->sendIdentify();
-    }
 }
 
 void

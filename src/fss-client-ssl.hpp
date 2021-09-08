@@ -27,14 +27,15 @@ private:
     std::string ca_file{""};
     std::string private_key_file{""};
     std::string public_key_file{""};
+protected:
+    auto reconnect_to() -> bool override;
 public:
-    fss_server(fss_client *t_client, std::string t_address, uint16_t t_port, bool connect, std::string t_ca, std::string t_private_key, std::string t_public_key) : flight_safety_system::client::fss_server(t_client, std::move(t_address), t_port, connect), ca_file(std::move(t_ca)), private_key_file(std::move(t_private_key)), public_key_file(std::move(t_public_key)) {};
+    fss_server(fss_client *t_client, std::string t_address, uint16_t t_port, std::string t_ca, std::string t_private_key, std::string t_public_key) : flight_safety_system::client::fss_server(t_client, std::move(t_address), t_port), ca_file(std::move(t_ca)), private_key_file(std::move(t_private_key)), public_key_file(std::move(t_public_key)) {};
     fss_server(fss_server &other) : flight_safety_system::client::fss_server(other), ca_file(other.ca_file), private_key_file(other.private_key_file), public_key_file(other.public_key_file) {};
     fss_server(fss_server&&) = delete;
     auto operator=(fss_server&) -> fss_server& = delete;
     auto operator=(fss_server&&) -> fss_server& = delete;
     ~fss_server() override = default;
-    auto reconnect_to() -> bool override;
 };
 
 
