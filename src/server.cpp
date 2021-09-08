@@ -21,16 +21,16 @@
 
 constexpr int sec_to_msec = 1000;
 
-using namespace flight_safety_system::server;
+namespace fss_server = flight_safety_system::server;
 namespace fss_transport = flight_safety_system::transport;
 
-std::shared_ptr<db_connection> dbc = nullptr;
+std::shared_ptr<fss_server::db_connection> dbc = nullptr;
 
 class server_clients{
 private:
     std::mutex lock{};
-    std::list<std::shared_ptr<fss_client>> clients{};
-    std::queue<std::shared_ptr<fss_client>> disconnected{};
+    std::list<std::shared_ptr<fss_server::fss_client>> clients{};
+    std::queue<std::shared_ptr<fss_server::fss_client>> disconnected{};
     uint32_t total_clients{0};
     bool shutting_down{false};
 public:
@@ -60,14 +60,14 @@ public:
         }
         this->lock.unlock();
     };
-    void clientConnected(std::shared_ptr<fss_client> client)
+    void clientConnected(std::shared_ptr<fss_server::fss_client> client)
     {
         this->lock.lock();
         this->total_clients++;
         this->clients.push_back(std::move(client));
         this->lock.unlock();
     };
-    void clientDisconnected(fss_client *client)
+    void clientDisconnected(fss_server::fss_client *client)
     {
         /* If we are shutting down, don't worry */
         if (this->shutting_down) return;
@@ -83,7 +83,7 @@ public:
         }
         this->lock.unlock();
     };
-    void sendMsg(const std::shared_ptr<fss_transport::fss_message> &msg, fss_client *except = nullptr)
+    void sendMsg(const std::shared_ptr<fss_transport::fss_message> &msg, fss_server::fss_client *except = nullptr)
     {
         for (const auto &client : clients)
         {
@@ -118,15 +118,15 @@ public:
 
 std::shared_ptr<server_clients> clients = nullptr;
 
-fss_client::fss_client(std::shared_ptr<fss_transport::fss_connection> t_conn) : fss_message_cb(std::move(t_conn))
+fss_server::fss_client::fss_client(std::shared_ptr<fss_transport::fss_connection> t_conn) : fss_message_cb(std::move(t_conn))
 {
     this->getConnection()->setHandler(this);
 }
 
-fss_client::~fss_client() = default;
+fss_server::fss_client::~fss_client() = default;
 
 void
-fss_client::sendCommand()
+fss_server::fss_client::sendCommand()
 {
     uint64_t ts = fss_current_timestamp();
     auto ac = dbc->asset_get_command(this->name);
@@ -155,7 +155,7 @@ fss_client::sendCommand()
 }
 
 void
-fss_client::sendRTTRequest(const std::shared_ptr<fss_transport::fss_message_rtt_request> &rtt_req)
+fss_server::fss_client::sendRTTRequest(const std::shared_ptr<fss_transport::fss_message_rtt_request> &rtt_req)
 {
     uint64_t ts = fss_current_timestamp();
     this->getConnection()->sendMsg(rtt_req);
@@ -163,7 +163,7 @@ fss_client::sendRTTRequest(const std::shared_ptr<fss_transport::fss_message_rtt_
 }
 
 void
-fss_client::sendSMMSettings()
+fss_server::fss_client::sendSMMSettings()
 {
     auto smm = dbc->asset_get_smm_settings(this->name);
     if (smm != nullptr)
@@ -174,7 +174,7 @@ fss_client::sendSMMSettings()
 }
 
 void
-fss_client::processMessage(std::shared_ptr<fss_transport::fss_message> msg)
+fss_server::fss_client::processMessage(std::shared_ptr<fss_transport::fss_message> msg)
 {
     if (msg == nullptr)
     {
@@ -315,7 +315,7 @@ new_client_connect(std::shared_ptr<fss_transport::fss_connection> conn) -> bool
 #ifdef DEBUG
     std::cout << "New client connected" << std::endl;
 #endif
-    clients->clientConnected(std::make_shared<fss_client>(std::move(conn)));
+    clients->clientConnected(std::make_shared<fss_server::fss_client>(std::move(conn)));
     return true;
 }
 
@@ -338,7 +338,7 @@ main(int argc, char *argv[]) -> int
     configfile >> config;
 
     /* Connect to database */
-    dbc = std::make_shared<db_connection>(config["postgres"]["host"].asString(), config["postgres"]["user"].asString(), config["postgres"]["pass"].asString(), config["postgres"]["db"].asString());
+    dbc = std::make_shared<fss_server::db_connection>(config["postgres"]["host"].asString(), config["postgres"]["user"].asString(), config["postgres"]["pass"].asString(), config["postgres"]["db"].asString());
     
     /* Create the clients tracking */
     clients = std::make_shared<server_clients>();
