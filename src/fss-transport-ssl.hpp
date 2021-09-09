@@ -49,5 +49,5 @@ protected:
 public:
     fss_listen(uint16_t t_port, flight_safety_system::transport::fss_connect_cb t_cb, std::string t_ca, std::string t_private_key, std::string t_public_key) : flight_safety_system::transport::fss_listen(t_port, t_cb), ca_file(std::move(t_ca)), private_key_file(std::move(t_private_key)), public_key_file(std::move(t_public_key)) {};
 };
-}; // namespace transport_ssl
-}; // namespace flight_safety_system
+} // namespace transport_ssl
+} // namespace flight_safety_system
