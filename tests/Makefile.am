@@ -11,7 +11,7 @@ all_test_LDADD = ../src/libfss-transport.la ../src/libfss-client.la ../src/libfs
 
 if SSL
 all_test_SOURCES += connection-ssl.cpp
-all_test_LDADD += ../src/libfss-transport-ssl.la $(GNUTLS_LIBS)
+all_test_LDADD += ../src/libfss-transport-ssl.la $(GNUTLS_LIBS) -lgnutlsxx
 endif
 
 endif
