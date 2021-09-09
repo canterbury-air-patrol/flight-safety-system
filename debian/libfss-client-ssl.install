@@ -1,0 +1,3 @@
+usr/lib/*/libfss-client-ssl.*
+usr/lib/*/pkgconfig/fss-client-ssl.pc
+usr/include/fss-client-ssl.hpp

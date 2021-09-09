@@ -1,0 +1,3 @@
+usr/lib/*/libfss-transport-ssl.*
+usr/lib/*/pkgconfig/fss-transport-ssl.pc
+usr/include/fss-transport-ssl.hpp
