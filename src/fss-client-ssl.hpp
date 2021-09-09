@@ -39,5 +39,5 @@ public:
 };
 
 
-}; // namespace client_ssl
-}; // namespace flight_safety_system
+} // namespace client_ssl
+} // namespace flight_safety_system
