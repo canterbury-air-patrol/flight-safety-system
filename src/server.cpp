@@ -346,7 +346,7 @@ main(int argc, char *argv[]) -> int
     /* Open listen socket */
     std::shared_ptr<flight_safety_system::transport::fss_listen> listen;
 #ifdef HAVE_SSL
-    if (config["ssl"])
+    if (config["ssl"].isArray())
     {
         std::cerr << "Starting fss server in TLS mode" << std::endl;
         std::string ca_public_key = config["ssl"]["ca_public_key"].asString();
