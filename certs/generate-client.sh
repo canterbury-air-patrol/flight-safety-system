@@ -4,7 +4,7 @@ CA_PUBLIC_PEM=ca.public.pem
 CA_PRIVATE_PEM=ca.private.pem
 
 CLIENT_TMPL=${1}.tmpl
-CLIENT_PRIVATE_PEM=#{1}.private.pem
+CLIENT_PRIVATE_PEM=${1}.private.pem
 CLIENT_PUBLIC_PEM=${1}.public.pem
 
 certtool --generate-privkey > ${CLIENT_PRIVATE_PEM}
