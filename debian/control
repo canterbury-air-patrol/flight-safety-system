@@ -32,5 +32,5 @@ Description: The SSL client library for Flight-Safety-System
 
 Package: flight-safety-system-server
 Architecture: any
-Depends: libfss, libfss-transport, libfss-transport-ssl, libjsoncpp1, libecpg6
+Depends: libfss, libfss-transport, libfss-transport-ssl, libjsoncpp1 | libjsoncpp24, libecpg6
 Description: The Flight-Safety-System server
