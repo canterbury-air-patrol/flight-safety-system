@@ -15,8 +15,8 @@
 #include "fss-transport-ssl.hpp"
 
 constexpr const char * CA_PUBLIC_FILE = "certs/ca.public.pem";
-constexpr const char * SERVER_PRIVATE_FILE = "certs/server.private.pem";
-constexpr const char * SERVER_PUBLIC_FILE = "certs/server.public.pem";
+constexpr const char * SERVER_PRIVATE_FILE = "certs/localhost.private.pem";
+constexpr const char * SERVER_PUBLIC_FILE = "certs/localhost.public.pem";
 constexpr const char * CLIENT_PRIVATE_FILE = "certs/client.private.pem";
 constexpr const char * CLIENT_PUBLIC_FILE = "certs/client.public.pem";
 

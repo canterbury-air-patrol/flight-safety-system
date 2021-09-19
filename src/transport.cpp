@@ -284,6 +284,13 @@ fss_transport::fss_connection::recvMsg() -> std::shared_ptr<fss_transport::fss_m
     return msg;
 }
 
+auto
+fss_transport::fss_connection::getClientNames() -> std::list<std::string>
+{
+    std::list<std::string> ret;
+    return ret;
+}
+
 fss_transport::fss_listen::~fss_listen()
 {
     this->disconnect();

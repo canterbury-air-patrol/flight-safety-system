@@ -247,6 +247,7 @@ flight_safety_system::client::fss_server::processMessage(std::shared_ptr<fss_tra
             case fss_transport::message_type_closed:
             case fss_transport::message_type_identity:
             case fss_transport::message_type_identity_non_aircraft:
+            case fss_transport::message_type_identity_required:
                 break;
             case fss_transport::message_type_rtt_request:
             {

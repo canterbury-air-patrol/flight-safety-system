@@ -17,7 +17,7 @@ all_test_LDADD += ../src/libfss-transport-ssl.la $(GNUTLS_LIBS) -lgnutlsxx
 BUILT_SOURCES+=certs
 certs:
 	mkdir certs
-	(cd certs; ../../certs/generate-ca.sh; ../../certs/generate-server.sh server; ../../certs/generate-client.sh client)
+	(cd certs; ../../certs/generate-ca.sh; ../../certs/generate-server.sh localhost; ../../certs/generate-client.sh client)
 
 endif
 

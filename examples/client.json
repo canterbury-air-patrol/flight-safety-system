@@ -2,12 +2,12 @@
     "name": "test1",
     "ssl": {
         "ca_public_key": "certs/ca.public.pem",
-        "client_private_key": "certs/client.private.pem",
-        "client_public_key": "certs/client.public.pem"
+        "client_private_key": "certs/test1.private.pem",
+        "client_public_key": "certs/test1.public.pem"
     },
     "servers": [
         {
-            "address": "127.0.0.1",
+            "address": "localhost",
             "port": 20202
         }
     ]

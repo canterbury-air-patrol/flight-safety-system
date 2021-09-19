@@ -3,6 +3,7 @@
 #include <memory>
 #include <sys/types.h>
 #include <thread>
+#include <list>
 
 #include "fss.hpp"
 
@@ -38,6 +39,9 @@ using fss_message_type = enum fss_message_type_e {
 
     /* Non-aircraft clients */
     message_type_identity_non_aircraft,
+
+    /* Please send identity */
+    message_type_identity_required,
 };
 
 using fss_asset_command = enum fss_asset_command_e {
@@ -172,6 +176,7 @@ public:
     auto getMsg() -> std::shared_ptr<fss_message>;
     virtual void processMessages();
     void disconnect();
+    virtual auto getClientNames() -> std::list<std::string>;
 };
 
 class fss_listen : public fss_connection {
@@ -399,6 +404,15 @@ public:
     fss_message_identity_non_aircraft(uint64_t t_id, const std::shared_ptr<buf_len> &bl) : fss_message(t_id, message_type_identity_non_aircraft) { this->unpackData(bl); };
     void addCapability(uint8_t cap_id);
     auto getCapability(uint8_t cap_id) -> bool;
+};
+
+class fss_message_identity_required : public fss_message {
+private:
+protected:
+    void packData(std::shared_ptr<buf_len> bl) override;
+public:
+    fss_message_identity_required() : fss_message(message_type_identity_required) {};
+    fss_message_identity_required(uint64_t t_id, const std::shared_ptr<buf_len> &bl) : fss_message(t_id, message_type_identity) {};
 };
 } // namespace transport
 } // namespace flight_safety_system

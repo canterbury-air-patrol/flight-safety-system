@@ -452,6 +452,11 @@ flight_safety_system::transport::fss_message_identity_non_aircraft::getCapabilit
     return !!(this->capabilities & ((uint64_t)(1) << cap_id));
 }
 
+void
+flight_safety_system::transport::fss_message_identity_required::packData(std::shared_ptr<buf_len> bl)
+{
+}
+
 auto
 flight_safety_system::transport::fss_message::decode(const std::shared_ptr<buf_len> &bl) -> std::shared_ptr<flight_safety_system::transport::fss_message>
 {
@@ -494,6 +499,9 @@ flight_safety_system::transport::fss_message::decode(const std::shared_ptr<buf_l
             break;
         case message_type_identity_non_aircraft:
             msg = std::make_shared<fss_message_identity_non_aircraft>(msg_id, bl);
+            break;
+        case message_type_identity_required:
+            msg = std::make_shared<fss_message_identity_required>(msg_id, bl);
             break;
     }
     

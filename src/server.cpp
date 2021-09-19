@@ -1,4 +1,5 @@
 #include "fss-transport.hpp"
+#include <ostream>
 #ifdef HAVE_SSL
 #include "fss-transport-ssl.hpp"
 #endif
@@ -198,7 +199,28 @@ fss_server::fss_client::processMessage(std::shared_ptr<fss_transport::fss_messag
             if (identity_msg != nullptr)
             {
                 this->name = identity_msg->getName();
-                this->identified = true;
+                auto possible_names = this->getConnection()->getClientNames();
+                if (possible_names.empty())
+                {
+                    /* No client names, so accept anything */
+                    this->identified = true;
+                }
+                else
+                {
+                    for (auto possible_name: possible_names)
+                    {
+                        if (possible_name == this->name)
+                        {
+                            this->identified = true;
+                            break;
+                        }
+                    }
+                }
+                if (!this->identified)
+                {
+                    clients->clientDisconnected(this);
+                    return;
+                }
                 this->aircraft = true;
                 /* send the current command */
                 this->sendCommand();
@@ -219,6 +241,10 @@ fss_server::fss_client::processMessage(std::shared_ptr<fss_transport::fss_messag
             this->identified = true;
             this->aircraft = false;
         }
+        else
+        {
+            this->sendMsg(std::make_shared<fss_transport::fss_message_identity_required>());
+        }
     }
     else
     {
@@ -228,6 +254,7 @@ fss_server::fss_client::processMessage(std::shared_ptr<fss_transport::fss_messag
             case fss_transport::message_type_closed:
             case fss_transport::message_type_identity:
             case fss_transport::message_type_identity_non_aircraft:
+            case fss_transport::message_type_identity_required:
                 break;
             case fss_transport::message_type_rtt_request:
             {
@@ -346,7 +373,7 @@ main(int argc, char *argv[]) -> int
     /* Open listen socket */
     std::shared_ptr<flight_safety_system::transport::fss_listen> listen;
 #ifdef HAVE_SSL
-    if (config["ssl"].isArray())
+    if (config["ssl"].isObject())
     {
         std::cerr << "Starting fss server in TLS mode" << std::endl;
         std::string ca_public_key = config["ssl"]["ca_public_key"].asString();

@@ -7,7 +7,7 @@
     },
     "ssl": {
        "ca_public_key": "certs/ca.public.pem",
-       "server_private_key": "certs/server.private.pem",
-       "server_public_key": "certs/server.public.pem"
+       "server_private_key": "certs/localhost.private.pem",
+       "server_public_key": "certs/localhost.public.pem"
     }
 }
