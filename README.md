@@ -30,7 +30,7 @@ Create a [server.json](examples/server.json) file with the correct port and data
 Then start the server `fss-server server.json`
 
 ### Client
-There is no full client implementation shipped with flight-safety-system, however there is a [library](src/fss-client.hpp) to use and an [example client](examples/fake_client.cpp) that can be used as a starting point.
+There is no full client implementation shipped with flight-safety-system, however there is a [library](src/fss-client-ssl.hpp) to use and an [example client](examples/fake_client.cpp) that can be used as a starting point.
 
 ## Redundancy
 Redundancy is available by running multiple independent servers, the normal client configuration allows for specifying multiple servers to connect to. 

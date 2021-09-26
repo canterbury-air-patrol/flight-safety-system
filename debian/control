@@ -15,11 +15,6 @@ Architecture: any
 Depends: libfss
 Description: The transport library for Flight-Safety-System
 
-Package: libfss-client
-Architecture: any
-Depends: libfss, libfss-transport, libjsoncpp-dev
-Description: The client library for Flight-Safety-System
-
 Package: libfss-transport-ssl
 Architecture: any
 Depends: libfss, libfss-transport, libgnutlsxx28, libgnutls28-dev
