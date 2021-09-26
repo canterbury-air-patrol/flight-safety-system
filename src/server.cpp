@@ -1,8 +1,6 @@
 #include "fss-transport.hpp"
 #include <ostream>
-#ifdef HAVE_SSL
 #include "fss-transport-ssl.hpp"
-#endif
 #include "fss.hpp"
 #include "fss-server.hpp"
 
@@ -372,26 +370,17 @@ main(int argc, char *argv[]) -> int
 
     /* Open listen socket */
     std::shared_ptr<flight_safety_system::transport::fss_listen> listen;
-#ifdef HAVE_SSL
-    if (config["ssl"].isObject())
+    std::cerr << "Starting fss server in TLS mode" << std::endl;
+    std::string ca_public_key = config["ssl"]["ca_public_key"].asString();
+    std::string server_private_key = config["ssl"]["server_private_key"].asString();
+    std::string server_public_key = config["ssl"]["server_public_key"].asString();
+    if (ca_public_key == "" || server_private_key == "" || server_public_key == "")
     {
-        std::cerr << "Starting fss server in TLS mode" << std::endl;
-        std::string ca_public_key = config["ssl"]["ca_public_key"].asString();
-        std::string server_private_key = config["ssl"]["server_private_key"].asString();
-        std::string server_public_key = config["ssl"]["server_public_key"].asString();
-        if (ca_public_key == "" || server_private_key == "" || server_public_key == "")
-        {
-            std::cerr << "Missing ssl parameter, all of these are required: 'ca_public_key', 'server_private_key', 'server_public_key'" << std::endl;
-            exit(-1);
-        }
-        listen = std::make_shared<flight_safety_system::transport_ssl::fss_listen>(config["port"].asInt(), new_client_connect, config["ssl"]["ca_public_key"].asString(), config["ssl"]["server_private_key"].asString(), config["ssl"]["server_public_key"].asString());
+        std::cerr << "Missing ssl parameter, all of these are required: 'ca_public_key', 'server_private_key', 'server_public_key'" << std::endl;
+        exit(-1);
     }
-    else
-#endif
-    {
-        std::cerr << "Starting fss server in plain-text mode" << std::endl;
-        listen = std::make_shared<fss_transport::fss_listen>(config["port"].asInt(), new_client_connect);
-    }
+    listen = std::make_shared<flight_safety_system::transport_ssl::fss_listen>(config["port"].asInt(), new_client_connect, config["ssl"]["ca_public_key"].asString(), config["ssl"]["server_private_key"].asString(), config["ssl"]["server_public_key"].asString());
+
     /* Process client messages:
        - Battery status
        - Position (reflect to other clients)

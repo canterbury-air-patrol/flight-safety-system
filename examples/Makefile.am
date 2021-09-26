@@ -11,11 +11,7 @@ bin_PROGRAMS += fss-fake-client
 
 fss_fake_client_SOURCES = fake_client.cpp
 fss_fake_client_LDADD = ../src/libfss-client.la ../src/libfss-transport.la ../src/libfss.la $(JSONCPP_LIBS)
-
-if SSL
 fss_fake_client_LDADD += ../src/libfss-client-ssl.la ../src/libfss-transport-ssl.la
-endif
-
 endif
 
 if HAVE_SYSTEMD

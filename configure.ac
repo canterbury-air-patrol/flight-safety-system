@@ -22,15 +22,14 @@ PKG_INSTALLDIR
 
 # Check for required pkg-config
 PKG_CHECK_MODULES([JSONCPP], [jsoncpp])
+PKG_CHECK_MODULES([GNUTLS], [gnutls >= 3.3.0])
 
 AC_ARG_ENABLE([server],AS_HELP_STRING([--enable-server], [Build the server (fss-server)]))
-AC_ARG_ENABLE([ssl],AS_HELP_STRING([--enable-ssl], [Build with ssl support]))
 AC_ARG_ENABLE([tests],AS_HELP_STRING([--enable-tests], [Build the tests (Requires catch2)]))
 AC_ARG_ENABLE([coverage],AS_HELP_STRING([--enable-coverage], [Build with coverage support (gcov)]))
 AC_ARG_ENABLE([fake-client],AS_HELP_STRING([--enable-fake-client], [Build the example client (fss-fake-client)]))
 
 AM_CONDITIONAL([SERVER], [test "x$enable_server" == "xyes"])
-AM_CONDITIONAL([SSL], [test "x$enable_ssl" == "xyes"])
 AM_CONDITIONAL([ENABLE_TESTS], [test "x$enable_tests" == "xyes"])
 AM_CONDITIONAL([COVERAGE], [test "x$enable_coverage" == "xyes"])
 AM_CONDITIONAL([FAKE_CLIENT], [test "x$enable_fake_client" == "xyes"])
@@ -55,10 +54,6 @@ AS_IF([test "x$enable_server" == "xyes"], [
     PKG_CHECK_MODULES([ECPG], [libecpg])
 ])
 
-AS_IF([test "x$enable_ssl" == "xyes"], [
-    PKG_CHECK_MODULES([GNUTLS], [gnutls >= 3.3.0])
-    AC_DEFINE([HAVE_SSL],[],[Enable SSL Support])
-])
 
 AS_IF([test "x$enable_tests" == "xyes"], [
 AC_LANG_PUSH([C++])

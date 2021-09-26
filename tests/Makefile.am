@@ -10,7 +10,6 @@ BUILT_SOURCES=
 all_test_SOURCES = main.cpp messages.cpp connection.cpp client.cpp
 all_test_LDADD = ../src/libfss-transport.la ../src/libfss-client.la ../src/libfss.la $(JSONCPP_LIBS)
 
-if SSL
 all_test_SOURCES += connection-ssl.cpp certs
 all_test_LDADD += ../src/libfss-transport-ssl.la $(GNUTLS_LIBS) -lgnutlsxx
 
@@ -18,7 +17,4 @@ BUILT_SOURCES+=certs
 certs:
 	mkdir certs
 	(cd certs; ../../certs/generate-ca.sh; ../../certs/generate-server.sh localhost; ../../certs/generate-client.sh client)
-
-endif
-
 endif

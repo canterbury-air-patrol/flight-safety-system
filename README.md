@@ -38,9 +38,7 @@ Redundancy is available by running multiple independent servers, the normal clie
 Also, each server can include configuration of all known servers and this information will be provided to clients periodically to allow them to learn about and connect to all of the servers.
 
 ## SSL Support
-**SSL Support is currently experimental**
-
-It is possible to use SSL to protect the connection between clients and servers. A common CA will be needed so that the clients and servers can verify each other by certificate.
+It is required to use SSL to protect the connection between clients and servers. A common CA will be needed so that the clients and servers can verify each other by certificate.
 
 ### Generating certificates
 Scripts are provided in the certs directory to help generate and sign the certificates.

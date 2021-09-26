@@ -32,7 +32,6 @@ pkgconfig_DATA+= fss-transport.pc
 libfss_transport_la_SOURCES = transport.cpp transport-helpers.cpp transport-messages.cpp transport.hpp
 libfss_transport_la_LIBADD = $(pthread_LIBS)
 
-if SSL
 lib_LTLIBRARIES += libfss-transport-ssl.la
 libfss_transport_ssl_la_LDFLAGS = -version-info 0:0:0
 libfss_transport_ssl_la_SOURCES = transport-ssl.cpp
@@ -48,7 +47,6 @@ libfss_client_ssl_la_CXXFLAGS = $(AM_CXXFLAGS) $(JSONCPP_CFLAGS)
 libfss_client_ssl_la_LIBADD = $(GNUTLS_LIBS) -lgnutlsxx $(JSONCPP_LIBS) -L. libfss-client.la libfss-transport-ssl.la
 include_HEADERS += fss-client-ssl.hpp
 pkgconfig_DATA += fss-client-ssl.pc
-endif
 
 .pgc.c:
 	ecpg -o $@ $< $(ECPGFLAGS)
@@ -60,9 +58,5 @@ fss_server_SOURCES = server.cpp fss-server.hpp db.cpp server-db.pgc server-db.h
 fss_server_CXXFLAGS = $(AM_CXXFLAGS) $(JSONCPP_CFLAGS)
 fss_server_CFLAGS = $(AM_CFLAGS) $(ECPG_CFLAGS)
 fss_server_LDADD = libfss.la libfss-transport.la $(JSONCPP_LIBS) $(ECPG_LIBS)
-
-if SSL
 fss_server_LDADD += libfss-transport-ssl.la
-endif
-
 endif
