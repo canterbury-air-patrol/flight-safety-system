@@ -307,6 +307,7 @@ public:
     virtual auto getVertVel() -> int16_t { return this->vertical_velocity; };
     virtual auto getCallSign() -> std::string { return this->callsign; };
     virtual auto getSquawk() -> uint16_t { return this->squawk; };
+    virtual auto getTSLC() -> uint8_t { return this->tslc; };
     virtual auto getFlags() -> uint16_t { return this->flags; };
     virtual auto getAltitudeType() -> uint8_t { return this->altitude_type; };
     virtual auto getEmitterType() -> uint8_t { return this->emitter_type; };
@@ -412,7 +413,7 @@ protected:
     void packData(std::shared_ptr<buf_len> bl) override;
 public:
     fss_message_identity_required() : fss_message(message_type_identity_required) {};
-    fss_message_identity_required(uint64_t t_id, const std::shared_ptr<buf_len> &bl) : fss_message(t_id, message_type_identity) {};
+    fss_message_identity_required(uint64_t t_id, const std::shared_ptr<buf_len> &bl __attribute__((unused))) : fss_message(t_id, message_type_identity) {};
 };
 } // namespace transport
 } // namespace flight_safety_system

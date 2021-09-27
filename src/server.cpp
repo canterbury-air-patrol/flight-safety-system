@@ -205,7 +205,7 @@ fss_server::fss_client::processMessage(std::shared_ptr<fss_transport::fss_messag
                 }
                 else
                 {
-                    for (auto possible_name: possible_names)
+                    for (const auto &possible_name: possible_names)
                     {
                         if (possible_name == this->name)
                         {

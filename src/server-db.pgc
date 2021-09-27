@@ -99,15 +99,15 @@ db_asset_command_get(unsigned long long asset_id_arg)
     EXEC SQL BEGIN DECLARE SECTION;
     unsigned long long asset_id = asset_id_arg;
     unsigned long long id = 0;
-    unsigned long long ts;
+    unsigned long long ts = 0;
     char command[COMMAND_LEN];
-    double lat;
-    double lng;
-    int alt;
+    double lat = 0.0;
+    double lng = 0.0;
+    int alt = 0;
     int success = 0;
-    int lat_ind;
-    int lng_ind;
-    int alt_ind;
+    int lat_ind = 0;
+    int lng_ind = 0;
+    int alt_ind = 0;
     EXEC SQL END DECLARE SECTION;
 
     EXEC SQL SELECT 1, AC.id, (extract(epoch from AC.timestamp) * 1000)::bigint, AC.command, ST_Y(AC.position::geometry), ST_X(AC.position::geometry), AC.altitude INTO :success, :id, :ts, :command, :lat :lat_ind, :lng :lng_ind, :alt :alt_ind FROM assets_assetcommand AS AC WHERE AC.asset_id = :asset_id ORDER BY AC.timestamp DESC LIMIT 1;
@@ -166,8 +166,8 @@ db_asset_smm_settings_get(unsigned long long asset_id_arg)
     EXEC SQL BEGIN DECLARE SECTION;
     unsigned long long asset_id = asset_id_arg;
     char server_address[SMM_SERVER_LEN];
-    int server_port;
-    bool server_https;
+    int server_port = 0;
+    bool server_https = false;
     char smm_login[SMM_LOGIN_LEN];
     char smm_password[SMM_PASSWORD_LEN];
     int success = 0;
@@ -196,7 +196,7 @@ db_active_fss_servers_get(void)
 
     EXEC SQL BEGIN DECLARE SECTION;
     char server_address[SMM_SERVER_LEN];
-    int server_port;
+    int server_port = 0;
     EXEC SQL END DECLARE SECTION;
 
     EXEC SQL SET AUTOCOMMIT TO OFF;

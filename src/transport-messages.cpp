@@ -453,7 +453,7 @@ flight_safety_system::transport::fss_message_identity_non_aircraft::getCapabilit
 }
 
 void
-flight_safety_system::transport::fss_message_identity_required::packData(std::shared_ptr<buf_len> bl)
+flight_safety_system::transport::fss_message_identity_required::packData(std::shared_ptr<buf_len> bl __attribute__((unused)))
 {
 }
 

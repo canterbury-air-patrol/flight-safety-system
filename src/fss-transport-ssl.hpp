@@ -25,7 +25,7 @@ public:
     fss_connection(fss_connection&&) = delete;
     auto operator=(fss_connection&) -> fss_connection& = delete;
     auto operator=(fss_connection&&) -> fss_connection& = delete;
-    virtual ~fss_connection();
+    ~fss_connection() override;
 };
 
 class fss_connection_client : public fss_connection {
@@ -38,8 +38,12 @@ protected:
     auto recvBytes(void *bytes, size_t max_bytes) -> ssize_t override;
 public:
     fss_connection_client(std::string t_ca, std::string t_private_key, std::string t_public_key) : fss_connection(std::move(t_ca), std::move(t_private_key), std::move(t_public_key)), session{} {};
-    auto connectTo(const std::string &address, uint16_t port) -> bool override;
+    fss_connection_client(fss_connection_client &) = delete;
+    fss_connection_client(fss_connection_client &&) = delete;
+    auto operator=(fss_connection_client &) -> fss_connection& = delete;
+    auto operator=(fss_connection_client &&) -> fss_connection& = delete;
     ~fss_connection_client();
+    auto connectTo(const std::string &address, uint16_t port) -> bool override;
 };
 
 
@@ -53,7 +57,11 @@ protected:
     auto recvBytes(void *bytes, size_t max_bytes) -> ssize_t override;
 public:
     fss_connection_server(int t_fd, std::string t_ca, std::string t_private_key, std::string t_public_key);
-    ~fss_connection_server();
+    fss_connection_server(fss_connection_server&) = delete;
+    fss_connection_server(fss_connection_server&&) = delete;
+    auto operator=(fss_connection_server&) -> fss_connection_server& = delete;
+    auto operator=(fss_connection_server&&) -> fss_connection_server& = delete;
+    ~fss_connection_server() override;
     auto getClientNames() -> std::list<std::string> override;
 };
 

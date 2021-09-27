@@ -28,7 +28,7 @@ convert_str_to_sa(const std::string &addr, uint16_t port, struct sockaddr_storag
     /* Try converting an IPv6 address */
     if (family == AF_UNSPEC)
     {
-        struct in6_addr ia;
+        struct in6_addr ia = {};
         if (inet_pton (AF_INET6, addr.c_str(), &ia) == 1)
         {
             family = AF_INET6;

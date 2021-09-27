@@ -71,7 +71,7 @@ public:
     fss_server(fss_server&&) = delete;
     auto operator=(fss_server&) -> fss_server& = delete;
     auto operator=(fss_server&&) -> fss_server& = delete;
-    virtual ~fss_server() = default;
+    ~fss_server() override = default;
     void processMessage(std::shared_ptr<flight_safety_system::transport::fss_message> message) override;
     virtual auto getAddress() -> std::string;
     virtual auto getPort() -> uint16_t;
