@@ -66,55 +66,35 @@ using fss_asset_command = enum fss_asset_command_e {
 
 class buf_len {
 private:
-    char *data{nullptr};
-    uint16_t length{0};
+    std::string data{};
 public:
-    buf_len(const buf_len &bl) : data(static_cast<char *>(malloc(bl.length))), length(bl.length)
-    {
-        memcpy (this->data, bl.data, this->length);
-    }
-    buf_len(buf_len &&bl) : data(bl.data), length(bl.length)
-    {
-        bl.data = nullptr;
-        bl.length = 0;
-    }
+    buf_len(const buf_len &bl) = default;
+    buf_len(buf_len &&bl) noexcept = default;
     buf_len() = default;
-    buf_len(const char *_data, uint16_t len) : data(static_cast<char *>(malloc(len))), length(len) {
-        memcpy (this->data, _data, this->length);
-    };
+    buf_len(const char *_data, uint16_t len) : data(_data, len) {};
     auto operator=(buf_len &&) -> buf_len& = delete;
-    ~buf_len() { free(this->data); };
+    virtual ~buf_len() = default;
     auto operator=(const buf_len &other) -> buf_len &
     {
         if (this != &other)
         {
-            free(this->data);
-            this->length = other.length;
-            this->data = (char *) malloc(this->length);
-            memcpy(this->data, other.data, this->length);
+            this->data = other.data;
         }
         return *this;
     }
-    auto isValid() -> bool { return this->data != nullptr; };
+    auto isValid() -> bool { return this->data.length() != 0; };
     auto addData(const char *new_data, uint16_t len) -> bool
     {
-        char *tmp_data = (char *)realloc(this->data, this->length + len);
-        if (tmp_data == nullptr)
-        {
-            return false;
-        }
-        this->data = tmp_data;
-        memcpy(this->data + this->length, new_data, len);
-        this->length += len;
+        this->data.append(new_data, len);
         return true;
     }
     auto getData() -> const char *
     {
-        return this->data;
+        return this->data.c_str();
     }
     auto getLength() -> size_t
     {
-        return this->length;
+        return this->data.length();
     }
 };
 
@@ -126,7 +106,7 @@ protected:
     void clearConnection() { this->conn = nullptr; };
 public:
     explicit fss_message_cb(std::shared_ptr<fss_connection> t_conn) : conn(std::move(t_conn)) {};
-    fss_message_cb(const fss_message_cb &from) : conn(from.conn) {};
+    fss_message_cb(const fss_message_cb &from) = default;
     fss_message_cb(fss_message_cb&&) = delete;
     auto operator=(fss_message_cb &) -> fss_message_cb& = delete;
     auto operator=(fss_message_cb &&) -> fss_message_cb& = delete;
