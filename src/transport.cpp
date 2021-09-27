@@ -115,12 +115,15 @@ fss_transport::fss_connection::getMsg() -> std::shared_ptr<fss_transport::fss_me
 {
     if (this->handler == nullptr)
     {
-        auto msg = this->messages.front();
-        if (msg != nullptr)
+        if (!this->messages.empty())
         {
-            this->messages.pop();
+            auto msg = this->messages.front();
+            if (msg != nullptr)
+            {
+                this->messages.pop();
+            }
+            return msg;
         }
-        return msg;
     }
     return nullptr;
 }
