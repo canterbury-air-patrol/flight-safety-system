@@ -53,7 +53,7 @@ flight_safety_system::client_ssl::fss_client::disconnect()
 void
 flight_safety_system::client_ssl::fss_client::setAssetName(std::string t_asset_name) {
     this->asset_name = std::move(t_asset_name);
-};
+}
 
 void
 flight_safety_system::client_ssl::fss_client::connectTo(const std::string &t_address, uint16_t t_port, bool t_connect)
