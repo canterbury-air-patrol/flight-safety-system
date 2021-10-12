@@ -69,5 +69,7 @@ Primarily flight-safety-system is designed to run alongside [Search Management M
 
 [Canterbury Air Patrol](http://www.canterburyairpatrol.org) has a [client](https://github.com/canterbury-air-patrol/fss-smm-mav) that integrates Flight-Safety-System and Search Management Map to control an aircraft running [ArduPilot](https://www.ardupilot.org).
 
+There is an [ADS-B Integration](https://github.com/canterbury-air-patrol/fss-adsb/) that allows positions reports from ADS-B Out aircraft to be relayed to FSS clients.
+
 ## License
 This project is licensed under GNU GPLv2 see the [LICENSE](LICENSE.md) file for details.
