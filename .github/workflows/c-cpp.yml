@@ -14,7 +14,7 @@ jobs:
     steps:
     - uses: actions/checkout@v2
     - name: Install Deps
-      run: sudo apt install -y libjsoncpp-dev libecpg-dev catch
+      run: sudo apt install -y libjsoncpp-dev libecpg-dev catch libgnutlsxx28 libgnutls28-dev gnutls-bin
     - name: autogen
       run: ./autogen.sh
     - name: configure
