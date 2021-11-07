@@ -11,6 +11,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <arpa/inet.h>
 #include <cstring>
 
@@ -149,6 +150,10 @@ fss_transport::fss_connection::connectTo(const std::string &address, uint16_t po
     {
         this->fd = socket(remote.ss_family == AF_INET ? PF_INET : PF_INET6, SOCK_STREAM, IPPROTO_TCP);
     }
+
+    // Limit the total number of SYN's that are sent
+    int synRetries = 2;
+    setsockopt(this->fd, IPPROTO_TCP, TCP_SYNCNT, &synRetries, sizeof(synRetries));
 
     if (connect(this->fd, (struct sockaddr *)&remote, remote.ss_family == AF_INET ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6)) < 0)
     {
