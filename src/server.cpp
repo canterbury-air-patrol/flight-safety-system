@@ -304,7 +304,7 @@ fss_server::fss_client::processMessage(std::shared_ptr<fss_transport::fss_messag
                 auto status_msg = std::dynamic_pointer_cast<fss_transport::fss_message_system_status>(msg);
                 if (status_msg != nullptr)
                 {
-                    dbc->asset_add_status(this->name, status_msg->getBatRemaining(), status_msg->getBatMAHUsed());
+                    dbc->asset_add_status(this->name, status_msg->getBatRemaining(), status_msg->getBatMAHUsed(), status_msg->getBatVoltage());
                 }
             }
                 break;

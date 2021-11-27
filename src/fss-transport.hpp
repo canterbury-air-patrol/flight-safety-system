@@ -297,14 +297,16 @@ class fss_message_system_status: public fss_message {
 private:
     uint8_t bat_percent;
     uint32_t mah_used;
+    double voltage;
 protected:
     void unpackData(const std::shared_ptr<buf_len> &bl);
     void packData(std::shared_ptr<buf_len> bl) override;
 public:
-    fss_message_system_status(uint8_t bat_remaining_percent, uint32_t bat_mah_used) : fss_message(message_type_system_status), bat_percent(bat_remaining_percent), mah_used(bat_mah_used) {};
-    fss_message_system_status(uint64_t t_id, const std::shared_ptr<buf_len> &bl) : fss_message(t_id, message_type_system_status), bat_percent(0), mah_used(0) { this->unpackData(bl); };
+    fss_message_system_status(uint8_t bat_remaining_percent, uint32_t bat_mah_used, double bat_voltage=0.0) : fss_message(message_type_system_status), bat_percent(bat_remaining_percent), mah_used(bat_mah_used), voltage(bat_voltage) {};
+    fss_message_system_status(uint64_t t_id, const std::shared_ptr<buf_len> &bl) : fss_message(t_id, message_type_system_status), bat_percent(0), mah_used(0), voltage(0.0) { this->unpackData(bl); };
     virtual auto getBatRemaining() -> uint8_t { return this->bat_percent; };
     virtual auto getBatMAHUsed() -> uint32_t { return this->mah_used; };
+    virtual auto getBatVoltage() -> double { return this->voltage; };
 };
 
 class fss_message_search_status: public fss_message {

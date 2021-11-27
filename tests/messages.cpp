@@ -191,14 +191,18 @@ TEST_CASE("System Status Message Check") {
     auto bat_level = random() % max_bat_level;
     constexpr int max_bat_used = 5000;
     auto bat_used = random() % max_bat_used;
+    constexpr int max_bat_voltage = 11000;
+    auto bat_voltage_n = random() % max_bat_voltage;
+    double bat_voltage = (double) bat_voltage_n / 1000.0;
 
     /* Create a test system status */
-    auto msg = std::make_shared<flight_safety_system::transport::fss_message_system_status>(bat_level, bat_used);
+    auto msg = std::make_shared<flight_safety_system::transport::fss_message_system_status>(bat_level, bat_used, bat_voltage);
     /* Check the type */
     REQUIRE(msg->getType() == flight_safety_system::transport::message_type_system_status);
     /* Check the parameters */
     REQUIRE(msg->getBatRemaining() == bat_level);
     REQUIRE(msg->getBatMAHUsed() == bat_used);
+    REQUIRE(msg->getBatVoltage() == bat_voltage);
     /* Convert to bl and back */
     msg->setId(msg_id);
     auto bl = msg->getPacked();
@@ -210,6 +214,8 @@ TEST_CASE("System Status Message Check") {
     REQUIRE(decoded->getId() == msg_id);
     REQUIRE(decoded->getBatRemaining() == bat_level);
     REQUIRE(decoded->getBatMAHUsed() == bat_used);
+    constexpr double bat_volt_tolerance = 0.000001;
+    REQUIRE(std::fabs(decoded->getBatVoltage() - bat_voltage) < bat_volt_tolerance);
     auto decoded_generic = flight_safety_system::transport::fss_message::decode(bl);
     /* Check the type */
     REQUIRE(decoded_generic->getType() == flight_safety_system::transport::message_type_system_status);
@@ -219,6 +225,7 @@ TEST_CASE("System Status Message Check") {
     REQUIRE(decoded_generic_status != nullptr);
     REQUIRE(decoded_generic_status->getBatRemaining() == bat_level);
     REQUIRE(decoded_generic_status->getBatMAHUsed() == bat_used);
+    REQUIRE(std::fabs(decoded_generic_status->getBatVoltage() - bat_voltage) < bat_volt_tolerance);
 }
 
 

@@ -39,13 +39,13 @@ flight_safety_system::server::db_connection::asset_add_rtt(const std::string &as
 }
 
 void
-flight_safety_system::server::db_connection::asset_add_status(const std::string &asset_name, uint8_t bat_percent, uint32_t bat_mah_used)
+flight_safety_system::server::db_connection::asset_add_status(const std::string &asset_name, uint8_t bat_percent, uint32_t bat_mah_used, double bat_voltage)
 {
     this->db_lock.lock();
     uint64_t asset_id = db_get_asset_id(asset_name.c_str());
     if (asset_id != 0)
     {
-        db_status_create_entry(asset_id, bat_percent, bat_mah_used);
+        db_status_create_entry(asset_id, bat_percent, bat_mah_used, bat_voltage);
     }
     this->db_lock.unlock();
 }

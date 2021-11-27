@@ -1,6 +1,6 @@
 # Process this file with autoconf to produce a configure script.
 AC_PREREQ([2.69])
-AC_INIT([flight-safety-system], [0.8.2], [sjp@canterburyairpatrol.org])
+AC_INIT([flight-safety-system], [0.9.0], [sjp@canterburyairpatrol.org])
 AM_INIT_AUTOMAKE([-Wall -Werror foreign -Wno-portability])
 
 m4_include([m4/ax_cxx_compile_stdcxx.m4])

@@ -58,15 +58,16 @@ void db_rtt_create_entry(unsigned long long asset_id_arg, unsigned long long del
     EXEC SQL INSERT INTO assets_assetrtt (asset_id, rtt, timestamp) VALUES (:asset_id, :rtt, NOW());
 }
 
-void db_status_create_entry(unsigned long long asset_id_arg, unsigned short bat_percent, unsigned int bat_mah_used)
+void db_status_create_entry(unsigned long long asset_id_arg, unsigned short bat_percent, unsigned int bat_mah_used, double bat_voltage)
 {
     EXEC SQL BEGIN DECLARE SECTION;
     unsigned long long asset_id = asset_id_arg;
     unsigned short bp = bat_percent;
     unsigned long bu = bat_mah_used;
+    double voltage = bat_voltage;
     EXEC SQL END DECLARE SECTION;
     
-    EXEC SQL INSERT INTO assets_assetstatus (asset_id, bat_percent, bat_used_mah, timestamp) VALUES (:asset_id, :bp, :bu, NOW());
+    EXEC SQL INSERT INTO assets_assetstatus (asset_id, bat_percent, bat_used_mah, bat_volt, timestamp) VALUES (:asset_id, :bp, :bu, :voltage, NOW());
 }
 
 void db_search_status_create_entry(unsigned long long asset_id_arg, unsigned long long search_id, unsigned long long search_completed, unsigned long long search_total)

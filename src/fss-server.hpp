@@ -77,7 +77,7 @@ public:
     ~db_connection();
     auto check_asset(const std::string &asset_name) -> bool;
     void asset_add_rtt(const std::string &asset_name, uint64_t rtt);
-    void asset_add_status(const std::string &asset_name, uint8_t bat_percent, uint32_t bat_mah_used);
+    void asset_add_status(const std::string &asset_name, uint8_t bat_percent, uint32_t bat_mah_used, double bat_voltage);
     void asset_add_search_status(const std::string &asset_name, uint64_t search_id, uint64_t search_completed, uint64_t search_total);
     void asset_add_position(const std::string &asset_name, double latitude, double longitude, uint16_t altitude);
     auto asset_get_command(const std::string &asset_name) -> std::shared_ptr<asset_command>;

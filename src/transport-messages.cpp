@@ -253,8 +253,11 @@ flight_safety_system::transport::fss_message_system_status::packData(std::shared
 {
     uint8_t bat_percent_n = this->getBatRemaining();
     uint32_t mah_used_n = htonl(this->getBatMAHUsed());
+    uint32_t voltage_n = htonl((int32_t) (this->getBatVoltage() / flt_to_int));
+
     bl->addData((char *)&bat_percent_n, sizeof(uint8_t));
     bl->addData((char *)&mah_used_n, sizeof(uint32_t));
+    bl->addData((char *)&voltage_n, sizeof(uint32_t));
 }
 
 void
@@ -270,6 +273,13 @@ flight_safety_system::transport::fss_message_system_status::unpackData(const std
         this->bat_percent = *(uint8_t *)(data + offset);
         offset += sizeof(uint8_t);
         this->mah_used = ntohl(*(uint32_t *)(data + offset));
+        offset += sizeof(uint32_t);
+    }
+    if (length - offset >= sizeof(int32_t))
+    {
+        uint32_t voltage_n = ntohl(*(int32_t *)(data + offset));
+        offset += sizeof(int32_t);
+        this->voltage = ((double)voltage_n) * flt_to_int;
     }
 }
 

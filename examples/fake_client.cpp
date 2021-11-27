@@ -52,7 +52,8 @@ main(int argc, char *argv[]) -> int
             /* Send each server some fake details */
             constexpr int bat_remaining = 75;
             constexpr int bat_mah_used = 1000;
-            auto msg_status = std::make_shared<flight_safety_system::transport::fss_message_system_status>(bat_remaining, bat_mah_used);
+            constexpr double bat_voltage = 11.4;
+            auto msg_status = std::make_shared<flight_safety_system::transport::fss_message_system_status>(bat_remaining, bat_mah_used, bat_voltage);
             constexpr int search_number = 1;
             constexpr int search_current_point = 23;
             constexpr int search_total_points = 100;
