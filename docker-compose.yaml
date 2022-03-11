@@ -1,0 +1,43 @@
+services:
+  web:
+    image: fss-web:latest
+    ports:
+      - "8090:8080"
+    links:
+      - db
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      - DB_HOST=db
+      - DB_USER=postgres
+      - DB_NAME=postgres
+      - DB_PASS=password
+      - DJANGO_SUPERUSER_USERNAME=admin
+      - DJANGO_SUPERUSER_PASSWORD=administrator
+      - DJANGO_SUPERUSER_EMAIL=me@example.com
+  server:
+    build:
+      context: .
+      dockerfile: docker/fss-server.Dockerfile
+    ports:
+      - "20202:20202"
+    links:
+      - db
+    depends_on:
+      - web
+    environment:
+      - DB_HOST=db
+      - DB_USER=postgres
+      - DB_NAME=postgres
+      - DB_PASS=password
+      - NAME=server
+      - LISTEN_PORT=20202
+    volumes:
+      - "./certs:/certs:rw"
+  db:
+    image: mdillon/postgis
+    healthcheck:
+      test: "pg_isready --username=postgres"
+      timeout: 10s
+      retries: 20

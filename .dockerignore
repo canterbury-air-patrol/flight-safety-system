@@ -1,0 +1,3 @@
+docker/*.Dockerfile
+certs/*.pem
+certs/*.tmpl
