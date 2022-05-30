@@ -131,7 +131,7 @@ public:
     auto sendMsg(const std::shared_ptr<fss_message> &msg) -> bool;
     auto getMsg() -> std::shared_ptr<fss_message>;
     virtual void processMessages();
-    void disconnect();
+    virtual void disconnect();
     virtual auto getClientNames() -> std::list<std::string>;
 };
 
