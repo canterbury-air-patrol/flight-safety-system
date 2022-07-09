@@ -118,12 +118,15 @@ db_asset_command_get(unsigned long long asset_id_arg)
     if (success == 1)
     {
         res = malloc(sizeof(struct asset_command_s));
-        res->dbid = id;
-        res->command = strdup(command);
-        res->timestamp = ts;
-        res->latitude = lat;
-        res->longitude = lng;
-        res->altitude = alt;
+        if (res != NULL)
+        {
+            res->dbid = id;
+            res->command = strdup(command);
+            res->timestamp = ts;
+            res->latitude = lat;
+            res->longitude = lng;
+            res->altitude = alt;
+        }
     }
     return res;
 }
@@ -181,9 +184,12 @@ db_asset_smm_settings_get(unsigned long long asset_id_arg)
     if (success == 1)
     {
         settings = malloc(sizeof(struct smm_settings_s));
-        settings->address = convert_to_http(server_address, server_port, server_https);
-        settings->username = strdup(smm_login);
-        settings->password = strdup(smm_password);
+        if (settings != NULL)
+        {
+            settings->address = convert_to_http(server_address, server_port, server_https);
+            settings->username = strdup(smm_login);
+            settings->password = strdup(smm_password);
+        }
     }
     return settings;
 }
@@ -193,7 +199,10 @@ db_active_fss_servers_get(void)
 {
     size_t len = 0;
     struct fss_server_s **res = (struct fss_server_s **)malloc(sizeof(struct fss_server_s *) * (len + 1));
-    res[len] = NULL;
+    if (res != NULL)
+    {
+        res[len] = NULL;
+    }
 
     EXEC SQL BEGIN DECLARE SECTION;
     char server_address[SMM_SERVER_LEN];
@@ -211,12 +220,27 @@ db_active_fss_servers_get(void)
     {
         EXEC SQL FETCH FROM cur1 INTO :server_address, :server_port;
         struct fss_server_s *s = (struct fss_server_s *)malloc(sizeof(struct fss_server_s));
-        s->address = strdup(server_address);
-        s->port = server_port;
-        res[len] = s;
-        len++;
-        res = (struct fss_server_s **)realloc(res, sizeof(struct fss_server_s *) * (len + 1));
-        res[len] = NULL;
+        if (s != NULL)
+        {
+            s->address = strdup(server_address);
+            s->port = server_port;
+        }
+        struct fss_server_s **old = res;
+        res = (struct fss_server_s **)realloc(res, sizeof(struct fss_server_s *) * (len + 2));
+        if (res)
+        {
+            res[len] = s;
+            len++;
+            res[len] = NULL;
+        } else {
+            res = old;
+            if (s != NULL)
+            {
+                free (s->address);
+                free (s);
+            }
+            s = NULL;
+        }
     }
     EXEC SQL WHENEVER NOT FOUND CONTINUE;
     EXEC SQL WHENEVER SQLERROR CONTINUE;
