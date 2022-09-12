@@ -1,0 +1,32 @@
+name: "Clang Static Analysis"
+
+on:
+  push:
+    branches: [ "develop" ]
+  pull_request:
+    # The branches below must be a subset of the branches above
+    branches: [ "develop" ]
+  schedule:
+    - cron: '35 14 * * 2'
+
+jobs:
+  clangsa:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Install dependencies
+      run: sudo apt install libjsoncpp-dev gnutls-dev libecpg-dev gnutls-bin clang clang-tools
+
+    # Check YOUR project out!
+    - name: "Check out repository"
+      uses: actions/checkout@v3
+
+    - name: "Autogen"
+      run: ./autogen.sh
+
+    - name: "Check code"
+      run: scan-build -v -sarif -o sarif -enable-checker nullability -enable-checker optin -enable-checker security "./configure --prefix=/usr --enable-server --enable-tests --enable-fake-client; make clean; make"
+
+    # Upload the results to the CI.
+    - uses: github/codeql-action/upload-sarif@v2
+      with:
+        sarif_file: sarif
