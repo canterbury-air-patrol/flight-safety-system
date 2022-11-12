@@ -12,10 +12,10 @@ private:
     std::string username;
     std::string password;
 public:
-    smm_settings(std::string t_address, std::string t_username, std::string t_password) : address(std::move(t_address)), username(std::move(t_username)), password(std::move(t_password)) {};
-    auto getAddress() -> std::string { return this->address; };
-    auto getUsername() -> std::string { return this->username; };
-    auto getPassword() -> std::string { return this->password; };
+    smm_settings(std::string t_address, std::string t_username, std::string t_password);
+    auto getAddress() -> std::string;
+    auto getUsername() -> std::string;
+    auto getPassword() -> std::string;
 };
 
 class fss_server_details
@@ -24,9 +24,9 @@ private:
     std::string address;
     uint16_t port;
 public:
-    fss_server_details(std::string t_address, uint16_t t_port) : address(std::move(t_address)), port(t_port) {};
-    auto getAddress() -> std::string { return this->address; };
-    auto getPort() -> uint16_t { return this->port; };
+    fss_server_details(std::string t_address, uint16_t t_port);
+    auto getAddress() -> std::string;
+    auto getPort() -> uint16_t;
 };
 
 class asset_command {
@@ -38,31 +38,13 @@ private:
     double longitude;
     uint16_t altitude;
 public:
-    asset_command(uint64_t t_dbid, uint64_t t_timestamp, const std::string &t_cmd, double t_latitude, double t_longitude, uint16_t t_altitude) : dbid(t_dbid), timestamp(t_timestamp), command(transport::asset_command_unknown), latitude(t_latitude), longitude(t_longitude), altitude(t_altitude) {
-        if (t_cmd == "RTL") {
-            this->command = transport::asset_command_rtl;
-        } else if (t_cmd == "HOLD") {
-            this->command = transport::asset_command_hold;
-        } else if (t_cmd == "GOTO") {
-            this->command = transport::asset_command_goto;
-        } else if (t_cmd == "RON") {
-            this->command = transport::asset_command_resume;
-        } else if (t_cmd == "DISARM") {
-            this->command = transport::asset_command_disarm;
-        } else if (t_cmd == "ALT") {
-            this->command = transport::asset_command_altitude;
-        } else if (t_cmd == "TERM") {
-            this->command = transport::asset_command_terminate;
-        } else if (t_cmd == "MAN") {
-            this->command = transport::asset_command_manual;
-        }
-    };
-    auto getDBId() -> uint64_t { return this->dbid; };
-    auto getTimeStamp() -> uint64_t { return this->timestamp; };
-    auto getCommand() -> transport::fss_asset_command { return this->command; };
-    auto getLatitude() -> double { return this->latitude; };
-    auto getLongitude() -> double { return this->longitude; };
-    auto getAltitude() -> uint16_t { return this->altitude; };
+    asset_command(uint64_t t_dbid, uint64_t t_timestamp, const std::string &t_cmd, double t_latitude, double t_longitude, uint16_t t_altitude);
+    auto getDBId() -> uint64_t;
+    auto getTimeStamp() -> uint64_t;
+    auto getCommand() -> transport::fss_asset_command;
+    auto getLatitude() -> double;
+    auto getLongitude() -> double;
+    auto getAltitude() -> uint16_t;
 };
 
 class db_connection {
@@ -90,9 +72,9 @@ private:
     uint64_t timestamp;
     uint64_t reqid;
 public:
-    fss_client_rtt(uint64_t t_timestamp, uint64_t t_reqid) : timestamp(t_timestamp), reqid(t_reqid) {};
-    auto getTimeStamp() -> uint64_t { return this->timestamp; };
-    auto getRequestId() -> uint64_t { return this->reqid; };
+    fss_client_rtt(uint64_t t_timestamp, uint64_t t_reqid);
+    auto getTimeStamp() -> uint64_t;
+    auto getRequestId() -> uint64_t;
 };
 
 class fss_client: public transport::fss_message_cb {

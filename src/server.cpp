@@ -25,6 +25,108 @@ namespace fss_transport = flight_safety_system::transport;
 
 std::shared_ptr<fss_server::db_connection> dbc = nullptr;
 
+flight_safety_system::server::smm_settings::smm_settings(std::string t_address, std::string t_username, std::string t_password) : address(std::move(t_address)), username(std::move(t_username)), password(std::move(t_password))
+{
+}
+
+auto
+flight_safety_system::server::smm_settings::getAddress() -> std::string
+{
+    return this->address;
+}
+auto
+flight_safety_system::server::smm_settings::getUsername() -> std::string
+{
+    return this->username;
+}
+auto
+flight_safety_system::server::smm_settings::getPassword() -> std::string
+{
+    return this->password;
+}
+
+flight_safety_system::server::fss_server_details::fss_server_details(std::string t_address, uint16_t t_port) : address(std::move(t_address)), port(t_port)
+{
+}
+
+auto
+flight_safety_system::server::fss_server_details::getAddress() -> std::string
+{
+    return this->address;
+}
+auto
+flight_safety_system::server::fss_server_details::getPort() -> uint16_t
+{
+    return this->port;
+}
+
+flight_safety_system::server::asset_command::asset_command(uint64_t t_dbid, uint64_t t_timestamp, const std::string &t_cmd, double t_latitude, double t_longitude, uint16_t t_altitude) : dbid(t_dbid), timestamp(t_timestamp), command(transport::asset_command_unknown), latitude(t_latitude), longitude(t_longitude), altitude(t_altitude)
+{
+    if (t_cmd == "RTL") {
+        this->command = transport::asset_command_rtl;
+    } else if (t_cmd == "HOLD") {
+        this->command = transport::asset_command_hold;
+    } else if (t_cmd == "GOTO") {
+        this->command = transport::asset_command_goto;
+    } else if (t_cmd == "RON") {
+        this->command = transport::asset_command_resume;
+    } else if (t_cmd == "DISARM") {
+        this->command = transport::asset_command_disarm;
+    } else if (t_cmd == "ALT") {
+        this->command = transport::asset_command_altitude;
+    } else if (t_cmd == "TERM") {
+        this->command = transport::asset_command_terminate;
+    } else if (t_cmd == "MAN") {
+        this->command = transport::asset_command_manual;
+    }
+}
+
+auto
+flight_safety_system::server::asset_command::getDBId() -> uint64_t
+{
+    return this->dbid;
+}
+auto
+flight_safety_system::server::asset_command::getTimeStamp() -> uint64_t
+{
+    return this->timestamp;
+}
+auto
+flight_safety_system::server::asset_command::getCommand() -> transport::fss_asset_command
+{
+    return this->command;
+}
+auto
+flight_safety_system::server::asset_command::getLatitude() -> double
+{
+    return this->latitude;
+}
+auto
+flight_safety_system::server::asset_command::getLongitude() -> double
+{
+    return this->longitude;
+}
+auto
+flight_safety_system::server::asset_command::getAltitude() -> uint16_t
+{
+    return this->altitude;
+}
+
+flight_safety_system::server::fss_client_rtt::fss_client_rtt(uint64_t t_timestamp, uint64_t t_reqid) : timestamp(t_timestamp), reqid(t_reqid)
+{
+}
+
+auto
+flight_safety_system::server::fss_client_rtt::getTimeStamp() -> uint64_t
+{
+    return this->timestamp;
+}
+auto
+flight_safety_system::server::fss_client_rtt::getRequestId() -> uint64_t
+{
+    return this->reqid;
+}
+
 class server_clients{
 private:
     std::mutex lock{};
