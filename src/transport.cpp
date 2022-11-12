@@ -19,8 +19,6 @@
 
 #include "transport.hpp"
 
-namespace fss_transport = flight_safety_system::transport;
-
 #ifdef DEBUG
 /* Run inet_ntop on a sockaddr_storage object */
 static const char *
@@ -44,17 +42,17 @@ inet_ntop_stor(struct sockaddr_storage *src, char *dst, size_t dstlen, uint16_t 
 #endif
 
 static void
-recv_msg_thread(fss_transport::fss_connection *conn)
+recv_msg_thread(flight_safety_system::transport::fss_connection *conn)
 {
     conn->processMessages();
 }
 
-fss_transport::fss_connection::fss_connection(int t_fd) : fd(t_fd), recv_thread(std::thread(recv_msg_thread, this))
+flight_safety_system::transport::fss_connection::fss_connection(int t_fd) : fd(t_fd), recv_thread(std::thread(recv_msg_thread, this))
 {
 }
 
 void
-fss_transport::fss_connection::disconnect()
+flight_safety_system::transport::fss_connection::disconnect()
 {
     if (this->fd != -1)
     {
@@ -69,7 +67,7 @@ fss_transport::fss_connection::disconnect()
     }
 }
 
-fss_transport::fss_connection::~fss_connection()
+flight_safety_system::transport::fss_connection::~fss_connection()
 {
     this->disconnect();
     while(!this->messages.empty())
@@ -79,13 +77,13 @@ fss_transport::fss_connection::~fss_connection()
     }
 }
 
-auto fss_transport::fss_connection::getMessageId() -> uint64_t
+auto flight_safety_system::transport::fss_connection::getMessageId() -> uint64_t
 {
     return ++this->last_msg_id;
 }
 
 void
-fss_transport::fss_connection::processMessages()
+flight_safety_system::transport::fss_connection::processMessages()
 {
     this->run = true;
     while (this->run)
@@ -112,7 +110,7 @@ fss_transport::fss_connection::processMessages()
 }
 
 auto
-fss_transport::fss_connection::getMsg() -> std::shared_ptr<fss_transport::fss_message>
+flight_safety_system::transport::fss_connection::getMsg() -> std::shared_ptr<flight_safety_system::transport::fss_message>
 {
     if (this->handler == nullptr)
     {
@@ -130,7 +128,7 @@ fss_transport::fss_connection::getMsg() -> std::shared_ptr<fss_transport::fss_me
 }
 
 auto
-fss_transport::fss_connection::connectTo(const std::string &address, uint16_t port) -> bool
+flight_safety_system::transport::fss_connection::connectTo(const std::string &address, uint16_t port) -> bool
 {
     struct sockaddr_storage remote = {};
     if (!convert_str_to_sa (address, port, &remote))
@@ -167,7 +165,7 @@ fss_transport::fss_connection::connectTo(const std::string &address, uint16_t po
 }
 
 auto
-fss_transport::fss_connection::sendMsg(const std::shared_ptr<fss_message> &msg) -> bool
+flight_safety_system::transport::fss_connection::sendMsg(const std::shared_ptr<fss_message> &msg) -> bool
 {
     std::lock_guard<std::mutex> lock_holder(this->send_lock);
     msg->setId(this->getMessageId());
@@ -198,7 +196,7 @@ print_bl(std::shared_ptr<flight_safety_system::transport::buf_len> bl)
 #endif
 
 auto
-fss_transport::fss_connection::sendMsg(const std::shared_ptr<buf_len> &bl) -> bool
+flight_safety_system::transport::fss_connection::sendMsg(const std::shared_ptr<buf_len> &bl) -> bool
 {
     size_t sent = 0;
     size_t to_send = bl->getLength();
@@ -219,7 +217,7 @@ fss_transport::fss_connection::sendMsg(const std::shared_ptr<buf_len> &bl) -> bo
 }
 
 void
-fss_transport::fss_connection::setHandler(fss_message_cb *cb)
+flight_safety_system::transport::fss_connection::setHandler(fss_message_cb *cb)
 {
     this->handler = cb;
     if (this->handler != nullptr)
@@ -234,15 +232,15 @@ fss_transport::fss_connection::setHandler(fss_message_cb *cb)
 }
 
 auto
-fss_transport::fss_connection::recvBytes(void *t_bytes, size_t t_max_bytes) -> ssize_t
+flight_safety_system::transport::fss_connection::recvBytes(void *t_bytes, size_t t_max_bytes) -> ssize_t
 {
     return recv(this->fd, t_bytes, t_max_bytes, 0);
 }
 
 auto
-fss_transport::fss_connection::recvMsg() -> std::shared_ptr<fss_transport::fss_message>
+flight_safety_system::transport::fss_connection::recvMsg() -> std::shared_ptr<flight_safety_system::transport::fss_message>
 {
-    std::shared_ptr<fss_transport::fss_message> msg = nullptr;
+    std::shared_ptr<flight_safety_system::transport::fss_message> msg = nullptr;
     std::string data;
     data.resize(sizeof (uint16_t));
     ssize_t received = this->recvBytes(&data[0], data.size());
@@ -273,7 +271,7 @@ fss_transport::fss_connection::recvMsg() -> std::shared_ptr<fss_transport::fss_m
             printf("Message reads: \n");
             print_bl(bl);
 #endif
-            msg = fss_transport::fss_message::decode(bl);
+            msg = flight_safety_system::transport::fss_message::decode(bl);
         }
         else
         {
@@ -283,7 +281,7 @@ fss_transport::fss_connection::recvMsg() -> std::shared_ptr<fss_transport::fss_m
     else if(received == 0 || (received < 0 || errno == EBADF))
     {
         /* Connection was closed */
-        msg = std::make_shared<fss_transport::fss_message_closed>();
+        msg = std::make_shared<flight_safety_system::transport::fss_message_closed>();
     }
     else
     {
@@ -293,25 +291,25 @@ fss_transport::fss_connection::recvMsg() -> std::shared_ptr<fss_transport::fss_m
 }
 
 auto
-fss_transport::fss_connection::getClientNames() -> std::list<std::string>
+flight_safety_system::transport::fss_connection::getClientNames() -> std::list<std::string>
 {
     std::list<std::string> ret;
     return ret;
 }
 
-fss_transport::fss_listen::~fss_listen()
+flight_safety_system::transport::fss_listen::~fss_listen()
 {
     this->disconnect();
 }
 
 static void
-listen_thread(fss_transport::fss_listen *listen)
+listen_thread(flight_safety_system::transport::fss_listen *listen)
 {
     listen->processMessages();
 }
 
 void
-fss_transport::fss_listen::processMessages()
+flight_safety_system::transport::fss_listen::processMessages()
 {
     while (this->getFd() >= 0)
     {
@@ -347,13 +345,13 @@ fss_transport::fss_listen::processMessages()
 }
 
 auto
-fss_transport::fss_listen::newConnection(int t_newfd) -> std::shared_ptr<fss_transport::fss_connection>
+flight_safety_system::transport::fss_listen::newConnection(int t_newfd) -> std::shared_ptr<flight_safety_system::transport::fss_connection>
 {
-    return std::make_shared<fss_transport::fss_connection>(t_newfd);
+    return std::make_shared<flight_safety_system::transport::fss_connection>(t_newfd);
 }
 
 auto
-fss_transport::fss_listen::startListening() -> bool
+flight_safety_system::transport::fss_listen::startListening() -> bool
 {
     /* open the socket */
     if (this->getFd() < 0)
@@ -378,7 +376,7 @@ fss_transport::fss_listen::startListening() -> bool
     return true;
 }
 
-fss_transport::fss_message_cb::~fss_message_cb()
+flight_safety_system::transport::fss_message_cb::~fss_message_cb()
 {
     if (this->conn != nullptr)
     {
