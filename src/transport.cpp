@@ -238,6 +238,25 @@ flight_safety_system::transport::fss_connection::recvBytes(void *t_bytes, size_t
 }
 
 auto
+flight_safety_system::transport::fss_connection::getFd() -> int
+{
+    return this->fd;
+}
+
+void
+flight_safety_system::transport::fss_connection::setFd(int new_fd)
+{
+    this->fd = new_fd;
+}
+
+void
+flight_safety_system::transport::fss_connection::startRecvThread(std::thread t_recv_thread)
+{
+    this->recv_thread = std::move(t_recv_thread);
+}
+
+
+auto
 flight_safety_system::transport::fss_connection::recvMsg() -> std::shared_ptr<flight_safety_system::transport::fss_message>
 {
     std::shared_ptr<flight_safety_system::transport::fss_message> msg = nullptr;
@@ -295,6 +314,11 @@ flight_safety_system::transport::fss_connection::getClientNames() -> std::list<s
 {
     std::list<std::string> ret;
     return ret;
+}
+
+flight_safety_system::transport::fss_listen::fss_listen(uint16_t t_port, fss_connect_cb t_cb) : fss_connection(), port(t_port), cb(t_cb)
+{
+    this->startListening();
 }
 
 flight_safety_system::transport::fss_listen::~fss_listen()

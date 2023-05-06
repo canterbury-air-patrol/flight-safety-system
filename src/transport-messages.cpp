@@ -22,6 +22,86 @@ packString(const std::shared_ptr<flight_safety_system::transport::buf_len> &bl, 
     bl->addData((char *)&empty, sizeof(uint64_t) - (bl->getLength() % sizeof(uint64_t)));
 }
 
+flight_safety_system::transport::buf_len::buf_len(const buf_len &bl) = default;
+flight_safety_system::transport::buf_len::buf_len(buf_len &&bl) noexcept = default;
+flight_safety_system::transport::buf_len::buf_len() = default;
+
+flight_safety_system::transport::buf_len::buf_len(const char *_data, uint16_t len) : data(_data, len)
+{
+}
+
+flight_safety_system::transport::buf_len::~buf_len() = default;
+
+auto
+flight_safety_system::transport::buf_len::operator=(const buf_len &other) -> buf_len &
+{
+    if (this != &other)
+    {
+        this->data = other.data;
+    }
+    return *this;
+}
+
+auto
+flight_safety_system::transport::buf_len::isValid() -> bool
+{
+    return this->data.length() != 0;
+}
+
+auto
+flight_safety_system::transport::buf_len::addData(const char *new_data, uint16_t len) -> bool
+{
+    this->data.append(new_data, len);
+    return true;
+}
+
+auto
+flight_safety_system::transport::buf_len::getData() -> const char *
+{
+    return this->data.c_str();
+}
+
+auto
+flight_safety_system::transport::buf_len::getLength() -> size_t
+{
+    return this->data.length();
+}
+
+flight_safety_system::transport::fss_message_cb::fss_message_cb(std::shared_ptr<fss_connection> t_conn) : conn(std::move(t_conn))
+{
+}
+
+flight_safety_system::transport::fss_message_cb::fss_message_cb(const fss_message_cb &from) = default;
+
+void
+flight_safety_system::transport::fss_message_cb::setConnection(std::shared_ptr<fss_connection> t_conn)
+{
+    this->conn = std::move(t_conn);
+}
+
+void flight_safety_system::transport::fss_message_cb::clearConnection()
+{
+    this->conn = nullptr;
+}
+
+auto flight_safety_system::transport::fss_message_cb::operator=(const flight_safety_system::transport::fss_message_cb& other) -> fss_message_cb&
+{
+    if (this != &other)
+    {
+        this->conn = other.conn;
+    }
+    return *this;
+}
+
+auto flight_safety_system::transport::fss_message_cb::getConnection() -> std::shared_ptr<fss_connection>
+{
+    return this->conn;
+}
+auto flight_safety_system::transport::fss_message_cb::connected() -> bool
+{
+    return this->conn != nullptr;
+}
+
 void
 flight_safety_system::transport::fss_message_cb::disconnect()
 {
@@ -42,10 +122,55 @@ flight_safety_system::transport::fss_message_cb::sendMsg(const std::shared_ptr<f
     return false;
 }
 
+flight_safety_system::transport::fss_message::fss_message(fss_message_type t_type) : id(0), type(t_type)
+{
+}
+
+flight_safety_system::transport::fss_message::fss_message(uint64_t t_id, fss_message_type t_type) : id(t_id), type(t_type)
+{
+}
+
+
 auto
 flight_safety_system::transport::fss_message::headerLength() -> size_t
 {
     return sizeof(uint16_t) + sizeof(uint16_t) + sizeof(uint64_t);
+}
+
+void
+flight_safety_system::transport::fss_message::setId(uint64_t t_id)
+{
+    this->id = t_id;
+}
+auto
+flight_safety_system::transport::fss_message::getId() -> uint64_t
+{
+    return this->id;
+}
+auto
+flight_safety_system::transport::fss_message::getType() -> fss_message_type
+{
+    return this->type;
+}
+auto
+flight_safety_system::transport::fss_message::getLatitude() -> double
+{
+    return NAN;
+}
+auto
+flight_safety_system::transport::fss_message::getLongitude() -> double
+{
+    return NAN;
+}
+auto
+flight_safety_system::transport::fss_message::getAltitude() -> uint32_t
+{
+    return 0;
+}
+auto
+flight_safety_system::transport::fss_message::getTimeStamp() -> uint64_t
+{
+    return 0;
 }
 
 void
@@ -93,6 +218,14 @@ flight_safety_system::transport::fss_message::getPacked() -> std::shared_ptr<buf
     return bl;
 }
 
+flight_safety_system::transport::fss_message_closed::fss_message_closed() : fss_message(message_type_closed)
+{
+}
+
+flight_safety_system::transport::fss_message_identity::fss_message_identity(std::string t_name) : fss_message(message_type_identity), name(std::move(t_name))
+{
+}
+
 void
 flight_safety_system::transport::fss_message_identity::packData(std::shared_ptr<buf_len> bl)
 {
@@ -110,6 +243,40 @@ flight_safety_system::transport::fss_message_identity::unpackData(const std::sha
     name_n[length - offset] = '\0';
     this->name = std::string(name_n);
     free (name_n);
+}
+
+flight_safety_system::transport::fss_message_identity::fss_message_identity(uint64_t t_id, const std::shared_ptr<buf_len> &bl) : fss_message(t_id, message_type_identity), name()
+{
+    this->unpackData(bl);
+}
+
+auto
+flight_safety_system::transport::fss_message_identity::getName() -> std::string
+{
+    return this->name;
+}
+
+
+flight_safety_system::transport::fss_message_rtt_request::fss_message_rtt_request() : fss_message(message_type_rtt_request)
+{
+}
+
+flight_safety_system::transport::fss_message_rtt_request::fss_message_rtt_request(uint64_t t_id, const std::shared_ptr<buf_len> &bl __attribute__((unused))) : fss_message(t_id, message_type_rtt_request)
+{
+}
+
+void
+flight_safety_system::transport::fss_message_rtt_request::packData(std::shared_ptr<buf_len> bl __attribute__((unused)))
+{
+}
+
+flight_safety_system::transport::fss_message_rtt_response::fss_message_rtt_response(uint64_t t_request_id) : fss_message(message_type_rtt_response), request_id(t_request_id)
+{
+}
+
+flight_safety_system::transport::fss_message_rtt_response::fss_message_rtt_response(uint64_t t_id, const std::shared_ptr<buf_len> &bl) : fss_message(t_id, message_type_rtt_response), request_id(0)
+{
+    this->unpackData(bl);
 }
 
 void
@@ -133,6 +300,30 @@ flight_safety_system::transport::fss_message_rtt_response::unpackData(const std:
     {
         this->request_id = 0;
     }
+}
+
+auto
+flight_safety_system::transport::fss_message_rtt_response::getRequestId() -> uint64_t
+{
+    return this->request_id;
+}
+
+flight_safety_system::transport::fss_message_position_report::fss_message_position_report(double t_latitude, double t_longitude, uint32_t t_altitude,
+                                                                                          uint16_t t_heading, uint16_t t_hor_vel, int16_t t_ver_vel,
+                                                                                          uint32_t t_icao_address, std::string t_callsign,
+                                                                                          uint16_t t_squawk, uint8_t t_tslc, uint16_t t_flags, uint8_t t_alt_type,
+                                                                                          uint8_t t_emitter_type, uint64_t t_timestamp) :
+    fss_message(message_type_position_report), latitude(t_latitude), longitude(t_longitude),
+    altitude(t_altitude), heading(t_heading), horizontal_velocity(t_hor_vel), vertical_velocity(t_ver_vel),
+    callsign(std::move(t_callsign)), icao_address(t_icao_address), squawk(t_squawk), timestamp(t_timestamp),
+    tslc(t_tslc), flags(t_flags), altitude_type(t_alt_type), emitter_type(t_emitter_type)
+{
+}
+
+
+flight_safety_system::transport::fss_message_position_report::fss_message_position_report(uint64_t t_id, const std::shared_ptr<buf_len> &bl) : fss_message(t_id, message_type_position_report)
+{
+    this->unpackData(bl);
 }
 
 constexpr float flt_to_int = 0.000001;
@@ -248,6 +439,86 @@ flight_safety_system::transport::fss_message_position_report::unpackData(const s
     }
 }
 
+auto
+flight_safety_system::transport::fss_message_position_report::getLatitude() -> double
+{
+    return this->latitude;
+}
+auto
+flight_safety_system::transport::fss_message_position_report::getLongitude() -> double
+{
+    return this->longitude;
+}
+auto
+flight_safety_system::transport::fss_message_position_report::getAltitude() -> uint32_t
+{
+    return this->altitude;
+}
+auto
+flight_safety_system::transport::fss_message_position_report::getTimeStamp() -> uint64_t
+{
+    return this->timestamp;
+}
+auto
+flight_safety_system::transport::fss_message_position_report::getICAOAddress() -> uint32_t
+{
+    return this->icao_address;
+}
+auto
+flight_safety_system::transport::fss_message_position_report::getHeading() -> uint16_t
+{
+    return this->heading;
+}
+auto
+flight_safety_system::transport::fss_message_position_report::getHorzVel() -> uint16_t
+{
+    return this->horizontal_velocity;
+}
+auto
+flight_safety_system::transport::fss_message_position_report::getVertVel() -> int16_t
+{
+    return this->vertical_velocity;
+}
+auto
+flight_safety_system::transport::fss_message_position_report::getCallSign() -> std::string
+{
+    return this->callsign;
+}
+auto
+flight_safety_system::transport::fss_message_position_report::getSquawk() -> uint16_t
+{
+    return this->squawk;
+}
+auto
+flight_safety_system::transport::fss_message_position_report::getTSLC() -> uint8_t
+{
+    return this->tslc;
+}
+auto
+flight_safety_system::transport::fss_message_position_report::getFlags() -> uint16_t
+{
+    return this->flags;
+}
+auto
+flight_safety_system::transport::fss_message_position_report::getAltitudeType() -> uint8_t
+{
+    return this->altitude_type;
+}
+auto
+flight_safety_system::transport::fss_message_position_report::getEmitterType() -> uint8_t
+{
+    return this->emitter_type;
+}
+
+flight_safety_system::transport::fss_message_system_status::fss_message_system_status(uint8_t bat_remaining_percent, uint32_t bat_mah_used, double bat_voltage) : fss_message(message_type_system_status), bat_percent(bat_remaining_percent), mah_used(bat_mah_used), voltage(bat_voltage)
+{
+}
+
+flight_safety_system::transport::fss_message_system_status::fss_message_system_status(uint64_t t_id, const std::shared_ptr<buf_len> &bl) : fss_message(t_id, message_type_system_status), bat_percent(0), mah_used(0), voltage(0.0)
+{
+    this->unpackData(bl);
+}
+
 void
 flight_safety_system::transport::fss_message_system_status::packData(std::shared_ptr<buf_len> bl)
 {
@@ -283,6 +554,24 @@ flight_safety_system::transport::fss_message_system_status::unpackData(const std
     }
 }
 
+auto
+flight_safety_system::transport::fss_message_system_status::getBatRemaining() -> uint8_t
+{
+    return this->bat_percent;
+}
+auto
+flight_safety_system::transport::fss_message_system_status::getBatMAHUsed() -> uint32_t
+{
+    return this->mah_used;
+}
+auto flight_safety_system::transport::fss_message_system_status::getBatVoltage() -> double
+{
+    return this->voltage;
+}
+
+flight_safety_system::transport::fss_message_search_status::fss_message_search_status(uint64_t t_search_id, uint64_t last_point_completed, uint64_t total_search_points) : fss_message(message_type_search_status), search_id(t_search_id), point_completed(last_point_completed), points_total(total_search_points) {};
+flight_safety_system::transport::fss_message_search_status::fss_message_search_status(uint64_t t_id, const std::shared_ptr<buf_len> &bl) : fss_message(t_id, message_type_search_status), search_id(0), point_completed(0), points_total(0) { this->unpackData(bl); };
+
 void
 flight_safety_system::transport::fss_message_search_status::packData(std::shared_ptr<buf_len> bl)
 {
@@ -311,6 +600,39 @@ flight_safety_system::transport::fss_message_search_status::unpackData(const std
         offset += sizeof(uint64_t);
         this->points_total = ntohll(*(uint64_t *)(data + offset));
     }
+}
+
+auto
+flight_safety_system::transport::fss_message_search_status::getSearchId() -> uint64_t
+{
+    return this->search_id;
+}
+auto
+flight_safety_system::transport::fss_message_search_status::getSearchCompleted() -> uint64_t
+{
+    return this->point_completed;
+}
+auto
+flight_safety_system::transport::fss_message_search_status::getSearchTotal() -> uint64_t
+{
+    return this->points_total;
+}
+
+flight_safety_system::transport::fss_message_asset_command::fss_message_asset_command(fss_asset_command t_command, uint64_t t_timestamp) : fss_message(message_type_command), command(t_command), latitude(NAN), longitude(NAN), altitude(0), timestamp(t_timestamp)
+{
+}
+
+flight_safety_system::transport::fss_message_asset_command::fss_message_asset_command(fss_asset_command t_command, uint64_t t_timestamp, double t_latitude, double t_longitude) : fss_message(message_type_command), command(t_command), latitude(t_latitude), longitude(t_longitude), altitude(0), timestamp(t_timestamp)
+{
+}
+
+flight_safety_system::transport::fss_message_asset_command::fss_message_asset_command(fss_asset_command t_command, uint64_t t_timestamp, uint32_t t_altitude) : fss_message(message_type_command), command(t_command), latitude(NAN), longitude(NAN), altitude(t_altitude), timestamp(t_timestamp)
+{
+}
+
+flight_safety_system::transport::fss_message_asset_command::fss_message_asset_command(uint64_t t_id, const std::shared_ptr<buf_len> &bl) : fss_message(t_id, message_type_command), command(asset_command_unknown), latitude(NAN), longitude(NAN), altitude(0), timestamp(0)
+{
+    this->unpackData(bl);
 }
 
 void
@@ -353,6 +675,32 @@ flight_safety_system::transport::fss_message_asset_command::unpackData(const std
     }
     this->latitude = lat * flt_to_int;
     this->longitude = lng * flt_to_int;
+}
+
+auto
+flight_safety_system::transport::fss_message_asset_command::getCommand() -> fss_asset_command
+{
+    return this->command;
+}
+auto
+flight_safety_system::transport::fss_message_asset_command::getLatitude() -> double
+{
+    return this->latitude;
+}
+auto
+flight_safety_system::transport::fss_message_asset_command::getLongitude() -> double
+{
+    return this->longitude;
+}
+auto
+flight_safety_system::transport::fss_message_asset_command::getAltitude() -> uint32_t
+{
+    return this->altitude;
+}
+auto
+flight_safety_system::transport::fss_message_asset_command::getTimeStamp() -> uint64_t
+{
+    return this->timestamp;
 }
 
 void
