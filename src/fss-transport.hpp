@@ -119,7 +119,7 @@ protected:
     void setFd(int new_fd);
     void startRecvThread(std::thread t_recv_thread);
 public:
-    fss_connection() = default;
+    fss_connection();
     explicit fss_connection(int fd);
     fss_connection(fss_connection&) = delete;
     fss_connection(fss_connection&&) = delete;
@@ -168,7 +168,7 @@ public:
     fss_message(fss_message &&) = delete;
     auto operator=(fss_message &) -> fss_message& = delete;
     auto operator=(fss_message &&) -> fss_message& = delete;
-    virtual ~fss_message() = default;
+    virtual ~fss_message();
     void setId(uint64_t t_id);
     auto getId() -> uint64_t;
     auto getType() -> fss_message_type;

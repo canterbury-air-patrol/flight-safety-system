@@ -37,9 +37,13 @@ flight_safety_system::client_ssl::fss_client::fss_client(const std::string &t_fi
     }
 }
 
+flight_safety_system::client_ssl::fss_client::fss_client() = default;
+
 flight_safety_system::client_ssl::fss_client::fss_client(std::string t_ca, std::string t_private_key, std::string t_public_key) : ca_file(std::move(t_ca)), private_key_file(std::move(t_private_key)), public_key_file(std::move(t_public_key))
 {
 }
+
+flight_safety_system::client_ssl::fss_client::~fss_client() = default;
 
 void
 flight_safety_system::client_ssl::fss_client::disconnect()
@@ -205,8 +209,9 @@ flight_safety_system::client_ssl::fss_client::handleSMMSettings(const std::share
 
 flight_safety_system::client_ssl::fss_server::fss_server(flight_safety_system::client_ssl::fss_client *t_client, std::string t_address, uint16_t t_port, std::string t_ca, std::string t_private_key, std::string t_public_key) : flight_safety_system::transport::fss_message_cb(nullptr), client(t_client), address(std::move(t_address)), port(t_port), ca_file(std::move(t_ca)), private_key_file(std::move(t_private_key)), public_key_file(std::move(t_public_key))
 {
-
 }
+
+flight_safety_system::client_ssl::fss_server::~fss_server() = default;
 
 auto
 flight_safety_system::client_ssl::fss_server::getAddress() -> std::string

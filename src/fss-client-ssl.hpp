@@ -31,13 +31,13 @@ protected:
     void addServer(const std::shared_ptr<fss_server> &server);
 public:
     explicit fss_client(const std::string &config_file);
-    explicit fss_client() = default;
+    explicit fss_client();
     explicit fss_client(std::string t_ca, std::string t_private_key, std::string t_public_key);
     fss_client(fss_client&) = delete;
     fss_client(fss_client&&) = delete;
     auto operator=(fss_client&) -> fss_client& = delete;
     auto operator=(fss_client&&) -> fss_client& = delete;
-    virtual ~fss_client() = default;
+    virtual ~fss_client();
     virtual void connectTo(const std::string &t_address, uint16_t t_port, bool connect);
     virtual void attemptReconnect();
     virtual void disconnect();
@@ -71,7 +71,7 @@ public:
     fss_server(fss_server&&) = delete;
     auto operator=(fss_server&) -> fss_server& = delete;
     auto operator=(fss_server&&) -> fss_server& = delete;
-    ~fss_server() override = default;
+    ~fss_server() override;
     void processMessage(std::shared_ptr<flight_safety_system::transport::fss_message> message) override;
     virtual auto getAddress() -> std::string;
     virtual auto getPort() -> uint16_t;

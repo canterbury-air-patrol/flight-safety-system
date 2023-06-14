@@ -130,6 +130,7 @@ flight_safety_system::transport::fss_message::fss_message(uint64_t t_id, fss_mes
 {
 }
 
+flight_safety_system::transport::fss_message::~fss_message() = default;
 
 auto
 flight_safety_system::transport::fss_message::headerLength() -> size_t

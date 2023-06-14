@@ -41,6 +41,8 @@ inet_ntop_stor(struct sockaddr_storage *src, char *dst, size_t dstlen, uint16_t 
 }
 #endif
 
+flight_safety_system::transport::fss_connection::fss_connection() = default;
+
 static void
 recv_msg_thread(flight_safety_system::transport::fss_connection *conn)
 {
