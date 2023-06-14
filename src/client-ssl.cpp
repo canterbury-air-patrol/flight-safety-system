@@ -152,8 +152,8 @@ flight_safety_system::client_ssl::fss_client::serverRequiresReconnect(flight_saf
     {
         if (s.get() == server)
         {
-            this->reconnect_servers.push_back(std::move(s));
             this->servers.remove(s);
+            this->reconnect_servers.push_back(std::move(s));
             break;
         }
     }
