@@ -17,6 +17,10 @@ recv_msg_thread(flight_safety_system::transport_ssl::fss_connection *conn)
     conn->processMessages();
 }
 
+flight_safety_system::transport_ssl::fss_connection::fss_connection(std::string t_ca, std::string t_private_key, std::string t_public_key) : flight_safety_system::transport::fss_connection(), ca_file(std::move(t_ca)), private_key_file(std::move(t_private_key)), public_key_file(std::move(t_public_key))
+{
+}
+
 flight_safety_system::transport_ssl::fss_connection::fss_connection(int t_fd, std::string t_ca, std::string t_private_key, std::string t_public_key) : ca_file(std::move(t_ca)), private_key_file(std::move(t_private_key)), public_key_file(std::move(t_public_key))
 {
 }
@@ -67,6 +71,10 @@ flight_safety_system::transport_ssl::fss_connection_server::fss_connection_serve
     {
         this->startRecvThread(std::thread(recv_msg_thread, this));
     }
+}
+
+flight_safety_system::transport_ssl::fss_connection_client::fss_connection_client(std::string t_ca, std::string t_private_key, std::string t_public_key) : fss_connection(std::move(t_ca), std::move(t_private_key), std::move(t_public_key)), session{}
+{
 }
 
 auto
@@ -275,6 +283,10 @@ auto
 flight_safety_system::transport_ssl::fss_listen::newConnection(int t_newfd) -> std::shared_ptr<flight_safety_system::transport::fss_connection>
 {
     return std::make_shared<flight_safety_system::transport_ssl::fss_connection_server>(t_newfd, this->ca_file, this->private_key_file, this->public_key_file);
+}
+
+flight_safety_system::transport_ssl::fss_listen::fss_listen(uint16_t t_port, flight_safety_system::transport::fss_connect_cb t_cb, std::string t_ca, std::string t_private_key, std::string t_public_key) : flight_safety_system::transport::fss_listen(t_port, t_cb), ca_file(std::move(t_ca)), private_key_file(std::move(t_private_key)), public_key_file(std::move(t_public_key))
+{
 }
 
 auto flight_safety_system::transport_ssl::fss_connection_server::getClientNames() -> std::list<std::string>

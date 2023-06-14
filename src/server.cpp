@@ -252,6 +252,19 @@ flight_safety_system::server::fss_client::sendCommand()
     }
 }
 
+auto
+flight_safety_system::server::fss_client::isAircraft() -> bool
+{
+    return this->aircraft;
+}
+
+auto
+flight_safety_system::server::fss_client::getName() -> std::string
+{
+    return this->name;
+}
+
+
 void
 flight_safety_system::server::fss_client::sendRTTRequest(const std::shared_ptr<flight_safety_system::transport::fss_message_rtt_request> &rtt_req)
 {

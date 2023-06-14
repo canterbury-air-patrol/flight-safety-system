@@ -218,6 +218,11 @@ flight_safety_system::transport::fss_message::getPacked() -> std::shared_ptr<buf
     return bl;
 }
 
+void
+flight_safety_system::transport::fss_message_closed::packData(std::shared_ptr<buf_len> bl __attribute__((unused)))
+{
+}
+
 flight_safety_system::transport::fss_message_closed::fss_message_closed() : fss_message(message_type_closed)
 {
 }
@@ -741,6 +746,33 @@ flight_safety_system::transport::fss_message_smm_settings::unpackData(const std:
     }
 }
 
+flight_safety_system::transport::fss_message_smm_settings::fss_message_smm_settings(std::string t_server_url, std::string t_username, std::string t_password) : fss_message(message_type_smm_settings), server_url(std::move(t_server_url)), username(std::move(t_username)), password(std::move(t_password))
+{
+}
+
+flight_safety_system::transport::fss_message_smm_settings::fss_message_smm_settings(uint64_t t_id, const std::shared_ptr<buf_len> &bl) : fss_message(t_id, message_type_smm_settings), server_url(), username(), password()
+{
+    this->unpackData(bl);
+}
+
+auto
+flight_safety_system::transport::fss_message_smm_settings::getServerURL() -> std::string
+{
+    return this->server_url;
+}
+
+auto
+flight_safety_system::transport::fss_message_smm_settings::getUsername() -> std::string
+{
+    return this->username;
+}
+
+auto
+flight_safety_system::transport::fss_message_smm_settings::getPassword() -> std::string
+{
+    return this->password;
+}
+
 void
 packServer(const std::shared_ptr<flight_safety_system::transport::buf_len> &bl, const std::pair<std::string, uint16_t> &server)
 {
@@ -778,6 +810,28 @@ flight_safety_system::transport::fss_message_server_list::unpackData(const std::
     }
 }
 
+flight_safety_system::transport::fss_message_server_list::fss_message_server_list() : fss_message(message_type_server_list), servers()
+{
+}
+
+flight_safety_system::transport::fss_message_server_list::fss_message_server_list(uint64_t t_id, const std::shared_ptr<buf_len> &bl) : fss_message(t_id, message_type_server_list), servers()
+{
+    this->unpackData(bl);
+}
+
+void
+flight_safety_system::transport::fss_message_server_list::addServer(const std::string &server, uint16_t port)
+{
+    this->servers.emplace_back(server, port);
+}
+
+auto
+flight_safety_system::transport::fss_message_server_list::getServers() -> std::vector<std::pair<std::string, uint16_t>>
+{
+    return this->servers;
+}
+
+
 void
 flight_safety_system::transport::fss_message_identity_non_aircraft::packData(std::shared_ptr<buf_len> bl)
 {
@@ -798,6 +852,15 @@ flight_safety_system::transport::fss_message_identity_non_aircraft::unpackData(c
     }
 }
 
+flight_safety_system::transport::fss_message_identity_non_aircraft::fss_message_identity_non_aircraft() : fss_message(message_type_identity_non_aircraft)
+{
+}
+
+flight_safety_system::transport::fss_message_identity_non_aircraft::fss_message_identity_non_aircraft(uint64_t t_id, const std::shared_ptr<buf_len> &bl) : fss_message(t_id, message_type_identity_non_aircraft)
+{
+    this->unpackData(bl);
+}
+
 void
 flight_safety_system::transport::fss_message_identity_non_aircraft::addCapability(uint8_t cap_id)
 {
@@ -814,6 +877,15 @@ void
 flight_safety_system::transport::fss_message_identity_required::packData(std::shared_ptr<buf_len> bl __attribute__((unused)))
 {
 }
+
+flight_safety_system::transport::fss_message_identity_required::fss_message_identity_required() : fss_message(message_type_identity_required)
+{
+}
+
+flight_safety_system::transport::fss_message_identity_required::fss_message_identity_required(uint64_t t_id, const std::shared_ptr<buf_len> &bl __attribute__((unused))) : fss_message(t_id, message_type_identity)
+{
+}
+
 
 auto
 flight_safety_system::transport::fss_message::decode(const std::shared_ptr<buf_len> &bl) -> std::shared_ptr<flight_safety_system::transport::fss_message>

@@ -25,7 +25,7 @@ private:
     std::list<std::shared_ptr<flight_safety_system::client_ssl::fss_server>> servers{};
     std::list<std::shared_ptr<flight_safety_system::client_ssl::fss_server>> reconnect_servers{};
     void notifyConnectionStatus();
-    virtual void connectionStatusChange(flight_safety_system::client_ssl::connection_status status __attribute__((unused))) {};
+    virtual void connectionStatusChange(flight_safety_system::client_ssl::connection_status status);
 protected:
     void setAssetName(std::string t_asset_name);
     void addServer(const std::shared_ptr<fss_server> &server);
@@ -42,7 +42,7 @@ public:
     virtual void attemptReconnect();
     virtual void disconnect();
     virtual void sendMsgAll(const std::shared_ptr<flight_safety_system::transport::fss_message> &msg);
-    virtual auto getAssetName() -> std::string { return this->asset_name; };
+    virtual auto getAssetName() -> std::string;
     virtual void serverRequiresReconnect(fss_server *server);
     virtual void updateServers(const std::shared_ptr<flight_safety_system::transport::fss_message_server_list> &msg);
     virtual void handleCommand(const std::shared_ptr<flight_safety_system::transport::fss_message_asset_command> &msg __attribute__((unused)));

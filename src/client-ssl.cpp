@@ -101,6 +101,12 @@ flight_safety_system::client_ssl::fss_client::sendMsgAll(const std::shared_ptr<f
     }
 }
 
+auto
+flight_safety_system::client_ssl::fss_client::getAssetName() -> std::string
+{
+    return this->asset_name;
+}
+
 void
 flight_safety_system::client_ssl::fss_client::addServer(const std::shared_ptr<flight_safety_system::client_ssl::fss_server> &server)
 {
@@ -175,6 +181,11 @@ flight_safety_system::client_ssl::fss_client::notifyConnectionStatus()
             this->connectionStatusChange(CLIENT_CONNECTION_STATUS_CONNECTED_2_OR_MORE);
             break;
     }
+}
+
+void
+flight_safety_system::client_ssl::fss_client::connectionStatusChange(flight_safety_system::client_ssl::connection_status status __attribute__((unused)))
+{
 }
 
 void

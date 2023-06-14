@@ -184,7 +184,7 @@ public:
 
 class fss_message_closed: public fss_message {
 protected:
-    void packData(std::shared_ptr<buf_len>) override {};
+    void packData(std::shared_ptr<buf_len>) override;
 public:
     fss_message_closed();
 };
@@ -326,11 +326,11 @@ protected:
     void unpackData(const std::shared_ptr<buf_len> &bl);
     void packData(std::shared_ptr<buf_len> bl) override;
 public:
-    fss_message_smm_settings(std::string t_server_url, std::string t_username, std::string t_password) : fss_message(message_type_smm_settings), server_url(std::move(t_server_url)), username(std::move(t_username)), password(std::move(t_password)) {};
-    fss_message_smm_settings(uint64_t t_id, const std::shared_ptr<buf_len> &bl) : fss_message(t_id, message_type_smm_settings), server_url(), username(), password() { this->unpackData(bl); };
-    virtual auto getServerURL() -> std::string { return this->server_url; };
-    virtual auto getUsername() -> std::string { return this->username; };
-    virtual auto getPassword() -> std::string { return this->password; };
+    fss_message_smm_settings(std::string t_server_url, std::string t_username, std::string t_password);
+    fss_message_smm_settings(uint64_t t_id, const std::shared_ptr<buf_len> &bl);
+    virtual auto getServerURL() -> std::string;
+    virtual auto getUsername() -> std::string;
+    virtual auto getPassword() -> std::string;
 };
 
 class fss_message_server_list: public fss_message {
@@ -340,10 +340,10 @@ protected:
     void unpackData(const std::shared_ptr<buf_len> &bl);
     void packData(std::shared_ptr<buf_len> bl) override;
 public:
-    fss_message_server_list() : fss_message(message_type_server_list), servers() {};
-    fss_message_server_list(uint64_t t_id, const std::shared_ptr<buf_len> &bl) : fss_message(t_id, message_type_server_list), servers() { this->unpackData(bl); };
-    virtual void addServer(const std::string &server, uint16_t port) { this->servers.emplace_back(server, port); };
-    virtual auto getServers() -> std::vector<std::pair<std::string, uint16_t>> { return this->servers; };
+    fss_message_server_list();
+    fss_message_server_list(uint64_t t_id, const std::shared_ptr<buf_len> &bl);
+    virtual void addServer(const std::string &server, uint16_t port);
+    virtual auto getServers() -> std::vector<std::pair<std::string, uint16_t>>;
 };
 
 class fss_message_identity_non_aircraft: public fss_message {
@@ -353,8 +353,8 @@ protected:
     void unpackData(const std::shared_ptr<buf_len> &bl);
     void packData(std::shared_ptr<buf_len> bl) override;
 public:
-    fss_message_identity_non_aircraft() : fss_message(message_type_identity_non_aircraft) {};
-    fss_message_identity_non_aircraft(uint64_t t_id, const std::shared_ptr<buf_len> &bl) : fss_message(t_id, message_type_identity_non_aircraft) { this->unpackData(bl); };
+    fss_message_identity_non_aircraft();
+    fss_message_identity_non_aircraft(uint64_t t_id, const std::shared_ptr<buf_len> &bl);
     void addCapability(uint8_t cap_id);
     auto getCapability(uint8_t cap_id) -> bool;
 };
@@ -364,8 +364,8 @@ private:
 protected:
     void packData(std::shared_ptr<buf_len> bl) override;
 public:
-    fss_message_identity_required() : fss_message(message_type_identity_required) {};
-    fss_message_identity_required(uint64_t t_id, const std::shared_ptr<buf_len> &bl __attribute__((unused))) : fss_message(t_id, message_type_identity) {};
+    fss_message_identity_required();
+    fss_message_identity_required(uint64_t t_id, const std::shared_ptr<buf_len> &bl);
 };
 } // namespace transport
 } // namespace flight_safety_system

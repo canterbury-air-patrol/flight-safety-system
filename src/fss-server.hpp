@@ -83,7 +83,7 @@ private:
     bool aircraft{false};
     std::string name{};
     std::list<std::shared_ptr<fss_client_rtt>> outstanding_rtt_requests{};
-    auto getName() -> std::string { return this->name; };
+    auto getName() -> std::string;
     uint64_t last_command_send_ts{0};
     uint64_t last_command_dbid{0};
 public:
@@ -97,7 +97,7 @@ public:
     void sendRTTRequest(const std::shared_ptr<transport::fss_message_rtt_request> &rtt_req);
     void sendSMMSettings();
     void sendCommand();
-    auto isAircraft() -> bool { return this->aircraft; };
+    auto isAircraft() -> bool;
 };
 } // namespace server
 } // namespace flight_safety_system

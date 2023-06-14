@@ -19,7 +19,7 @@ protected:
     auto recvSessionBytes(gnutls::session &session, void *bytes, size_t max_bytes) -> ssize_t;
     void setupSession(gnutls::session &session);
 public:
-    fss_connection(std::string t_ca, std::string t_private_key, std::string t_public_key) : flight_safety_system::transport::fss_connection(), ca_file(std::move(t_ca)), private_key_file(std::move(t_private_key)), public_key_file(std::move(t_public_key)) {};
+    fss_connection(std::string t_ca, std::string t_private_key, std::string t_public_key);
     fss_connection(int t_fd, std::string t_ca, std::string t_private_key, std::string t_public_key);
     fss_connection(fss_connection&) = delete;
     fss_connection(fss_connection&&) = delete;
@@ -37,7 +37,7 @@ protected:
     auto sendMsg(const std::shared_ptr<flight_safety_system::transport::buf_len> &bl) -> bool override;
     auto recvBytes(void *bytes, size_t max_bytes) -> ssize_t override;
 public:
-    fss_connection_client(std::string t_ca, std::string t_private_key, std::string t_public_key) : fss_connection(std::move(t_ca), std::move(t_private_key), std::move(t_public_key)), session{} {};
+    fss_connection_client(std::string t_ca, std::string t_private_key, std::string t_public_key);
     fss_connection_client(fss_connection_client &) = delete;
     fss_connection_client(fss_connection_client &&) = delete;
     auto operator=(fss_connection_client &) -> fss_connection& = delete;
@@ -73,7 +73,7 @@ private:
 protected:
     auto newConnection(int fd) -> std::shared_ptr<flight_safety_system::transport::fss_connection> override;
 public:
-    fss_listen(uint16_t t_port, flight_safety_system::transport::fss_connect_cb t_cb, std::string t_ca, std::string t_private_key, std::string t_public_key) : flight_safety_system::transport::fss_listen(t_port, t_cb), ca_file(std::move(t_ca)), private_key_file(std::move(t_private_key)), public_key_file(std::move(t_public_key)) {};
+    fss_listen(uint16_t t_port, flight_safety_system::transport::fss_connect_cb t_cb, std::string t_ca, std::string t_private_key, std::string t_public_key);
 };
 } // namespace transport_ssl
 } // namespace flight_safety_system
