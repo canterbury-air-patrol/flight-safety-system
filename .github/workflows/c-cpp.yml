@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
     - name: Install Deps
       run: sudo apt install -y libjsoncpp-dev libecpg-dev catch libgnutlsxx28 libgnutls28-dev gnutls-bin
     - name: autogen
