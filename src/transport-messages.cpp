@@ -575,8 +575,14 @@ auto flight_safety_system::transport::fss_message_system_status::getBatVoltage()
     return this->voltage;
 }
 
-flight_safety_system::transport::fss_message_search_status::fss_message_search_status(uint64_t t_search_id, uint64_t last_point_completed, uint64_t total_search_points) : fss_message(message_type_search_status), search_id(t_search_id), point_completed(last_point_completed), points_total(total_search_points) {};
-flight_safety_system::transport::fss_message_search_status::fss_message_search_status(uint64_t t_id, const std::shared_ptr<buf_len> &bl) : fss_message(t_id, message_type_search_status), search_id(0), point_completed(0), points_total(0) { this->unpackData(bl); };
+flight_safety_system::transport::fss_message_search_status::fss_message_search_status(uint64_t t_search_id, uint64_t last_point_completed, uint64_t total_search_points) : fss_message(message_type_search_status), search_id(t_search_id), point_completed(last_point_completed), points_total(total_search_points)
+{
+}
+
+flight_safety_system::transport::fss_message_search_status::fss_message_search_status(uint64_t t_id, const std::shared_ptr<buf_len> &bl) : fss_message(t_id, message_type_search_status), search_id(0), point_completed(0), points_total(0)
+{
+    this->unpackData(bl);
+}
 
 void
 flight_safety_system::transport::fss_message_search_status::packData(std::shared_ptr<buf_len> bl)
