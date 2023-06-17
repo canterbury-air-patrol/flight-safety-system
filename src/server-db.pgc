@@ -252,7 +252,7 @@ db_active_fss_servers_get(void)
     return res;
 }
 
-void db_disconnect()
+void db_disconnect(void)
 {
     EXEC SQL DISCONNECT ALL;
 }

@@ -1,5 +1,5 @@
 void db_connect(const char *host, const char *user, const char *pass, const char *db);
-void db_disconnect();
+void db_disconnect(void);
 
 unsigned long long db_get_asset_id(const char *asset_name);
 void db_rtt_create_entry(unsigned long long asset_id, unsigned long long delta);
