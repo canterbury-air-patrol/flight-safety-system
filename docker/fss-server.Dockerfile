@@ -1,8 +1,8 @@
-FROM debian:bullseye
+FROM debian:bookworm
 
 RUN apt update && apt upgrade -y
 RUN apt install -y build-essential automake libtool pkg-config
-RUN apt install -y libjsoncpp-dev libgnutlsxx28 libgnutls28-dev libecpg-dev gnutls-bin
+RUN apt install -y libjsoncpp-dev libgnutlsxx30 libgnutls28-dev libecpg-dev gnutls-bin
 
 COPY . /code/
 
