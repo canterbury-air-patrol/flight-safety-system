@@ -33,7 +33,7 @@ class asset_command {
 private:
     uint64_t dbid;
     uint64_t timestamp;
-    transport::fss_asset_command command;
+    transport::fss_asset_command command{transport::fss_asset_command::asset_command_unknown};
     double latitude;
     double longitude;
     uint16_t altitude;

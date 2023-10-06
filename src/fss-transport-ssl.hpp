@@ -42,7 +42,7 @@ public:
     fss_connection_client(fss_connection_client &&) = delete;
     auto operator=(fss_connection_client &) -> fss_connection& = delete;
     auto operator=(fss_connection_client &&) -> fss_connection& = delete;
-    ~fss_connection_client();
+    ~fss_connection_client() override;
     auto connectTo(const std::string &address, uint16_t port) -> bool override;
 };
 

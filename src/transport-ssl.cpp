@@ -1,4 +1,5 @@
 #include "fss-transport-ssl.hpp"
+#include "fss-transport.hpp"
 #include "transport.hpp"
 
 #include <cstdint>
@@ -21,13 +22,11 @@ flight_safety_system::transport_ssl::fss_connection::fss_connection(std::string 
 {
 }
 
-flight_safety_system::transport_ssl::fss_connection::fss_connection(int t_fd, std::string t_ca, std::string t_private_key, std::string t_public_key) : ca_file(std::move(t_ca)), private_key_file(std::move(t_private_key)), public_key_file(std::move(t_public_key))
+flight_safety_system::transport_ssl::fss_connection::fss_connection(int t_fd, std::string t_ca, std::string t_private_key, std::string t_public_key) : flight_safety_system::transport::fss_connection(t_fd), ca_file(std::move(t_ca)), private_key_file(std::move(t_private_key)), public_key_file(std::move(t_public_key))
 {
 }
 
-flight_safety_system::transport_ssl::fss_connection::~fss_connection()
-{
-}
+flight_safety_system::transport_ssl::fss_connection::~fss_connection() = default;
 
 flight_safety_system::transport_ssl::fss_connection_client::~fss_connection_client()
 {
@@ -104,7 +103,7 @@ flight_safety_system::transport_ssl::fss_connection_client::connectTo(const std:
     int synRetries = 2;
     setsockopt(this->getFd(), IPPROTO_TCP, TCP_SYNCNT, &synRetries, sizeof(synRetries));
 
-    if (connect(this->getFd(), (struct sockaddr *)&remote, remote.ss_family == AF_INET ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6)) < 0)
+    if (connect(this->getFd(), reinterpret_cast<struct sockaddr *>(&remote), remote.ss_family == AF_INET ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6)) < 0)
     {
         perror(("Failed to connect to " + address).c_str());
         return false;
@@ -185,23 +184,24 @@ flight_safety_system::transport_ssl::fss_connection_server::setupSSL() -> bool
     {
         for (auto cert : cert_list)
         {
-            gnutls_x509_crt_t cert_data;
+            gnutls_x509_crt_t cert_data = {};
 
             gnutls_x509_crt_init(&cert_data);
 
             gnutls_x509_crt_import(cert_data, &cert, GNUTLS_X509_FMT_DER);
 
-            char name_buf[512];
-            size_t dn_len = 512;
+            const size_t dn_max_len = 512;
+            char name_buf[dn_max_len];
+            size_t dn_len = dn_max_len;
             gnutls_x509_crt_get_dn (cert_data, name_buf, &dn_len);
-            std::string name = name_buf;
+            std::string name = std::string(name_buf);
             /* Locate the CN=<name> section */
             std::size_t found = name.find("CN=");
             if (found != std::string::npos)
             {
                 name.erase(0, found+3);
                 /* Strip off any extra data (like ,O=...) */
-                found = name.find(",");
+                found = name.find(',');
                 if (found != std::string::npos)
                 {
                     name.erase(found);

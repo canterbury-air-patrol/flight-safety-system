@@ -57,7 +57,7 @@ flight_safety_system::server::fss_server_details::getPort() -> uint16_t
     return this->port;
 }
 
-flight_safety_system::server::asset_command::asset_command(uint64_t t_dbid, uint64_t t_timestamp, const std::string &t_cmd, double t_latitude, double t_longitude, uint16_t t_altitude) : dbid(t_dbid), timestamp(t_timestamp), command(transport::asset_command_unknown), latitude(t_latitude), longitude(t_longitude), altitude(t_altitude)
+flight_safety_system::server::asset_command::asset_command(uint64_t t_dbid, uint64_t t_timestamp, const std::string &t_cmd, double t_latitude, double t_longitude, uint16_t t_altitude) : dbid(t_dbid), timestamp(t_timestamp), latitude(t_latitude), longitude(t_longitude), altitude(t_altitude)
 {
     if (t_cmd == "RTL") {
         this->command = transport::asset_command_rtl;
@@ -284,6 +284,17 @@ flight_safety_system::server::fss_client::sendSMMSettings()
     }
 }
 
+auto getServersListMsg() -> std::shared_ptr<flight_safety_system::transport::fss_message_server_list>
+{
+    auto known_servers = dbc->get_active_fss_servers();
+    auto server_list = std::make_shared<flight_safety_system::transport::fss_message_server_list>();
+    for (const auto &server_details : known_servers)
+    {
+        server_list->addServer(server_details->getAddress(),server_details->getPort());
+    }
+    return server_list;
+}
+
 void
 flight_safety_system::server::fss_client::processMessage(std::shared_ptr<flight_safety_system::transport::fss_message> msg)
 {
@@ -337,13 +348,7 @@ flight_safety_system::server::fss_client::processMessage(std::shared_ptr<flight_
                 /* send SMM config and servers list */
                 this->sendSMMSettings();
                 /* Send all the known fss servers */
-                auto known_servers = dbc->get_active_fss_servers();
-                auto server_list = std::make_shared<flight_safety_system::transport::fss_message_server_list>();
-                for (const auto &server_details : known_servers)
-                {
-                    server_list->addServer(server_details->getAddress(),server_details->getPort());
-                }
-                this->getConnection()->sendMsg(server_list);
+                this->getConnection()->sendMsg(getServersListMsg());
             }
         }
         else if(msg->getType() == flight_safety_system::transport::message_type_identity_non_aircraft)
@@ -522,13 +527,7 @@ main(int argc, char *argv[]) -> int
         if ((counter % send_config_period) == 0)
         {
             /* Send all the known fss servers */
-            auto known_servers = dbc->get_active_fss_servers();
-            auto server_list = std::make_shared<flight_safety_system::transport::fss_message_server_list>();
-            for (const auto &server_details : known_servers)
-            {
-                server_list->addServer(server_details->getAddress(),server_details->getPort());
-            }
-            clients->sendMsg(server_list);
+            clients->sendMsg(getServersListMsg());
             clients->sendSMMSettings();
         }
         counter++;

@@ -155,7 +155,7 @@ flight_safety_system::transport::fss_connection::connectTo(const std::string &ad
     int synRetries = 2;
     setsockopt(this->fd, IPPROTO_TCP, TCP_SYNCNT, &synRetries, sizeof(synRetries));
 
-    if (connect(this->fd, (struct sockaddr *)&remote, remote.ss_family == AF_INET ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6)) < 0)
+    if (connect(this->fd, reinterpret_cast<struct sockaddr *>(&remote), remote.ss_family == AF_INET ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6)) < 0)
     {
         perror(("Failed to connect to " + address).c_str());
         return false;
@@ -267,7 +267,7 @@ flight_safety_system::transport::fss_connection::recvMsg() -> std::shared_ptr<fl
     ssize_t received = this->recvBytes(&data[0], data.size());
     if (received == static_cast<ssize_t>(data.size()))
     {
-        uint16_t data_length = ntohs(*(uint16_t *)&data[0]);
+        uint16_t data_length = ntohs((reinterpret_cast<const uint16_t *>(data.data()))[0]);
         auto total_length = static_cast<ssize_t>(data_length);
         if (data_length % sizeof(uint64_t) != 0)
         {
@@ -287,7 +287,7 @@ flight_safety_system::transport::fss_connection::recvMsg() -> std::shared_ptr<fl
         }
         if (received == total_length)
         {
-            auto bl = std::make_shared<buf_len>(&data[0], data_length);
+            auto bl = std::make_shared<buf_len>(data.data(), data_length);
 #ifdef DEBUG
             printf("Message reads: \n");
             print_bl(bl);
@@ -341,7 +341,7 @@ flight_safety_system::transport::fss_listen::processMessages()
     {
         struct sockaddr_storage sa = {};
         socklen_t sa_len = sizeof(sockaddr_storage);
-        int newfd = accept(this->getFd(), (struct sockaddr *)&sa, &sa_len);
+        int newfd = accept(this->getFd(), reinterpret_cast<struct sockaddr *>(&sa), &sa_len);
         if (newfd < 0)
         {
             if (errno == EBADF)
@@ -388,7 +388,7 @@ flight_safety_system::transport::fss_listen::startListening() -> bool
     memset(&bind_addr, 0, sizeof (struct sockaddr_in6));
     bind_addr.sin6_family = AF_INET6;
     bind_addr.sin6_port = htons(this->port);
-    if (bind(this->getFd(), (struct sockaddr *)&bind_addr, sizeof(bind_addr)) < 0)
+    if (bind(this->getFd(), reinterpret_cast<struct sockaddr *>(&bind_addr), sizeof(bind_addr)) < 0)
     {
         perror("Failed to bind socket: ");
         return false;
