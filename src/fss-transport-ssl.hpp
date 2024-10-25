@@ -2,8 +2,10 @@
 
 #include <list>
 
-#include <gnutls/gnutls.h>
-#include <gnutls/gnutlsxx.h>
+namespace gnutls {
+    class certificate_credentials;
+    class session;
+};
 
 namespace flight_safety_system {
 namespace transport_ssl {
