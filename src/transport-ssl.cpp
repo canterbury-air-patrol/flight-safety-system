@@ -24,11 +24,11 @@ recv_msg_thread(flight_safety_system::transport_ssl::fss_connection *conn)
     conn->processMessages();
 }
 
-flight_safety_system::transport_ssl::fss_connection::fss_connection(std::string t_ca, std::string t_private_key, std::string t_public_key) : flight_safety_system::transport::fss_connection(), ca_file(std::move(t_ca)), private_key_file(std::move(t_private_key)), public_key_file(std::move(t_public_key))
+flight_safety_system::transport_ssl::fss_connection::fss_connection(std::string t_ca, std::string t_private_key, std::string t_public_key) : flight_safety_system::transport::fss_connection(), credentials(new gnutls::certificate_credentials()), ca_file(std::move(t_ca)), private_key_file(std::move(t_private_key)), public_key_file(std::move(t_public_key))
 {
 }
 
-flight_safety_system::transport_ssl::fss_connection::fss_connection(int t_fd, std::string t_ca, std::string t_private_key, std::string t_public_key) : flight_safety_system::transport::fss_connection(t_fd), ca_file(std::move(t_ca)), private_key_file(std::move(t_private_key)), public_key_file(std::move(t_public_key))
+flight_safety_system::transport_ssl::fss_connection::fss_connection(int t_fd, std::string t_ca, std::string t_private_key, std::string t_public_key) : flight_safety_system::transport::fss_connection(t_fd), credentials(new gnutls::certificate_credentials()), ca_file(std::move(t_ca)), private_key_file(std::move(t_private_key)), public_key_file(std::move(t_public_key))
 {
 }
 
@@ -130,9 +130,9 @@ flight_safety_system::transport_ssl::fss_connection::setupSession(gnutls::sessio
 {
     session.set_priority (nullptr, nullptr);
 
-    this->credentials.set_x509_trust_file(this->ca_file.c_str(), GNUTLS_X509_FMT_PEM);
-    this->credentials.set_x509_key_file(this->public_key_file.c_str(), this->private_key_file.c_str(), GNUTLS_X509_FMT_PEM);
-    session.set_credentials(this->credentials);
+    this->credentials->set_x509_trust_file(this->ca_file.c_str(), GNUTLS_X509_FMT_PEM);
+    this->credentials->set_x509_key_file(this->public_key_file.c_str(), this->private_key_file.c_str(), GNUTLS_X509_FMT_PEM);
+    session.set_credentials(*this->credentials);
 
     session.set_transport_ptr((gnutls_transport_ptr_t)(intptr_t)this->getFd());
 }

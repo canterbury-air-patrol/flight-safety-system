@@ -9,7 +9,7 @@ namespace flight_safety_system {
 namespace transport_ssl {
 class fss_connection : public flight_safety_system::transport::fss_connection {
 private:
-    gnutls::certificate_credentials credentials{};
+    std::unique_ptr<gnutls::certificate_credentials> credentials;
     std::string ca_file;
     std::string private_key_file;
     std::string public_key_file;
