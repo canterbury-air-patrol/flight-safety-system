@@ -21,7 +21,7 @@
 
 #ifdef DEBUG
 /* Run inet_ntop on a sockaddr_storage object */
-static const char *
+const char *
 inet_ntop_stor(struct sockaddr_storage *src, char *dst, size_t dstlen, uint16_t *port)
 {
     switch (src->ss_family)
@@ -355,7 +355,7 @@ flight_safety_system::transport::fss_listen::processMessages()
         char addr_str[INET6_ADDRSTRLEN];
         uint16_t client_port;
         inet_ntop_stor(&sa, addr_str, INET6_ADDRSTRLEN, &client_port);
-        std::cout << "New client from " << addr_str << ":" << client_port << " as " << fd << std::endl;
+        std::cout << "New client from " << addr_str << ":" << client_port << " as " << newfd << std::endl;
 #endif
         if (this->cb != nullptr)
         {

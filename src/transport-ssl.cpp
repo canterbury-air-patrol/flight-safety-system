@@ -12,6 +12,12 @@
 #include <thread>
 #include <netinet/tcp.h>
 
+#ifdef DEBUG
+// This is defined in transport.cpp
+extern const char *
+inet_ntop_stor(struct sockaddr_storage *src, char *dst, size_t dstlen, uint16_t *port);
+#endif
+
 static void
 recv_msg_thread(flight_safety_system::transport_ssl::fss_connection *conn)
 {
