@@ -14,10 +14,11 @@ private:
     std::string private_key_file;
     std::string public_key_file;
 protected:
+    std::unique_ptr<gnutls::session> session{nullptr};
     bool usable{false};
-    auto sendSessionMsg(gnutls::session &session, const std::shared_ptr<flight_safety_system::transport::buf_len> &bl) -> bool;
-    auto recvSessionBytes(gnutls::session &session, void *bytes, size_t max_bytes) -> ssize_t;
-    void setupSession(gnutls::session &session);
+    auto sendMsg(const std::shared_ptr<flight_safety_system::transport::buf_len> &bl) -> bool override;
+    auto recvBytes(void *bytes, size_t max_bytes) -> ssize_t override;
+    void setupSession();
 public:
     fss_connection(std::string t_ca, std::string t_private_key, std::string t_public_key);
     fss_connection(int t_fd, std::string t_ca, std::string t_private_key, std::string t_public_key);
@@ -30,12 +31,9 @@ public:
 
 class fss_connection_client : public fss_connection {
 private:
-    gnutls::client_session session;
     std::string hostname{};
 protected:
     auto setupSSL() -> bool;
-    auto sendMsg(const std::shared_ptr<flight_safety_system::transport::buf_len> &bl) -> bool override;
-    auto recvBytes(void *bytes, size_t max_bytes) -> ssize_t override;
 public:
     fss_connection_client(std::string t_ca, std::string t_private_key, std::string t_public_key);
     fss_connection_client(fss_connection_client &) = delete;
@@ -50,11 +48,8 @@ public:
 class fss_connection_server : public fss_connection {
 private:
     std::list<std::string> possible_names{};
-    gnutls::server_session session{};
 protected:
     auto setupSSL() -> bool;
-    auto sendMsg(const std::shared_ptr<flight_safety_system::transport::buf_len> &bl) -> bool override;
-    auto recvBytes(void *bytes, size_t max_bytes) -> ssize_t override;
 public:
     fss_connection_server(int t_fd, std::string t_ca, std::string t_private_key, std::string t_public_key);
     fss_connection_server(fss_connection_server&) = delete;
