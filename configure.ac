@@ -69,6 +69,8 @@ AC_CHECK_LIB([pthread], [pthread_create], [
     [AC_MSG_ERROR([pthread is required for this program])])
 AC_SUBST(pthread_LIBS)
 
+AC_CHECK_LIB([gnutlsxx], [_ZN6gnutls11credentialsC1E25gnutls_credentials_type_t])
+
 
 # Output Makefile files.
 AC_CONFIG_FILES([Makefile src/Makefile src/fss.pc src/fss-transport.pc src/fss-transport-ssl.pc src/fss-client.pc src/fss-client-ssl.pc examples/Makefile tests/Makefile])
