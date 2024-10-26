@@ -1,5 +1,7 @@
 #include <memory>
-#ifdef HAVE_CATCH2_CATCH_HPP
+#ifdef HAVE_CATCH2_CATCH_ALL_HPP
+#include <catch2/catch_all.hpp>
+#elif HAVE_CATCH2_CATCH_HPP
 #include <catch2/catch.hpp>
 #elif HAVE_CATCH_CATCH_HPP
 #include <catch/catch.hpp>
