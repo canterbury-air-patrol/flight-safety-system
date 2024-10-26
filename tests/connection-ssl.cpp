@@ -122,4 +122,5 @@ TEST_CASE("SSL - Listen - Callback")
     REQUIRE(!cb->connected());
 
     client_conn = nullptr;
+    delete conn;
 }

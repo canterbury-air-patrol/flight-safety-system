@@ -12,29 +12,33 @@
 #include <thread>
 #include <netinet/tcp.h>
 
+#ifdef DEBUG
+// This is defined in transport.cpp
+extern const char *
+inet_ntop_stor(struct sockaddr_storage *src, char *dst, size_t dstlen, uint16_t *port);
+#endif
+
 static void
 recv_msg_thread(flight_safety_system::transport_ssl::fss_connection *conn)
 {
     conn->processMessages();
 }
 
-flight_safety_system::transport_ssl::fss_connection::fss_connection(std::string t_ca, std::string t_private_key, std::string t_public_key) : flight_safety_system::transport::fss_connection(), ca_file(std::move(t_ca)), private_key_file(std::move(t_private_key)), public_key_file(std::move(t_public_key))
+flight_safety_system::transport_ssl::fss_connection::fss_connection(std::string t_ca, std::string t_private_key, std::string t_public_key) : flight_safety_system::transport::fss_connection(), credentials(new gnutls::certificate_credentials()), ca_file(std::move(t_ca)), private_key_file(std::move(t_private_key)), public_key_file(std::move(t_public_key))
 {
 }
 
-flight_safety_system::transport_ssl::fss_connection::fss_connection(int t_fd, std::string t_ca, std::string t_private_key, std::string t_public_key) : flight_safety_system::transport::fss_connection(t_fd), ca_file(std::move(t_ca)), private_key_file(std::move(t_private_key)), public_key_file(std::move(t_public_key))
+flight_safety_system::transport_ssl::fss_connection::fss_connection(int t_fd, std::string t_ca, std::string t_private_key, std::string t_public_key) : flight_safety_system::transport::fss_connection(t_fd), credentials(new gnutls::certificate_credentials()), ca_file(std::move(t_ca)), private_key_file(std::move(t_private_key)), public_key_file(std::move(t_public_key))
 {
 }
 
-flight_safety_system::transport_ssl::fss_connection::~fss_connection() = default;
-
-flight_safety_system::transport_ssl::fss_connection_client::~fss_connection_client()
+flight_safety_system::transport_ssl::fss_connection::~fss_connection()
 {
     if (this->usable)
     {
         try
         {
-            this->session.bye(GNUTLS_SHUT_WR);
+            this->session->bye(GNUTLS_SHUT_WR);
         }
         catch (gnutls::exception &ex)
         {
@@ -45,22 +49,9 @@ flight_safety_system::transport_ssl::fss_connection_client::~fss_connection_clie
     this->disconnect();
 }
 
-flight_safety_system::transport_ssl::fss_connection_server::~fss_connection_server()
-{
-    if (this->usable)
-    {
-        try
-        {
-            this->session.bye(GNUTLS_SHUT_WR);
-        }
-        catch (gnutls::exception &ex)
-        {
-            std::cerr << "fss_connection shutdown, gnutls exception during bye" << std::endl;
-        }
-        this->usable = false;
-    }
-    this->disconnect();
-}
+flight_safety_system::transport_ssl::fss_connection_client::~fss_connection_client() = default;
+
+flight_safety_system::transport_ssl::fss_connection_server::~fss_connection_server() = default;
 
 flight_safety_system::transport_ssl::fss_connection_server::fss_connection_server(int t_fd, std::string t_ca, std::string t_private_key, std::string t_public_key) : flight_safety_system::transport_ssl::fss_connection(std::move(t_ca), std::move(t_private_key), std::move(t_public_key))
 {
@@ -72,7 +63,7 @@ flight_safety_system::transport_ssl::fss_connection_server::fss_connection_serve
     }
 }
 
-flight_safety_system::transport_ssl::fss_connection_client::fss_connection_client(std::string t_ca, std::string t_private_key, std::string t_public_key) : fss_connection(std::move(t_ca), std::move(t_private_key), std::move(t_public_key)), session{}
+flight_safety_system::transport_ssl::fss_connection_client::fss_connection_client(std::string t_ca, std::string t_private_key, std::string t_public_key) : fss_connection(std::move(t_ca), std::move(t_private_key), std::move(t_public_key))
 {
 }
 
@@ -120,28 +111,32 @@ flight_safety_system::transport_ssl::fss_connection_client::connectTo(const std:
 }
 
 void
-flight_safety_system::transport_ssl::fss_connection::setupSession(gnutls::session &session)
+flight_safety_system::transport_ssl::fss_connection::setupSession()
 {
-    session.set_priority (nullptr, nullptr);
+    this->session->set_priority (nullptr, nullptr);
 
-    this->credentials.set_x509_trust_file(this->ca_file.c_str(), GNUTLS_X509_FMT_PEM);
-    this->credentials.set_x509_key_file(this->public_key_file.c_str(), this->private_key_file.c_str(), GNUTLS_X509_FMT_PEM);
-    session.set_credentials(this->credentials);
+    this->credentials->set_x509_trust_file(this->ca_file.c_str(), GNUTLS_X509_FMT_PEM);
+    this->credentials->set_x509_key_file(this->public_key_file.c_str(), this->private_key_file.c_str(), GNUTLS_X509_FMT_PEM);
+    this->session->set_credentials(*this->credentials);
 
-    session.set_transport_ptr((gnutls_transport_ptr_t)(intptr_t)this->getFd());
+    this->session->set_transport_ptr((gnutls_transport_ptr_t)(intptr_t)this->getFd());
 }
 
 auto
 flight_safety_system::transport_ssl::fss_connection_client::setupSSL() -> bool
 {
-    this->setupSession(this->session);
+    auto clientSession = new gnutls::client_session();
 
-    this->session.set_verify_cert(this->hostname.c_str(), 0);
+    this->session = std::unique_ptr<gnutls::session>(clientSession);
+
+    this->setupSession();
+
+    clientSession->set_verify_cert(this->hostname.c_str(), 0);
 
     int ret = -2;
     try
     {
-        ret = this->session.handshake();
+        ret = this->session->handshake();
     }
     catch (gnutls::exception &e)
     {
@@ -159,14 +154,18 @@ flight_safety_system::transport_ssl::fss_connection_client::setupSSL() -> bool
 auto
 flight_safety_system::transport_ssl::fss_connection_server::setupSSL() -> bool
 {
-    this->setupSession(this->session);
+    auto serverSession = new gnutls::server_session();
 
-    this->session.set_certificate_request(GNUTLS_CERT_REQUIRE);
+    this->session = std::unique_ptr<gnutls::session>(serverSession);
+
+    this->setupSession();
+
+    serverSession->set_certificate_request(GNUTLS_CERT_REQUIRE);
 
     int ret = -1;
     try
     {
-        ret = this->session.handshake();
+        ret = this->session->handshake();
     }
     catch(gnutls::exception &e)
     {
@@ -180,7 +179,7 @@ flight_safety_system::transport_ssl::fss_connection_server::setupSSL() -> bool
 
     std::vector<gnutls_datum_t> cert_list;
 
-    if (this->session.get_peers_certificate(cert_list))
+    if (this->session->get_peers_certificate(cert_list))
     {
         for (auto cert : cert_list)
         {
@@ -216,7 +215,7 @@ flight_safety_system::transport_ssl::fss_connection_server::setupSSL() -> bool
 }
 
 auto
-flight_safety_system::transport_ssl::fss_connection::sendSessionMsg(gnutls::session &session, const std::shared_ptr<flight_safety_system::transport::buf_len> &bl) -> bool
+flight_safety_system::transport_ssl::fss_connection::sendMsg(const std::shared_ptr<flight_safety_system::transport::buf_len> &bl) -> bool
 {
     if (!this->usable)
     {
@@ -227,7 +226,7 @@ flight_safety_system::transport_ssl::fss_connection::sendSessionMsg(gnutls::sess
     const char *data = bl->getData();
     try
     {
-        session.send(data, to_send);
+        this->session->send(data, to_send);
     }
     catch (gnutls::exception &ex)
     {
@@ -237,19 +236,7 @@ flight_safety_system::transport_ssl::fss_connection::sendSessionMsg(gnutls::sess
 }
 
 auto
-flight_safety_system::transport_ssl::fss_connection_client::sendMsg(const std::shared_ptr<flight_safety_system::transport::buf_len> &bl) -> bool
-{
-    return this->sendSessionMsg(this->session, bl);
-}
-
-auto
-flight_safety_system::transport_ssl::fss_connection_server::sendMsg(const std::shared_ptr<flight_safety_system::transport::buf_len> &bl) -> bool
-{
-    return this->sendSessionMsg(this->session, bl);
-}
-
-auto
-flight_safety_system::transport_ssl::fss_connection::recvSessionBytes(gnutls::session &session, void *t_bytes, size_t t_max_bytes) -> ssize_t
+flight_safety_system::transport_ssl::fss_connection::recvBytes(void *t_bytes, size_t t_max_bytes) -> ssize_t
 {
     if (!this->usable)
     {
@@ -259,7 +246,7 @@ flight_safety_system::transport_ssl::fss_connection::recvSessionBytes(gnutls::se
     ssize_t bytes_recved = -1;
     try
     {
-        bytes_recved = session.recv(t_bytes, t_max_bytes);
+        bytes_recved = this->session->recv(t_bytes, t_max_bytes);
     }
     catch (gnutls::exception &ex)
     {
@@ -268,17 +255,6 @@ flight_safety_system::transport_ssl::fss_connection::recvSessionBytes(gnutls::se
     return bytes_recved;
 }
 
-auto
-flight_safety_system::transport_ssl::fss_connection_client::recvBytes(void *t_bytes, size_t t_max_bytes) -> ssize_t
-{
-    return this->recvSessionBytes(this->session, t_bytes, t_max_bytes);
-}
-
-auto
-flight_safety_system::transport_ssl::fss_connection_server::recvBytes(void *t_bytes, size_t t_max_bytes) -> ssize_t
-{
-    return this->recvSessionBytes(this->session, t_bytes, t_max_bytes);
-}
 auto
 flight_safety_system::transport_ssl::fss_listen::newConnection(int t_newfd) -> std::shared_ptr<flight_safety_system::transport::fss_connection>
 {
