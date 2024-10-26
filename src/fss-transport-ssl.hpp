@@ -5,7 +5,7 @@
 namespace gnutls {
     class certificate_credentials;
     class session;
-};
+} // namespace gnutls
 
 namespace flight_safety_system {
 namespace transport_ssl {
