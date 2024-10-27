@@ -6,9 +6,9 @@ FSS provides a means of sending basic commands (RTL, Hold, Resume, etc) to an ai
 
 ## Basic Setup
 #### Dependencies
-Dependencies are jsoncpp, ecpg (for the server), catch (for tests).
+Dependencies are jsoncpp (load/read the config), gnutls/gnutlsxx (for secure connections), ecpg (for the server), catch2 (for tests).
 
-On debian/ubuntu you will need to `apt install libjsoncpp-dev ecpg-dev catch`
+On debian/ubuntu you will need to `apt install libjsoncpp-dev libgnutls28-dev ecpg-dev catch2`
 ### Build/Install
 You can build this package from source:
 ```
