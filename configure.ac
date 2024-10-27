@@ -13,7 +13,7 @@ AC_PROG_CXX
 AC_PROG_CC
 AM_PROG_AR
 
-AX_CXX_COMPILE_STDCXX([11],[],[mandatory])
+AX_CXX_COMPILE_STDCXX([14],[],[mandatory])
 
 LT_INIT([disable-static pic-only])
 
@@ -57,9 +57,10 @@ AS_IF([test "x$enable_server" == "xyes"], [
 
 AS_IF([test "x$enable_tests" == "xyes"], [
 AC_LANG_PUSH([C++])
+    AC_CHECK_HEADERS([catch2/catch_all.hpp], [PKG_CHECK_MODULES([CATCH2], [catch2-with-main])], [
     AC_CHECK_HEADERS([catch2/catch.hpp], [], [
 	AC_CHECK_HEADERS([catch/catch.hpp], [], [
-            AC_CHECK_HEADERS([catch.hpp])])])
+            AC_CHECK_HEADERS([catch.hpp])])])])
 AC_LANG_POP([C++])
 ])
 
@@ -68,6 +69,8 @@ AC_CHECK_LIB([pthread], [pthread_create], [
        pthread_LIBS="-pthread"],
     [AC_MSG_ERROR([pthread is required for this program])])
 AC_SUBST(pthread_LIBS)
+
+AC_CHECK_LIB([gnutlsxx], [_ZN6gnutls11credentialsC1E25gnutls_credentials_type_t])
 
 
 # Output Makefile files.

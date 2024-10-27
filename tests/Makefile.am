@@ -1,6 +1,6 @@
 AUTOMAKE_OPTIONS = subdir-objects
 ACLOCAL_AMFLAGS = $(ACLOCAL_FLAGS)
-AM_CXXFLAGS = -pthread -fPIC -std=c++11 -I. -Werror -Wall -Wshadow -Wunused -Wnull-dereference -Wformat=2 -pedantic -Wnon-virtual-dtor -Woverloaded-virtual -Wpedantic -Weffc++ -I../src -include config.h
+AM_CXXFLAGS = -pthread -fPIC -std=c++14 -I. -Werror -Wall -Wshadow -Wunused -Wnull-dereference -Wformat=2 -pedantic -Wnon-virtual-dtor -Woverloaded-virtual -Wpedantic -Weffc++ -I../src -include config.h
 
 if ENABLE_TESTS
 TESTS = all_test
@@ -11,7 +11,7 @@ all_test_SOURCES = main.cpp messages.cpp connection.cpp client.cpp
 all_test_LDADD = ../src/libfss-transport.la ../src/libfss-client-ssl.la ../src/libfss.la $(JSONCPP_LIBS)
 
 all_test_SOURCES += connection-ssl.cpp certs
-all_test_LDADD += ../src/libfss-transport-ssl.la $(GNUTLS_LIBS) -lgnutlsxx
+all_test_LDADD += ../src/libfss-transport-ssl.la $(GNUTLS_LIBS) $(CATCH2_LIBS)
 
 BUILT_SOURCES+=certs
 certs:
