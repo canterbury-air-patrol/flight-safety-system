@@ -17,15 +17,15 @@ Description: The transport library for Flight-Safety-System
 
 Package: libfss-transport-ssl
 Architecture: any
-Depends: libfss, libfss-transport, libgnutlsxx28 | libgnutlsxx30, libgnutls28-dev
+Depends: libfss, libfss-transport, libgnutls28-dev
 Description: The SSL transport library for Flight-Safety-System
 
 Package: libfss-client-ssl
 Architecture: any
-Depends: libfss, libfss-transport, libfss-transport-ssl, libjsoncpp-dev, libjsoncpp1 | libjsoncpp24 | libjsoncpp25, libgnutls28-dev
+Depends: libfss, libfss-transport, libfss-transport-ssl, libjsoncpp-dev, libjsoncpp25, libgnutls28-dev
 Description: The SSL client library for Flight-Safety-System
 
 Package: flight-safety-system-server
 Architecture: any
-Depends: libfss, libfss-transport, libfss-transport-ssl, libjsoncpp1 | libjsoncpp24 | libjsoncpp25, libecpg6
+Depends: libfss, libfss-transport, libfss-transport-ssl, libjsoncpp25, libecpg6
 Description: The Flight-Safety-System server
