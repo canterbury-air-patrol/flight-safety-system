@@ -248,6 +248,23 @@ flight_safety_system::transport::fss_message_identity::unpackData(const std::sha
     size_t offset = this->headerLength();
     const char *data = bl->getData();
     size_t length = bl->getLength();
+    /* Use the recorded message length from the header if available,
+       as bl may include alignment padding */
+    if (length >= sizeof(uint16_t))
+    {
+        uint16_t msg_len;
+        memcpy(&msg_len, data, sizeof(uint16_t));
+        msg_len = ntohs(msg_len);
+        if (msg_len > 0 && msg_len <= length)
+        {
+            length = msg_len;
+        }
+    }
+    if (length <= offset)
+    {
+        this->name.clear();
+        return;
+    }
     this->name.assign(data + offset, length - offset);
 }
 
@@ -446,6 +463,10 @@ flight_safety_system::transport::fss_message_position_report::unpackData(const s
         memcpy(&tmp, data + offset, sizeof(uint16_t));
         uint16_t len = ntohs(tmp);
         offset += sizeof(uint16_t);
+        if (offset + len > length)
+        {
+            return;
+        }
         this->callsign.assign(data + offset, len);
         offset += len;
         offset += (sizeof(uint64_t) - offset % sizeof(uint64_t));
@@ -774,6 +795,10 @@ flight_safety_system::transport::fss_message_smm_settings::unpackData(const std:
         memcpy(&tmp, data + offset, sizeof(uint16_t));
         uint16_t len = ntohs(tmp);
         offset += sizeof(uint16_t);
+        if (offset + len > length)
+        {
+            return;
+        }
         this->server_url.assign(data + offset, len);
         offset += len;
         offset += (sizeof(uint64_t) - offset % sizeof(uint64_t));
@@ -784,6 +809,10 @@ flight_safety_system::transport::fss_message_smm_settings::unpackData(const std:
         memcpy(&tmp, data + offset, sizeof(uint16_t));
         uint16_t len = ntohs(tmp);
         offset += sizeof(uint16_t);
+        if (offset + len > length)
+        {
+            return;
+        }
         this->username.assign(data + offset, len);
         offset += len;
         offset += (sizeof(uint64_t) - offset % sizeof(uint64_t));
@@ -794,6 +823,10 @@ flight_safety_system::transport::fss_message_smm_settings::unpackData(const std:
         memcpy(&tmp, data + offset, sizeof(uint16_t));
         uint16_t len = ntohs(tmp);
         offset += sizeof(uint16_t);
+        if (offset + len > length)
+        {
+            return;
+        }
         this->password.assign(data + offset, len);
     }
 }
@@ -857,6 +890,10 @@ flight_safety_system::transport::fss_message_server_list::unpackData(const std::
         memcpy(&tmp, data + offset, sizeof(uint16_t));
         uint16_t len = ntohs(tmp);
         offset += sizeof(uint16_t);
+        if (offset + len > length)
+        {
+            return;
+        }
         std::string server_addr;
         server_addr.assign(data + offset, len);
         this->servers.emplace_back(server_addr, port);
@@ -947,6 +984,10 @@ auto
 flight_safety_system::transport::fss_message::decode(const std::shared_ptr<buf_len> &bl) -> std::shared_ptr<flight_safety_system::transport::fss_message>
 {
     std::shared_ptr<fss_message> msg = nullptr;
+    if (bl->getLength() < sizeof(uint16_t) + sizeof(uint16_t) + sizeof(uint64_t))
+    {
+        return msg;
+    }
     const char *data = bl->getData();
     uint16_t type_n;
     memcpy(&type_n, data + sizeof(uint16_t), sizeof(uint16_t));
