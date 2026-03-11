@@ -120,9 +120,10 @@ protected:
     auto getFd() -> int;
     void setFd(int new_fd);
     void startRecvThread(std::thread t_recv_thread);
+    explicit fss_connection(int fd);
 public:
     fss_connection();
-    explicit fss_connection(int fd);
+    static auto create(int fd) -> std::shared_ptr<fss_connection>;
     fss_connection(fss_connection&) = delete;
     fss_connection(fss_connection&&) = delete;
     auto operator=(fss_connection &) -> fss_connection& = delete;
