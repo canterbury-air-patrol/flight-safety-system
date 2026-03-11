@@ -248,11 +248,7 @@ flight_safety_system::transport::fss_message_identity::unpackData(const std::sha
     size_t offset = this->headerLength();
     const char *data = bl->getData();
     size_t length = bl->getLength();
-    char *name_n = (char *)calloc(1, (length - offset) + 1);
-    memcpy(name_n, data + offset, length - offset);
-    name_n[length - offset] = '\0';
-    this->name = std::string(name_n);
-    free (name_n);
+    this->name.assign(data + offset, length - offset);
 }
 
 flight_safety_system::transport::fss_message_identity::fss_message_identity(uint64_t t_id, const std::shared_ptr<buf_len> &bl) : fss_message(t_id, message_type_identity), name()
