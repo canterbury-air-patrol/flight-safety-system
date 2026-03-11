@@ -137,12 +137,11 @@ public:
     ~server_clients() {
         /* Prevent changes while we empty the client list */
         this->shutting_down = true;
-        this->lock.lock();
+        std::lock_guard<std::mutex> guard(this->lock);
         for (const auto &c: this->clients)
         {
             c->disconnect();
         }
-        this->lock.unlock();
     }
     server_clients(server_clients&) = delete;
     server_clients(server_clients&&) = delete;
@@ -150,27 +149,25 @@ public:
     auto operator=(server_clients&&) -> server_clients& = delete;
     void cleanupRemovableClients()
     {
-        this->lock.lock();
+        std::lock_guard<std::mutex> guard(this->lock);
         while(!this->disconnected.empty())
         {
             auto client = this->disconnected.front();
             this->disconnected.pop();
             total_clients--;
         }
-        this->lock.unlock();
     };
     void clientConnected(std::shared_ptr<flight_safety_system::server::fss_client> client)
     {
-        this->lock.lock();
+        std::lock_guard<std::mutex> guard(this->lock);
         this->total_clients++;
         this->clients.push_back(std::move(client));
-        this->lock.unlock();
     };
     void clientDisconnected(flight_safety_system::server::fss_client *client)
     {
         /* If we are shutting down, don't worry */
         if (this->shutting_down) return;
-        this->lock.lock();
+        std::lock_guard<std::mutex> guard(this->lock);
         for (const auto &c : this->clients)
         {
             if (c.get() == client)
@@ -180,11 +177,11 @@ public:
                 break;
             }
         }
-        this->lock.unlock();
     };
     void sendMsg(const std::shared_ptr<flight_safety_system::transport::fss_message> &msg, flight_safety_system::server::fss_client *except = nullptr)
     {
-        for (const auto &client : clients)
+        std::lock_guard<std::mutex> guard(this->lock);
+        for (const auto &client : this->clients)
         {
             if (client->isAircraft() && client.get() != except)
             {
@@ -194,13 +191,15 @@ public:
     }
     void sendSMMSettings()
     {
-        for(const auto &client: clients)
+        std::lock_guard<std::mutex> guard(this->lock);
+        for(const auto &client: this->clients)
         {
             client->sendSMMSettings();
         }
     };
     void sendRTTRequest(const std::shared_ptr<flight_safety_system::transport::fss_message_rtt_request> &rtt_req)
     {
+        std::lock_guard<std::mutex> guard(this->lock);
         for(const auto &client: this->clients)
         {
             client->sendRTTRequest(rtt_req);
@@ -208,6 +207,7 @@ public:
     };
     void sendCommand()
     {
+        std::lock_guard<std::mutex> guard(this->lock);
         for(const auto &client: this->clients)
         {
             client->sendCommand();
