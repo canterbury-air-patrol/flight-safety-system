@@ -10,6 +10,7 @@
 #include <list>
 #include <memory>
 #include <mutex>
+#include <atomic>
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Weffc++"
@@ -130,7 +131,7 @@ private:
     std::list<std::shared_ptr<flight_safety_system::server::fss_client>> clients{};
     std::queue<std::shared_ptr<flight_safety_system::server::fss_client>> disconnected{};
     uint32_t total_clients{0};
-    bool shutting_down{false};
+    std::atomic<bool> shutting_down{false};
 public:
     server_clients() = default;
     ~server_clients() {
@@ -444,11 +445,11 @@ flight_safety_system::server::fss_client::processMessage(std::shared_ptr<flight_
     }
 }
 
-bool running = true;
+volatile sig_atomic_t running = 1;
 
 void sigIntHandler(int signum __attribute__((unused)))
 {
-    running = false;
+    running = 0;
 }
 
 auto
@@ -521,7 +522,7 @@ main(int argc, char *argv[]) -> int
 
     int counter = 0;
     constexpr int send_config_period = 15;
-    while (running)
+    while (running == 1)
     {
         sleep (1);
         clients->cleanupRemovableClients();
