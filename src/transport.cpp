@@ -56,11 +56,10 @@ flight_safety_system::transport::fss_connection::fss_connection(int t_fd) : fd(t
 void
 flight_safety_system::transport::fss_connection::disconnect()
 {
-    if (this->fd != -1)
+    int orig_fd = this->fd.exchange(-1);
+    if (orig_fd != -1)
     {
-        int orig_fd = this->fd;
-        this->fd = -1;
-        shutdown(orig_fd, 2);
+        shutdown(orig_fd, SHUT_RDWR);
         close(orig_fd);
     }
     if (this->recv_thread.joinable())
@@ -146,16 +145,17 @@ flight_safety_system::transport::fss_connection::connectTo(const std::string &ad
         std::cout << "Trying to connect to " << address << " (" << addr_str << "):" << port << std::endl;
 #endif
 
-    if (this->fd == -1)
+    if (this->fd.load() == -1)
     {
-        this->fd = socket(remote.ss_family == AF_INET ? PF_INET : PF_INET6, SOCK_STREAM, IPPROTO_TCP);
+        this->fd.store(socket(remote.ss_family == AF_INET ? PF_INET : PF_INET6, SOCK_STREAM, IPPROTO_TCP));
     }
 
+    int current_fd = this->fd.load();
     // Limit the total number of SYN's that are sent
     int synRetries = 2;
-    setsockopt(this->fd, IPPROTO_TCP, TCP_SYNCNT, &synRetries, sizeof(synRetries));
+    setsockopt(current_fd, IPPROTO_TCP, TCP_SYNCNT, &synRetries, sizeof(synRetries));
 
-    if (connect(this->fd, reinterpret_cast<struct sockaddr *>(&remote), remote.ss_family == AF_INET ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6)) < 0)
+    if (connect(current_fd, reinterpret_cast<struct sockaddr *>(&remote), remote.ss_family == AF_INET ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6)) < 0)
     {
         perror(("Failed to connect to " + address).c_str());
         return false;
@@ -200,6 +200,11 @@ print_bl(std::shared_ptr<flight_safety_system::transport::buf_len> bl)
 auto
 flight_safety_system::transport::fss_connection::sendMsg(const std::shared_ptr<buf_len> &bl) -> bool
 {
+    int current_fd = this->fd.load();
+    if (current_fd == -1)
+    {
+        return false;
+    }
     size_t sent = 0;
     size_t to_send = bl->getLength();
     const char *data = bl->getData();
@@ -208,7 +213,7 @@ flight_safety_system::transport::fss_connection::sendMsg(const std::shared_ptr<b
 #endif
     while (sent < to_send)
     {
-        ssize_t transfered = send(this->fd, &data[sent], to_send - sent, 0);
+        ssize_t transfered = send(current_fd, &data[sent], to_send - sent, 0);
         if (transfered < 0)
         {
             return false;
@@ -236,19 +241,24 @@ flight_safety_system::transport::fss_connection::setHandler(fss_message_cb *cb)
 auto
 flight_safety_system::transport::fss_connection::recvBytes(void *t_bytes, size_t t_max_bytes) -> ssize_t
 {
-    return recv(this->fd, t_bytes, t_max_bytes, 0);
+    int current_fd = this->fd.load();
+    if (current_fd == -1)
+    {
+        return -1;
+    }
+    return recv(current_fd, t_bytes, t_max_bytes, 0);
 }
 
 auto
 flight_safety_system::transport::fss_connection::getFd() -> int
 {
-    return this->fd;
+    return this->fd.load();
 }
 
 void
 flight_safety_system::transport::fss_connection::setFd(int new_fd)
 {
-    this->fd = new_fd;
+    this->fd.store(new_fd);
 }
 
 void
