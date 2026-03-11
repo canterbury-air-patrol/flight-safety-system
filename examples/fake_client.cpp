@@ -4,11 +4,11 @@
 
 #include <unistd.h>
 
-bool running = true;
+volatile sig_atomic_t running = 1;
 
 void sigIntHandler(int signum __attribute__((unused)))
 {
-    running = false;
+    running = 0;
 }
 
 auto
@@ -42,7 +42,7 @@ main(int argc, char *argv[]) -> int
     
     constexpr int send_interval = 5;
     int counter = 0;
-    while (running)
+    while (running == 1)
     {
         sleep (1);
         client->attemptReconnect();
