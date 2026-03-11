@@ -1,4 +1,3 @@
-#include <bits/stdint-uintn.h>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -13,7 +12,6 @@
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <arpa/inet.h>
-#include <cstring>
 
 #include <cerrno>
 
