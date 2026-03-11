@@ -465,9 +465,17 @@ auto
 main(int argc, char *argv[]) -> int
 {
     /* Watch out for sigint */
-    signal (SIGINT, sigIntHandler);
+    struct sigaction sa_int = {};
+    sa_int.sa_handler = sigIntHandler;
+    sigemptyset(&sa_int.sa_mask);
+    sa_int.sa_flags = 0;
+    sigaction(SIGINT, &sa_int, nullptr);
     /* Ignore sig pipe */
-    signal (SIGPIPE, SIG_IGN);
+    struct sigaction sa_pipe = {};
+    sa_pipe.sa_handler = SIG_IGN;
+    sigemptyset(&sa_pipe.sa_mask);
+    sa_pipe.sa_flags = 0;
+    sigaction(SIGPIPE, &sa_pipe, nullptr);
     /* Read config */
     std::string conf_file = (argc > 1 ? std::string(argv[1]) : "/etc/fss/server.json");
     std::ifstream configfile(conf_file);
