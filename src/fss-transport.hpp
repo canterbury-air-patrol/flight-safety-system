@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <memory>
 #include <sys/types.h>
 #include <thread>
@@ -105,7 +106,7 @@ public:
 
 class fss_connection {
     bool run{false};
-    int fd{-1};
+    std::atomic<int> fd{-1};
     uint64_t last_msg_id{0};
     fss_message_cb *handler{nullptr};
     std::queue<std::shared_ptr<fss_message>> messages{};
