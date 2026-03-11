@@ -267,7 +267,9 @@ flight_safety_system::transport::fss_connection::recvMsg() -> std::shared_ptr<fl
     ssize_t received = this->recvBytes(&data[0], data.size());
     if (received == static_cast<ssize_t>(data.size()))
     {
-        uint16_t data_length = ntohs((reinterpret_cast<const uint16_t *>(data.data()))[0]);
+        uint16_t data_length_n;
+        memcpy(&data_length_n, data.data(), sizeof(uint16_t));
+        uint16_t data_length = ntohs(data_length_n);
         auto total_length = static_cast<ssize_t>(data_length);
         if (data_length % sizeof(uint64_t) != 0)
         {

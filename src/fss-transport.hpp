@@ -77,6 +77,7 @@ public:
     auto operator=(const buf_len &other) -> buf_len &;
     auto isValid() -> bool;
     auto addData(const char *new_data, uint16_t len) -> bool;
+    void writeAt(size_t offset, const char *src, size_t len);
     auto getData() -> const char *;
     auto getLength() -> size_t;
 };
