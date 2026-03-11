@@ -47,8 +47,16 @@ recv_msg_thread(flight_safety_system::transport::fss_connection *conn)
     conn->processMessages();
 }
 
-flight_safety_system::transport::fss_connection::fss_connection(int t_fd) : fd(t_fd), recv_thread(std::thread(recv_msg_thread, this))
+flight_safety_system::transport::fss_connection::fss_connection(int t_fd) : fd(t_fd)
 {
+}
+
+auto
+flight_safety_system::transport::fss_connection::create(int t_fd) -> std::shared_ptr<fss_connection>
+{
+    auto conn = std::shared_ptr<fss_connection>(new fss_connection(t_fd));
+    conn->startRecvThread(std::thread(recv_msg_thread, conn.get()));
+    return conn;
 }
 
 void
@@ -383,7 +391,7 @@ flight_safety_system::transport::fss_listen::processMessages()
 auto
 flight_safety_system::transport::fss_listen::newConnection(int t_newfd) -> std::shared_ptr<flight_safety_system::transport::fss_connection>
 {
-    return std::make_shared<flight_safety_system::transport::fss_connection>(t_newfd);
+    return flight_safety_system::transport::fss_connection::create(t_newfd);
 }
 
 auto
