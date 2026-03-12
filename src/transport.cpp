@@ -99,8 +99,9 @@ flight_safety_system::transport::fss_connection::processMessages()
         if (msg == nullptr)
         {
             std::cerr << "Got a null msg" << std::endl;
+            continue;
         }
-        if (msg && msg->getType() == message_type_closed)
+        if (msg->getType() == message_type_closed)
         {
             std::cerr << "Remote closed the connection" << std::endl;
             this->run.store(false);
