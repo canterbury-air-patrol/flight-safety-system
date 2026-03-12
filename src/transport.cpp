@@ -395,7 +395,6 @@ flight_safety_system::transport::fss_listen::startListening() -> bool
         this->setFd(socket(PF_INET6, SOCK_STREAM, IPPROTO_TCP));
     }
     struct sockaddr_in6 bind_addr = {};
-    memset(&bind_addr, 0, sizeof (struct sockaddr_in6));
     bind_addr.sin6_family = AF_INET6;
     bind_addr.sin6_port = htons(this->port);
     if (bind(this->getFd(), reinterpret_cast<struct sockaddr *>(&bind_addr), sizeof(bind_addr)) < 0)
