@@ -194,21 +194,12 @@ flight_safety_system::transport_ssl::fss_connection_server::setupSSL() -> bool
 
             const size_t dn_max_len = 512;
             char name_buf[dn_max_len];
-            size_t dn_len = dn_max_len;
-            gnutls_x509_crt_get_dn (cert_data, name_buf, &dn_len);
-            std::string name = std::string(name_buf);
-            /* Locate the CN=<name> section */
-            std::size_t found = name.find("CN=");
-            if (found != std::string::npos)
+            size_t name_len = dn_max_len;
+            int rc = gnutls_x509_crt_get_dn_by_oid(cert_data, GNUTLS_OID_X520_COMMON_NAME,
+                                                     0, 0, name_buf, &name_len);
+            if (rc == GNUTLS_E_SUCCESS && name_len > 0)
             {
-                name.erase(0, found+3);
-                /* Strip off any extra data (like ,O=...) */
-                found = name.find(',');
-                if (found != std::string::npos)
-                {
-                    name.erase(found);
-                }
-                this->possible_names.push_back(name);
+                this->possible_names.push_back(std::string(name_buf, name_len));
             }
             gnutls_x509_crt_deinit(cert_data);
         }
