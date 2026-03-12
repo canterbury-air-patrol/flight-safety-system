@@ -169,6 +169,8 @@ flight_safety_system::transport::fss_connection::connectTo(const std::string &ad
     if (connect(current_fd, reinterpret_cast<struct sockaddr *>(&remote), remote.ss_family == AF_INET ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6)) < 0)
     {
         perror(("Failed to connect to " + address).c_str());
+        close(current_fd);
+        this->fd.store(-1);
         return false;
     }
 
@@ -419,11 +421,15 @@ flight_safety_system::transport::fss_listen::startListening() -> bool
     if (bind(this->getFd(), reinterpret_cast<struct sockaddr *>(&bind_addr), sizeof(bind_addr)) < 0)
     {
         perror("Failed to bind socket: ");
+        close(this->getFd());
+        this->setFd(-1);
         return false;
     }
     if(listen(this->getFd(), this->max_pending_connections) < 0)
     {
         perror("Failed to listen on socket: ");
+        close(this->getFd());
+        this->setFd(-1);
         return false;
     }
     this->startRecvThread(std::thread(listen_thread, this));

@@ -11,6 +11,7 @@
 #include <sys/types.h>
 #include <thread>
 #include <netinet/tcp.h>
+#include <unistd.h>
 
 #ifdef DEBUG
 // This is defined in transport.cpp
@@ -97,6 +98,8 @@ flight_safety_system::transport_ssl::fss_connection_client::connectTo(const std:
     if (connect(this->getFd(), reinterpret_cast<struct sockaddr *>(&remote), remote.ss_family == AF_INET ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6)) < 0)
     {
         perror(("Failed to connect to " + address).c_str());
+        close(this->getFd());
+        this->setFd(-1);
         return false;
     }
 
