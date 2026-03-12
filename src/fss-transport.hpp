@@ -105,7 +105,7 @@ public:
 };
 
 class fss_connection {
-    bool run{false};
+    std::atomic<bool> run{false};
     std::atomic<int> fd{-1};
     uint64_t last_msg_id{0};
     fss_message_cb *handler{nullptr};
