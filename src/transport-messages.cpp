@@ -22,6 +22,28 @@ packString(const std::shared_ptr<flight_safety_system::transport::buf_len> &bl, 
     bl->addData((char *)&empty, sizeof(uint64_t) - (bl->getLength() % sizeof(uint64_t)));
 }
 
+static auto
+unpackString(const char *data, size_t length, size_t &offset, std::string &result) -> bool
+{
+    if (offset > length || length - offset < sizeof(uint16_t))
+    {
+        return false;
+    }
+    uint16_t tmp;
+    memcpy(&tmp, data + offset, sizeof(uint16_t));
+    uint16_t len = ntohs(tmp);
+    offset += sizeof(uint16_t);
+    if (len > length - offset)
+    {
+        return false;
+    }
+    result.assign(data + offset, len);
+    offset += len;
+    /* Align to 8-byte boundary */
+    offset += (sizeof(uint64_t) - offset % sizeof(uint64_t));
+    return true;
+}
+
 flight_safety_system::transport::buf_len::buf_len(const buf_len &bl) = default;
 flight_safety_system::transport::buf_len::buf_len(buf_len &&bl) noexcept = default;
 flight_safety_system::transport::buf_len::buf_len() = default;
@@ -457,33 +479,23 @@ flight_safety_system::transport::fss_message_position_report::unpackData(const s
         this->squawk = ntohs(tmp);
         offset += sizeof(uint16_t);
     }
-    if (length - offset >= sizeof(uint16_t))
+    if (!unpackString(data, length, offset, this->callsign))
     {
-        uint16_t tmp;
-        memcpy(&tmp, data + offset, sizeof(uint16_t));
-        uint16_t len = ntohs(tmp);
-        offset += sizeof(uint16_t);
-        if (offset + len > length)
-        {
-            return;
-        }
-        this->callsign.assign(data + offset, len);
-        offset += len;
-        offset += (sizeof(uint64_t) - offset % sizeof(uint64_t));
+        return;
     }
-    if (length - offset >= sizeof(uint16_t))
+    if (offset <= length && length - offset >= sizeof(uint16_t))
     {
         uint16_t tmp;
         memcpy(&tmp, data + offset, sizeof(uint16_t));
         this->flags = ntohs(tmp);
         offset += sizeof(uint16_t);
     }
-    if (length - offset >= sizeof(uint8_t))
+    if (offset <= length && length - offset >= sizeof(uint8_t))
     {
         this->altitude_type = static_cast<uint8_t>(data[offset]);
         offset += sizeof(uint8_t);
     }
-    if (length - offset >= sizeof(uint8_t))
+    if (offset <= length && length - offset >= sizeof(uint8_t))
     {
         this->emitter_type = static_cast<uint8_t>(data[offset]);
         offset += sizeof(uint8_t);
@@ -789,46 +801,15 @@ flight_safety_system::transport::fss_message_smm_settings::unpackData(const std:
     size_t offset = this->headerLength();
     const char *data = bl->getData();
     size_t length = bl->getLength();
-    if (length - offset >= sizeof(uint16_t))
+    if (!unpackString(data, length, offset, this->server_url))
     {
-        uint16_t tmp;
-        memcpy(&tmp, data + offset, sizeof(uint16_t));
-        uint16_t len = ntohs(tmp);
-        offset += sizeof(uint16_t);
-        if (offset + len > length)
-        {
-            return;
-        }
-        this->server_url.assign(data + offset, len);
-        offset += len;
-        offset += (sizeof(uint64_t) - offset % sizeof(uint64_t));
+        return;
     }
-    if (length - offset >= sizeof(uint16_t))
+    if (!unpackString(data, length, offset, this->username))
     {
-        uint16_t tmp;
-        memcpy(&tmp, data + offset, sizeof(uint16_t));
-        uint16_t len = ntohs(tmp);
-        offset += sizeof(uint16_t);
-        if (offset + len > length)
-        {
-            return;
-        }
-        this->username.assign(data + offset, len);
-        offset += len;
-        offset += (sizeof(uint64_t) - offset % sizeof(uint64_t));
+        return;
     }
-    if (length - offset >= sizeof(uint16_t))
-    {
-        uint16_t tmp;
-        memcpy(&tmp, data + offset, sizeof(uint16_t));
-        uint16_t len = ntohs(tmp);
-        offset += sizeof(uint16_t);
-        if (offset + len > length)
-        {
-            return;
-        }
-        this->password.assign(data + offset, len);
-    }
+    unpackString(data, length, offset, this->password);
 }
 
 flight_safety_system::transport::fss_message_smm_settings::fss_message_smm_settings(std::string t_server_url, std::string t_username, std::string t_password) : fss_message(message_type_smm_settings), server_url(std::move(t_server_url)), username(std::move(t_username)), password(std::move(t_password))
@@ -881,24 +862,18 @@ flight_safety_system::transport::fss_message_server_list::unpackData(const std::
     size_t offset = this->headerLength();
     const char *data = bl->getData();
     size_t length = bl->getLength();
-    while (length - offset >= (sizeof(uint16_t) + sizeof(uint16_t)))
+    while (offset <= length && length - offset >= (sizeof(uint16_t) + sizeof(uint16_t)))
     {
         uint16_t tmp;
         memcpy(&tmp, data + offset, sizeof(uint16_t));
         uint16_t port = ntohs(tmp);
         offset += sizeof(uint16_t);
-        memcpy(&tmp, data + offset, sizeof(uint16_t));
-        uint16_t len = ntohs(tmp);
-        offset += sizeof(uint16_t);
-        if (offset + len > length)
+        std::string server_addr;
+        if (!unpackString(data, length, offset, server_addr))
         {
             return;
         }
-        std::string server_addr;
-        server_addr.assign(data + offset, len);
         this->servers.emplace_back(server_addr, port);
-        offset += len;
-        offset += (sizeof(uint64_t) - offset % sizeof(uint64_t));
     }
 }
 
