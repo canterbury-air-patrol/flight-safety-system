@@ -86,8 +86,8 @@ auto flight_safety_system::transport::fss_connection::getMessageId() -> uint64_t
 void
 flight_safety_system::transport::fss_connection::processMessages()
 {
-    this->run = true;
-    while (this->run)
+    this->run.store(true);
+    while (this->run.load())
     {
         auto msg = this->recvMsg();
         if (msg == nullptr)
@@ -97,7 +97,7 @@ flight_safety_system::transport::fss_connection::processMessages()
         if (msg && msg->getType() == message_type_closed)
         {
             std::cerr << "Remote closed the connection" << std::endl;
-            this->run = false;
+            this->run.store(false);
         }
         if (this->handler != nullptr)
         {
