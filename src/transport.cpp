@@ -112,6 +112,7 @@ flight_safety_system::transport::fss_connection::processMessages()
         }
         else
         {
+            std::lock_guard<std::mutex> lock_holder(this->msg_lock);
             this->messages.push(msg);
         }
     }
@@ -122,6 +123,7 @@ flight_safety_system::transport::fss_connection::getMsg() -> std::shared_ptr<fli
 {
     if (this->handler == nullptr)
     {
+        std::lock_guard<std::mutex> lock_holder(this->msg_lock);
         if (!this->messages.empty())
         {
             auto msg = this->messages.front();
@@ -233,6 +235,7 @@ flight_safety_system::transport::fss_connection::sendMsg(const std::shared_ptr<b
 void
 flight_safety_system::transport::fss_connection::setHandler(fss_message_cb *cb)
 {
+    std::lock_guard<std::mutex> lock_holder(this->msg_lock);
     this->handler = cb;
     if (this->handler != nullptr)
     {

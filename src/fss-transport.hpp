@@ -112,6 +112,7 @@ class fss_connection {
     std::queue<std::shared_ptr<fss_message>> messages{};
     std::thread recv_thread{};
     std::mutex send_lock{};
+    std::mutex msg_lock{};
 protected:
     auto recvMsg() -> std::shared_ptr<fss_message>;
     auto getMessageId() -> uint64_t;
