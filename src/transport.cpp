@@ -106,14 +106,16 @@ flight_safety_system::transport::fss_connection::processMessages()
             std::cerr << "Remote closed the connection" << std::endl;
             this->run.store(false);
         }
-        if (this->handler != nullptr)
-        {
-            this->handler->processMessage(msg);
-        }
-        else
         {
             std::lock_guard<std::mutex> lock_holder(this->msg_lock);
-            this->messages.push(msg);
+            if (this->handler != nullptr)
+            {
+                this->handler->processMessage(msg);
+            }
+            else
+            {
+                this->messages.push(msg);
+            }
         }
     }
 }
@@ -121,9 +123,9 @@ flight_safety_system::transport::fss_connection::processMessages()
 auto
 flight_safety_system::transport::fss_connection::getMsg() -> std::shared_ptr<flight_safety_system::transport::fss_message>
 {
+    std::lock_guard<std::mutex> lock_holder(this->msg_lock);
     if (this->handler == nullptr)
     {
-        std::lock_guard<std::mutex> lock_holder(this->msg_lock);
         if (!this->messages.empty())
         {
             auto msg = this->messages.front();
