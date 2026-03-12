@@ -282,7 +282,12 @@ flight_safety_system::transport::fss_connection::recvMsg() -> std::shared_ptr<fl
     std::string data;
     data.resize(sizeof (uint16_t));
     ssize_t received = this->recvBytes(&data[0], data.size());
-    if (received == static_cast<ssize_t>(data.size()))
+    if(received <= 0 || errno == EBADF)
+    {
+        /* Connection was closed */
+        msg = std::make_shared<flight_safety_system::transport::fss_message_closed>();
+    }
+    else if (received == static_cast<ssize_t>(data.size()))
     {
         uint16_t data_length_n;
         memcpy(&data_length_n, data.data(), sizeof(uint16_t));
@@ -302,6 +307,11 @@ flight_safety_system::transport::fss_connection::recvMsg() -> std::shared_ptr<fl
                 perror("Error receiving data");
                 break;
             }
+            else if (this_time == 0)
+            {
+                /* Connection was closed */
+                break;
+            }
             received += this_time;
         }
         if (received == total_length)
@@ -317,11 +327,6 @@ flight_safety_system::transport::fss_connection::recvMsg() -> std::shared_ptr<fl
         {
             perror ("Failed to get all the data: ");
         }
-    }
-    else if(received == 0 || (received < 0 || errno == EBADF))
-    {
-        /* Connection was closed */
-        msg = std::make_shared<flight_safety_system::transport::fss_message_closed>();
     }
     else
     {
