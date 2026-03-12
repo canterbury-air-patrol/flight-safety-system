@@ -335,8 +335,7 @@ flight_safety_system::server::fss_client::processMessage(std::shared_ptr<flight_
                 bool name_valid = false;
                 if (possible_names.empty())
                 {
-                    /* No client names, so accept anything */
-                    this->identified = true;
+                    std::cerr << "Rejecting client: no CN found in certificate" << std::endl;
                 }
                 else
                 {
