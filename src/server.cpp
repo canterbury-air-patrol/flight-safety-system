@@ -375,6 +375,7 @@ flight_safety_system::server::fss_client::processMessage(std::shared_ptr<flight_
     }
     else
     {
+        std::string client_name = this->getName();
         switch (msg->getType())
         {
             case flight_safety_system::transport::message_type_unknown:
@@ -414,9 +415,9 @@ flight_safety_system::server::fss_client::processMessage(std::shared_ptr<flight_
                 if (rtt_req != nullptr)
                 {
 #ifdef DEBUG
-                    std::cout << "RTT for " << this->getName() << " is " << (current_ts - rtt_req->getTimeStamp()) << std::endl;
+                    std::cout << "RTT for " << client_name << " is " << (current_ts - rtt_req->getTimeStamp()) << std::endl;
 #endif
-                    this->dbc->asset_add_rtt(this->name, current_ts - rtt_req->getTimeStamp());
+                    this->dbc->asset_add_rtt(client_name, current_ts - rtt_req->getTimeStamp());
                 }
             }
                 break;
@@ -425,7 +426,7 @@ flight_safety_system::server::fss_client::processMessage(std::shared_ptr<flight_
                 if (this->aircraft)
                 {
                     /* Capture and store in the database */
-                    this->dbc->asset_add_position(this->name, msg->getLatitude(), msg->getLongitude(), msg->getAltitude());
+                    this->dbc->asset_add_position(client_name, msg->getLatitude(), msg->getLongitude(), msg->getAltitude());
                 }
                 /* Reflect this message to all aircraft clients */
                 this->client_handler->broadcastMsg(msg, this);
@@ -437,7 +438,7 @@ flight_safety_system::server::fss_client::processMessage(std::shared_ptr<flight_
                 auto status_msg = std::dynamic_pointer_cast<flight_safety_system::transport::fss_message_system_status>(msg);
                 if (status_msg != nullptr)
                 {
-                    this->dbc->asset_add_status(this->name, status_msg->getBatRemaining(), status_msg->getBatMAHUsed(), status_msg->getBatVoltage());
+                    this->dbc->asset_add_status(client_name, status_msg->getBatRemaining(), status_msg->getBatMAHUsed(), status_msg->getBatVoltage());
                 }
             }
                 break;
@@ -447,7 +448,7 @@ flight_safety_system::server::fss_client::processMessage(std::shared_ptr<flight_
                 auto status_msg = std::dynamic_pointer_cast<flight_safety_system::transport::fss_message_search_status>(msg);
                 if (status_msg != nullptr)
                 {
-                    this->dbc->asset_add_search_status(this->name, status_msg->getSearchId(), status_msg->getSearchCompleted(), status_msg->getSearchTotal());
+                    this->dbc->asset_add_search_status(client_name, status_msg->getSearchId(), status_msg->getSearchCompleted(), status_msg->getSearchTotal());
                 }
             }
                 break;
