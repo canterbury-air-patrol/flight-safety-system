@@ -288,13 +288,23 @@ flight_safety_system::transport::fss_connection::recvMsg() -> std::shared_ptr<fl
     std::shared_ptr<flight_safety_system::transport::fss_message> msg = nullptr;
     std::string data;
     data.resize(sizeof (uint16_t));
-    ssize_t received = this->recvBytes(&data[0], data.size());
-    if((received == -2) || (received < 0 && errno == EBADF) || received == 0)
+    ssize_t received = 0;
+    while (received < static_cast<ssize_t>(sizeof(uint16_t)))
     {
-        /* Connection was closed */
-        msg = std::make_shared<flight_safety_system::transport::fss_message_closed>();
+        ssize_t this_time = this->recvBytes(&data[received], sizeof(uint16_t) - received);
+        if ((this_time == -2) || (this_time < 0 && errno == EBADF) || this_time == 0)
+        {
+            /* Connection was closed */
+            return std::make_shared<flight_safety_system::transport::fss_message_closed>();
+        }
+        if (this_time < 0)
+        {
+            perror("Failed to get header");
+            return std::make_shared<flight_safety_system::transport::fss_message_closed>();
+        }
+        received += this_time;
     }
-    else if (received == static_cast<ssize_t>(data.size()))
+    if (received == static_cast<ssize_t>(data.size()))
     {
         uint16_t data_length_n;
         memcpy(&data_length_n, data.data(), sizeof(uint16_t));
@@ -334,11 +344,6 @@ flight_safety_system::transport::fss_connection::recvMsg() -> std::shared_ptr<fl
         {
             perror ("Failed to get all the data: ");
         }
-    }
-    else
-    {
-        std::cerr << "Failed to get the message length, got " << received << " bytes instead of " << sizeof(uint16_t) << std::endl;
-        perror("Failed to get header: ");
     }
     return msg;
 }
