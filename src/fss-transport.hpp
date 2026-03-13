@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <functional>
 #include <memory>
 #include <sys/types.h>
 #include <thread>
@@ -15,7 +16,7 @@ class fss_connection;
 class fss_listen;
 class fss_message;
 
-using  fss_connect_cb = bool (*)(std::shared_ptr<fss_connection> conn);
+using fss_connect_cb = std::function<bool(std::shared_ptr<fss_connection>)>;
 
 using fss_message_type = enum fss_message_type_e {
     message_type_unknown,

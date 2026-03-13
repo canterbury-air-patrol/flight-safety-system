@@ -21,8 +21,6 @@
 
 constexpr int sec_to_msec = 1000;
 
-std::shared_ptr<flight_safety_system::server::db_connection> dbc = nullptr;
-
 flight_safety_system::server::smm_settings::smm_settings(std::string t_address, std::string t_username, std::string t_password) : address(std::move(t_address)), username(std::move(t_username)), password(std::move(t_password))
 {
 }
@@ -125,7 +123,7 @@ flight_safety_system::server::fss_client_rtt::getRequestId() -> uint64_t
     return this->reqid;
 }
 
-class server_clients{
+class server_clients : public flight_safety_system::server::fss_client_handler {
 private:
     std::mutex lock{};
     std::list<std::shared_ptr<flight_safety_system::server::fss_client>> clients{};
@@ -163,7 +161,7 @@ public:
         this->total_clients++;
         this->clients.push_back(std::move(client));
     };
-    void clientDisconnected(flight_safety_system::server::fss_client *client)
+    void clientDisconnected(flight_safety_system::server::fss_client *client) override
     {
         /* If we are shutting down, don't worry */
         std::lock_guard<std::mutex> guard(this->lock);
@@ -178,7 +176,7 @@ public:
             }
         }
     };
-    void sendMsg(const std::shared_ptr<flight_safety_system::transport::fss_message> &msg, flight_safety_system::server::fss_client *except = nullptr)
+    void broadcastMsg(const std::shared_ptr<flight_safety_system::transport::fss_message> &msg, flight_safety_system::server::fss_client *except = nullptr) override
     {
         std::lock_guard<std::mutex> guard(this->lock);
         for (const auto &client : this->clients)
@@ -215,9 +213,7 @@ public:
     };
 };
 
-std::shared_ptr<server_clients> clients = nullptr;
-
-flight_safety_system::server::fss_client::fss_client(std::shared_ptr<flight_safety_system::transport::fss_connection> t_conn) : fss_message_cb(std::move(t_conn))
+flight_safety_system::server::fss_client::fss_client(std::shared_ptr<flight_safety_system::transport::fss_connection> t_conn, std::shared_ptr<flight_safety_system::server::db_connection> t_dbc, flight_safety_system::server::fss_client_handler *t_handler) : fss_message_cb(std::move(t_conn)), dbc(std::move(t_dbc)), client_handler(t_handler)
 {
     this->getConnection()->setHandler(this);
 }
@@ -229,7 +225,7 @@ flight_safety_system::server::fss_client::sendCommand()
 {
     std::lock_guard<std::mutex> guard(this->client_lock);
     uint64_t ts = fss_current_timestamp();
-    auto ac = dbc->asset_get_command(this->name);
+    auto ac = this->dbc->asset_get_command(this->name);
     constexpr int timeout_time = 10 * sec_to_msec;
     if (ac != nullptr && (ac->getDBId() != this->last_command_dbid || ts > (this->last_command_send_ts + timeout_time)))
     {
@@ -287,7 +283,7 @@ flight_safety_system::server::fss_client::sendSMMSettings()
         std::lock_guard<std::mutex> guard(this->client_lock);
         client_name = this->name;
     }
-    auto smm = dbc->asset_get_smm_settings(client_name);
+    auto smm = this->dbc->asset_get_smm_settings(client_name);
     if (smm != nullptr)
     {
         auto settings_msg = std::make_shared<flight_safety_system::transport::fss_message_smm_settings>(smm->getAddress(), smm->getUsername(), smm->getPassword());
@@ -295,7 +291,7 @@ flight_safety_system::server::fss_client::sendSMMSettings()
     }
 }
 
-auto getServersListMsg() -> std::shared_ptr<flight_safety_system::transport::fss_message_server_list>
+auto getServersListMsg(const std::shared_ptr<flight_safety_system::server::db_connection> &dbc) -> std::shared_ptr<flight_safety_system::transport::fss_message_server_list>
 {
     auto known_servers = dbc->get_active_fss_servers();
     auto server_list = std::make_shared<flight_safety_system::transport::fss_message_server_list>();
@@ -319,7 +315,7 @@ flight_safety_system::server::fss_client::processMessage(std::shared_ptr<flight_
     if (msg->getType() == flight_safety_system::transport::message_type_closed)
     {
         /* Connection has been closed, cleanup */
-        clients->clientDisconnected(this);
+        this->client_handler->clientDisconnected(this);
         return;
     }
     if (!this->identified)
@@ -350,7 +346,7 @@ flight_safety_system::server::fss_client::processMessage(std::shared_ptr<flight_
                 }
                 if (!name_valid)
                 {
-                    clients->clientDisconnected(this);
+                    this->client_handler->clientDisconnected(this);
                     return;
                 }
                 {
@@ -364,7 +360,7 @@ flight_safety_system::server::fss_client::processMessage(std::shared_ptr<flight_
                 /* send SMM config and servers list */
                 this->sendSMMSettings();
                 /* Send all the known fss servers */
-                this->getConnection()->sendMsg(getServersListMsg());
+                this->getConnection()->sendMsg(getServersListMsg(this->dbc));
             }
         }
         else if(msg->getType() == flight_safety_system::transport::message_type_identity_non_aircraft)
@@ -420,7 +416,7 @@ flight_safety_system::server::fss_client::processMessage(std::shared_ptr<flight_
 #ifdef DEBUG
                     std::cout << "RTT for " << this->getName() << " is " << (current_ts - rtt_req->getTimeStamp()) << std::endl;
 #endif
-                    dbc->asset_add_rtt(this->name, current_ts - rtt_req->getTimeStamp());
+                    this->dbc->asset_add_rtt(this->name, current_ts - rtt_req->getTimeStamp());
                 }
             }
                 break;
@@ -429,10 +425,10 @@ flight_safety_system::server::fss_client::processMessage(std::shared_ptr<flight_
                 if (this->aircraft)
                 {
                     /* Capture and store in the database */
-                    dbc->asset_add_position(this->name, msg->getLatitude(), msg->getLongitude(), msg->getAltitude());
+                    this->dbc->asset_add_position(this->name, msg->getLatitude(), msg->getLongitude(), msg->getAltitude());
                 }
                 /* Reflect this message to all aircraft clients */
-                clients->sendMsg(msg, this);
+                this->client_handler->broadcastMsg(msg, this);
             }
                 break;
             case flight_safety_system::transport::message_type_system_status:
@@ -441,7 +437,7 @@ flight_safety_system::server::fss_client::processMessage(std::shared_ptr<flight_
                 auto status_msg = std::dynamic_pointer_cast<flight_safety_system::transport::fss_message_system_status>(msg);
                 if (status_msg != nullptr)
                 {
-                    dbc->asset_add_status(this->name, status_msg->getBatRemaining(), status_msg->getBatMAHUsed(), status_msg->getBatVoltage());
+                    this->dbc->asset_add_status(this->name, status_msg->getBatRemaining(), status_msg->getBatMAHUsed(), status_msg->getBatVoltage());
                 }
             }
                 break;
@@ -451,7 +447,7 @@ flight_safety_system::server::fss_client::processMessage(std::shared_ptr<flight_
                 auto status_msg = std::dynamic_pointer_cast<flight_safety_system::transport::fss_message_search_status>(msg);
                 if (status_msg != nullptr)
                 {
-                    dbc->asset_add_search_status(this->name, status_msg->getSearchId(), status_msg->getSearchCompleted(), status_msg->getSearchTotal());
+                    this->dbc->asset_add_search_status(this->name, status_msg->getSearchId(), status_msg->getSearchCompleted(), status_msg->getSearchTotal());
                 }
             }
                 break;
@@ -469,16 +465,6 @@ volatile sig_atomic_t running = 1;
 void sigIntHandler(int signum __attribute__((unused)))
 {
     running = 0;
-}
-
-auto
-new_client_connect(std::shared_ptr<flight_safety_system::transport::fss_connection> conn) -> bool
-{
-#ifdef DEBUG
-    std::cout << "New client connected" << std::endl;
-#endif
-    clients->clientConnected(std::make_shared<flight_safety_system::server::fss_client>(std::move(conn)));
-    return true;
 }
 
 auto
@@ -508,10 +494,10 @@ main(int argc, char *argv[]) -> int
     configfile >> config;
 
     /* Connect to database */
-    dbc = std::make_shared<flight_safety_system::server::db_connection>(config["postgres"]["host"].asString(), config["postgres"]["user"].asString(), config["postgres"]["pass"].asString(), config["postgres"]["db"].asString());
-    
+    auto dbc = std::make_shared<flight_safety_system::server::db_connection>(config["postgres"]["host"].asString(), config["postgres"]["user"].asString(), config["postgres"]["pass"].asString(), config["postgres"]["db"].asString());
+
     /* Create the clients tracking */
-    clients = std::make_shared<server_clients>();
+    auto clients = std::make_shared<server_clients>();
 
     /* Open listen socket */
     std::shared_ptr<flight_safety_system::transport::fss_listen> listen;
@@ -524,7 +510,15 @@ main(int argc, char *argv[]) -> int
         std::cerr << "Missing ssl parameter, all of these are required: 'ca_public_key', 'server_private_key', 'server_public_key'" << std::endl;
         exit(-1);
     }
-    listen = std::make_shared<flight_safety_system::transport_ssl::fss_listen>(config["port"].asInt(), new_client_connect, config["ssl"]["ca_public_key"].asString(), config["ssl"]["server_private_key"].asString(), config["ssl"]["server_public_key"].asString());
+    listen = std::make_shared<flight_safety_system::transport_ssl::fss_listen>(config["port"].asInt(),
+        [dbc, &clients](std::shared_ptr<flight_safety_system::transport::fss_connection> conn) -> bool {
+#ifdef DEBUG
+            std::cout << "New client connected" << std::endl;
+#endif
+            clients->clientConnected(std::make_shared<flight_safety_system::server::fss_client>(std::move(conn), dbc, clients.get()));
+            return true;
+        },
+        config["ssl"]["ca_public_key"].asString(), config["ssl"]["server_private_key"].asString(), config["ssl"]["server_public_key"].asString());
 
     /* Process client messages:
        - Battery status
@@ -555,7 +549,7 @@ main(int argc, char *argv[]) -> int
         if ((counter % send_config_period) == 0)
         {
             /* Send all the known fss servers */
-            clients->sendMsg(getServersListMsg());
+            clients->broadcastMsg(getServersListMsg(dbc));
             clients->sendSMMSettings();
         }
         counter++;

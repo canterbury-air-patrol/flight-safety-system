@@ -78,6 +78,15 @@ public:
     auto getRequestId() -> uint64_t;
 };
 
+class fss_client;
+
+class fss_client_handler {
+public:
+    virtual ~fss_client_handler() = default;
+    virtual void clientDisconnected(fss_client *client) = 0;
+    virtual void broadcastMsg(const std::shared_ptr<transport::fss_message> &msg, fss_client *except = nullptr) = 0;
+};
+
 class fss_client: public transport::fss_message_cb {
 private:
     std::atomic<bool> identified{false};
@@ -88,8 +97,10 @@ private:
     auto getName() -> std::string;
     uint64_t last_command_send_ts{0};
     uint64_t last_command_dbid{0};
+    std::shared_ptr<db_connection> dbc;
+    fss_client_handler *client_handler;
 public:
-    explicit fss_client(std::shared_ptr<transport::fss_connection> conn);
+    fss_client(std::shared_ptr<transport::fss_connection> conn, std::shared_ptr<db_connection> t_dbc, fss_client_handler *t_handler);
     fss_client(fss_client&) = delete;
     fss_client(fss_client&&) = delete;
     auto operator=(fss_client&) -> fss_client& = delete;
