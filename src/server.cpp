@@ -539,7 +539,7 @@ main(int argc, char *argv[]) -> int
        - Per client, send RTT message
      */
 
-    int counter = 0;
+    uint64_t counter = 0;
     constexpr int send_config_period = 15;
     while (running == 1)
     {
