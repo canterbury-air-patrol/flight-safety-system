@@ -1,7 +1,10 @@
+#include <array>
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <cstring>
+#include <vector>
 #include "fss-transport.hpp"
 
 #include <iostream>
@@ -286,12 +289,11 @@ auto
 flight_safety_system::transport::fss_connection::recvMsg() -> std::shared_ptr<flight_safety_system::transport::fss_message>
 {
     std::shared_ptr<flight_safety_system::transport::fss_message> msg = nullptr;
-    std::string data;
-    data.resize(sizeof (uint16_t));
+    std::array<std::uint8_t, sizeof(uint16_t)> header{};
     ssize_t received = 0;
     while (received < static_cast<ssize_t>(sizeof(uint16_t)))
     {
-        ssize_t this_time = this->recvBytes(&data[received], sizeof(uint16_t) - received);
+        ssize_t this_time = this->recvBytes(&header[received], sizeof(uint16_t) - received);
         if ((this_time == -2) || (this_time < 0 && errno == EBADF) || this_time == 0)
         {
             /* Connection was closed */
@@ -304,46 +306,49 @@ flight_safety_system::transport::fss_connection::recvMsg() -> std::shared_ptr<fl
         }
         received += this_time;
     }
-    if (received == static_cast<ssize_t>(data.size()))
+    uint16_t data_length_n;
+    memcpy(&data_length_n, header.data(), sizeof(uint16_t));
+    uint16_t data_length = ntohs(data_length_n);
+    auto total_length = static_cast<ssize_t>(data_length);
+    if (data_length % sizeof(uint64_t) != 0)
     {
-        uint16_t data_length_n;
-        memcpy(&data_length_n, data.data(), sizeof(uint16_t));
-        uint16_t data_length = ntohs(data_length_n);
-        auto total_length = static_cast<ssize_t>(data_length);
-        if (data_length % sizeof(uint64_t) != 0)
+        total_length = data_length + sizeof(uint64_t) - (data_length % sizeof(uint64_t));
+    }
+    if (total_length < static_cast<ssize_t>(sizeof(uint16_t)))
+    {
+        return msg;
+    }
+    /* Get the full message (prefixed with the header for decode) */
+    std::vector<std::uint8_t> data(total_length);
+    memcpy(data.data(), header.data(), sizeof(uint16_t));
+    received = sizeof(uint16_t);
+    while (received != total_length)
+    {
+        ssize_t this_time = this->recvBytes(&data[received], total_length - received);
+        if (this_time < 0)
         {
-            total_length = data_length + sizeof(uint64_t) - (data_length % sizeof(uint64_t));
+            perror("Error receiving data");
+            break;
         }
-        /* Get the full message */
-        data.resize(total_length);
-        while (received != total_length)
+        else if (this_time == 0)
         {
-            ssize_t this_time = this->recvBytes(&data[received], total_length - received);
-            if (this_time < 0)
-            {
-                perror("Error receiving data");
-                break;
-            }
-            else if (this_time == 0)
-            {
-                /* Connection was closed */
-                break;
-            }
-            received += this_time;
+            /* Connection was closed */
+            break;
         }
-        if (received == total_length)
-        {
-            auto bl = std::make_shared<buf_len>(data.data(), data_length);
+        received += this_time;
+    }
+    if (received == total_length)
+    {
+        auto bl = std::make_shared<buf_len>(reinterpret_cast<const char *>(data.data()), data_length);
 #ifdef DEBUG
-            printf("Message reads: \n");
-            print_bl(bl);
+        printf("Message reads: \n");
+        print_bl(bl);
 #endif
-            msg = flight_safety_system::transport::fss_message::decode(bl);
-        }
-        else
-        {
-            perror ("Failed to get all the data: ");
-        }
+        msg = flight_safety_system::transport::fss_message::decode(bl);
+    }
+    else
+    {
+        perror ("Failed to get all the data: ");
     }
     return msg;
 }
