@@ -235,7 +235,7 @@ flight_safety_system::transport_ssl::fss_connection::recvBytes(void *t_bytes, si
     if (!this->usable)
     {
         std::cerr << "Attempt to recv on unusable transport_ssl::fss_connection" << std::endl;
-        return -1;
+        return -2;
     }
     ssize_t bytes_recved = -1;
     try
@@ -245,6 +245,10 @@ flight_safety_system::transport_ssl::fss_connection::recvBytes(void *t_bytes, si
     catch (gnutls::exception &ex)
     {
         std::cerr << "recv: caught gnutls exception: " << ex.get_code() << ", " << ex.what() << std::endl;
+        if (ex.get_code() != GNUTLS_E_AGAIN)
+        {
+            this->usable = false;
+        }
     }
     return bytes_recved;
 }
