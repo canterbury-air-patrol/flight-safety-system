@@ -256,9 +256,9 @@ auto
 flight_safety_system::transport::fss_connection::recvBytes(void *t_bytes, size_t t_max_bytes) -> ssize_t
 {
     int current_fd = this->fd.load();
-    if (current_fd == -1)
+    if (current_fd < 0)
     {
-        return -1;
+        return -2;
     }
     return recv(current_fd, t_bytes, t_max_bytes, 0);
 }
@@ -289,7 +289,7 @@ flight_safety_system::transport::fss_connection::recvMsg() -> std::shared_ptr<fl
     std::string data;
     data.resize(sizeof (uint16_t));
     ssize_t received = this->recvBytes(&data[0], data.size());
-    if(received <= 0 || errno == EBADF)
+    if((received == -2) || (received < 0 && errno == EBADF) || received == 0)
     {
         /* Connection was closed */
         msg = std::make_shared<flight_safety_system::transport::fss_message_closed>();
@@ -337,6 +337,7 @@ flight_safety_system::transport::fss_connection::recvMsg() -> std::shared_ptr<fl
     }
     else
     {
+        std::cerr << "Failed to get the message length, got " << received << " bytes instead of " << sizeof(uint16_t) << std::endl;
         perror("Failed to get header: ");
     }
     return msg;
