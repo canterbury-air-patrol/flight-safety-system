@@ -218,13 +218,26 @@ flight_safety_system::transport_ssl::fss_connection::sendMsg(const std::shared_p
     }
     size_t to_send = bl->getLength();
     const char *data = bl->getData();
-    try
+    size_t sent = 0;
+    while (sent < to_send)
     {
-        this->session->send(data, to_send);
-    }
-    catch (gnutls::exception &ex)
-    {
-        std::cerr << "send: caught gnutls exception: " << ex.get_code() << ", " << ex.what() << std::endl;        
+        ssize_t transferred = 0;
+        try
+        {
+            transferred = this->session->send(&data[sent], to_send - sent);
+        }
+        catch (gnutls::exception &ex)
+        {
+            std::cerr << "send: caught gnutls exception: " << ex.get_code() << ", " << ex.what() << std::endl;
+            this->usable = false;
+            return false;
+        }
+        if (transferred <= 0)
+        {
+            this->usable = false;
+            return false;
+        }
+        sent += transferred;
     }
     return true;
 }
