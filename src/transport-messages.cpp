@@ -950,7 +950,7 @@ flight_safety_system::transport::fss_message_identity_required::fss_message_iden
 {
 }
 
-flight_safety_system::transport::fss_message_identity_required::fss_message_identity_required(uint64_t t_id, const std::shared_ptr<buf_len> &bl __attribute__((unused))) : fss_message(t_id, message_type_identity)
+flight_safety_system::transport::fss_message_identity_required::fss_message_identity_required(uint64_t t_id, const std::shared_ptr<buf_len> &bl __attribute__((unused))) : fss_message(t_id, message_type_identity_required)
 {
 }
 
