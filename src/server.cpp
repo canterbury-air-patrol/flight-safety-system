@@ -166,8 +166,8 @@ public:
     void clientDisconnected(flight_safety_system::server::fss_client *client)
     {
         /* If we are shutting down, don't worry */
-        if (this->shutting_down) return;
         std::lock_guard<std::mutex> guard(this->lock);
+        if (this->shutting_down) return;
         for (const auto &c : this->clients)
         {
             if (c.get() == client)
