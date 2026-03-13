@@ -267,12 +267,15 @@ flight_safety_system::server::fss_client::getName() -> std::string
 void
 flight_safety_system::server::fss_client::sendRTTRequest(const std::shared_ptr<flight_safety_system::transport::fss_message_rtt_request> &rtt_req)
 {
+    std::lock_guard<std::mutex> guard(this->client_lock);
+    /* Back off if there are already unanswered RTT requests */
+    if (!this->outstanding_rtt_requests.empty())
+    {
+        return;
+    }
     uint64_t ts = fss_current_timestamp();
     this->getConnection()->sendMsg(rtt_req);
-    {
-        std::lock_guard<std::mutex> guard(this->client_lock);
-        this->outstanding_rtt_requests.push_back(std::make_shared<fss_client_rtt>(ts, rtt_req->getId()));
-    }
+    this->outstanding_rtt_requests.push_back(std::make_shared<fss_client_rtt>(ts, rtt_req->getId()));
 }
 
 void
