@@ -1,5 +1,6 @@
 #include "fss-transport.hpp"
 
+#include <atomic>
 #include <string>
 #include <list>
 #include <mutex>
@@ -79,9 +80,10 @@ public:
 
 class fss_client: public transport::fss_message_cb {
 private:
-    bool identified{false};
-    bool aircraft{false};
+    std::atomic<bool> identified{false};
+    std::atomic<bool> aircraft{false};
     std::string name{};
+    std::mutex client_lock{};
     std::list<std::shared_ptr<fss_client_rtt>> outstanding_rtt_requests{};
     auto getName() -> std::string;
     uint64_t last_command_send_ts{0};

@@ -227,6 +227,7 @@ flight_safety_system::server::fss_client::~fss_client() = default;
 void
 flight_safety_system::server::fss_client::sendCommand()
 {
+    std::lock_guard<std::mutex> guard(this->client_lock);
     uint64_t ts = fss_current_timestamp();
     auto ac = dbc->asset_get_command(this->name);
     constexpr int timeout_time = 10 * sec_to_msec;
@@ -262,6 +263,7 @@ flight_safety_system::server::fss_client::isAircraft() -> bool
 auto
 flight_safety_system::server::fss_client::getName() -> std::string
 {
+    std::lock_guard<std::mutex> guard(this->client_lock);
     return this->name;
 }
 
@@ -271,13 +273,21 @@ flight_safety_system::server::fss_client::sendRTTRequest(const std::shared_ptr<f
 {
     uint64_t ts = fss_current_timestamp();
     this->getConnection()->sendMsg(rtt_req);
-    this->outstanding_rtt_requests.push_back(std::make_shared<fss_client_rtt>(ts, rtt_req->getId()));
+    {
+        std::lock_guard<std::mutex> guard(this->client_lock);
+        this->outstanding_rtt_requests.push_back(std::make_shared<fss_client_rtt>(ts, rtt_req->getId()));
+    }
 }
 
 void
 flight_safety_system::server::fss_client::sendSMMSettings()
 {
-    auto smm = dbc->asset_get_smm_settings(this->name);
+    std::string client_name;
+    {
+        std::lock_guard<std::mutex> guard(this->client_lock);
+        client_name = this->name;
+    }
+    auto smm = dbc->asset_get_smm_settings(client_name);
     if (smm != nullptr)
     {
         auto settings_msg = std::make_shared<flight_safety_system::transport::fss_message_smm_settings>(smm->getAddress(), smm->getUsername(), smm->getPassword());
@@ -320,8 +330,9 @@ flight_safety_system::server::fss_client::processMessage(std::shared_ptr<flight_
             auto identity_msg = std::dynamic_pointer_cast<flight_safety_system::transport::fss_message_identity>(msg);
             if (identity_msg != nullptr)
             {
-                this->name = identity_msg->getName();
+                auto client_name = identity_msg->getName();
                 auto possible_names = this->getConnection()->getClientNames();
+                bool name_valid = false;
                 if (possible_names.empty())
                 {
                     /* No client names, so accept anything */
@@ -331,19 +342,24 @@ flight_safety_system::server::fss_client::processMessage(std::shared_ptr<flight_
                 {
                     for (const auto &possible_name: possible_names)
                     {
-                        if (possible_name == this->name)
+                        if (possible_name == client_name)
                         {
-                            this->identified = true;
+                            name_valid = true;
                             break;
                         }
                     }
                 }
-                if (!this->identified)
+                if (!name_valid)
                 {
                     clients->clientDisconnected(this);
                     return;
                 }
+                {
+                    std::lock_guard<std::mutex> guard(this->client_lock);
+                    this->name = std::move(client_name);
+                }
                 this->aircraft = true;
+                this->identified = true;
                 /* send the current command */
                 this->sendCommand();
                 /* send SMM config and servers list */
@@ -387,6 +403,7 @@ flight_safety_system::server::fss_client::processMessage(std::shared_ptr<flight_
                 auto rtt_resp_msg = std::dynamic_pointer_cast<flight_safety_system::transport::fss_message_rtt_response>(msg);
                 if (rtt_resp_msg != nullptr)
                 {
+                    std::lock_guard<std::mutex> guard(this->client_lock);
                     for(const auto &req : this->outstanding_rtt_requests)
                     {
                         if(req->getRequestId() == rtt_resp_msg->getRequestId())
@@ -394,10 +411,13 @@ flight_safety_system::server::fss_client::processMessage(std::shared_ptr<flight_
                             rtt_req = req;
                         }
                     }
+                    if (rtt_req != nullptr)
+                    {
+                        this->outstanding_rtt_requests.remove(rtt_req);
+                    }
                 }
                 if (rtt_req != nullptr)
                 {
-                    this->outstanding_rtt_requests.remove(rtt_req);
 #ifdef DEBUG
                     std::cout << "RTT for " << this->getName() << " is " << (current_ts - rtt_req->getTimeStamp()) << std::endl;
 #endif
