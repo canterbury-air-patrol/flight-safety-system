@@ -20,6 +20,7 @@
 #include <unistd.h>
 
 constexpr int sec_to_msec = 1000;
+constexpr uint64_t rtt_retry_interval = 10 * sec_to_msec;
 
 flight_safety_system::server::smm_settings::smm_settings(std::string t_address, std::string t_username, std::string t_password) : address(std::move(t_address)), username(std::move(t_username)), password(std::move(t_password))
 {
@@ -268,12 +269,16 @@ void
 flight_safety_system::server::fss_client::sendRTTRequest(const std::shared_ptr<flight_safety_system::transport::fss_message_rtt_request> &rtt_req)
 {
     std::lock_guard<std::mutex> guard(this->client_lock);
-    /* Back off if there are already unanswered RTT requests */
+    uint64_t ts = fss_current_timestamp();
+    /* Back off if there are unanswered RTT requests, but retry periodically */
     if (!this->outstanding_rtt_requests.empty())
     {
-        return;
+        auto &last = this->outstanding_rtt_requests.back();
+        if (ts - last->getTimeStamp() < rtt_retry_interval)
+        {
+            return;
+        }
     }
-    uint64_t ts = fss_current_timestamp();
     this->getConnection()->sendMsg(rtt_req);
     this->outstanding_rtt_requests.push_back(std::make_shared<fss_client_rtt>(ts, rtt_req->getId()));
 }
