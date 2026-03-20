@@ -425,7 +425,14 @@ flight_safety_system::transport::fss_listen::startListening() -> bool
     if (this->getFd() < 0)
     {
         this->setFd(socket(PF_INET6, SOCK_STREAM, IPPROTO_TCP));
+        if (this->getFd() < 0)
+        {
+            perror("Failed to open socket: ");
+            return false;
+        }
     }
+    int reuse = 1;
+    setsockopt(this->getFd(), SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
     struct sockaddr_in6 bind_addr = {};
     bind_addr.sin6_family = AF_INET6;
     bind_addr.sin6_port = htons(this->port);
