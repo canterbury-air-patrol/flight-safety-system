@@ -1,6 +1,6 @@
 #include "fss-transport.hpp"
-#include <ostream>
 #include "fss-transport-ssl.hpp"
+#include "fss-log.hpp"
 #include "fss.hpp"
 #include "fss-server.hpp"
 
@@ -339,7 +339,7 @@ flight_safety_system::server::fss_client::processMessage(std::shared_ptr<flight_
                 bool name_valid = false;
                 if (possible_names.empty())
                 {
-                    std::cerr << "Rejecting client: no CN found in certificate" << std::endl;
+                    FSS_LOG_ERROR("server", "Rejecting client: no CN found in certificate");
                 }
                 else
                 {
@@ -496,11 +496,16 @@ main(int argc, char *argv[]) -> int
     std::ifstream configfile(conf_file);
     if (!configfile.is_open())
     {
-        std::cerr << "Failed to load configuration: " << conf_file << std::endl;
+        FSS_LOG_ERROR("server", "Failed to load configuration: " << conf_file);
         exit(-1);
     }
     Json::Value config;
     configfile >> config;
+
+    if (config.isMember("log_level"))
+    {
+        flight_safety_system::log::set_level(config["log_level"].asString());
+    }
 
     /* Connect to database */
     auto dbc = std::make_shared<flight_safety_system::server::db_connection>(config["postgres"]["host"].asString(), config["postgres"]["user"].asString(), config["postgres"]["pass"].asString(), config["postgres"]["db"].asString());
@@ -510,13 +515,13 @@ main(int argc, char *argv[]) -> int
 
     /* Open listen socket */
     std::shared_ptr<flight_safety_system::transport::fss_listen> listen;
-    std::cerr << "Starting fss server in TLS mode" << std::endl;
+    FSS_LOG_INFO("server", "Starting fss server in TLS mode");
     std::string ca_public_key = config["ssl"]["ca_public_key"].asString();
     std::string server_private_key = config["ssl"]["server_private_key"].asString();
     std::string server_public_key = config["ssl"]["server_public_key"].asString();
     if (ca_public_key == "" || server_private_key == "" || server_public_key == "")
     {
-        std::cerr << "Missing ssl parameter, all of these are required: 'ca_public_key', 'server_private_key', 'server_public_key'" << std::endl;
+        FSS_LOG_ERROR("server", "Missing ssl parameter, all of these are required: 'ca_public_key', 'server_private_key', 'server_public_key'");
         exit(-1);
     }
     listen = std::make_shared<flight_safety_system::transport_ssl::fss_listen>(config["port"].asInt(),

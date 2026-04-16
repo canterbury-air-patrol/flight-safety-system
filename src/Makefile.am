@@ -12,7 +12,7 @@ AM_CPPFLAGS += $(CODE_COVERAGE_CPPFLAGS)
 bin_PROGRAMS =
 sbin_PROGRAMS =
 lib_LTLIBRARIES = libfss.la libfss-transport.la
-include_HEADERS = fss.hpp
+include_HEADERS = fss.hpp fss-log.hpp
 pkgconfig_DATA = fss.pc
 
 libfss_la_LDFLAGS = -version-info 0:0:0

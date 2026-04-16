@@ -1,5 +1,6 @@
 #include "fss-transport-ssl.hpp"
 #include "fss-transport.hpp"
+#include "fss-log.hpp"
 #include "transport.hpp"
 
 #include <cstdint>
@@ -43,7 +44,7 @@ flight_safety_system::transport_ssl::fss_connection::~fss_connection()
         }
         catch (gnutls::exception &ex)
         {
-            std::cerr << "fss_connection shutdown, gnutls exception during bye" << std::endl;
+            FSS_LOG_WARN("ssl", "fss_connection shutdown, gnutls exception during bye");
         }
         this->usable = false;
     }
@@ -75,7 +76,7 @@ flight_safety_system::transport_ssl::fss_connection_client::connectTo(const std:
     struct sockaddr_storage remote = {};
     if (!convert_str_to_sa (address, port, &remote))
     {
-        std::cerr << "Failed to convert '" << address << "' to a usable address\n";
+        FSS_LOG_ERROR("ssl", "Failed to convert '" << address << "' to a usable address");
         return false;
     }
 
@@ -97,7 +98,7 @@ flight_safety_system::transport_ssl::fss_connection_client::connectTo(const std:
 
     if (connect(this->getFd(), reinterpret_cast<struct sockaddr *>(&remote), remote.ss_family == AF_INET ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6)) < 0)
     {
-        perror(("Failed to connect to " + address).c_str());
+        FSS_PERROR("ssl", "Failed to connect to " + address);
         close(this->getFd());
         this->setFd(-1);
         return false;
@@ -143,11 +144,11 @@ flight_safety_system::transport_ssl::fss_connection_client::setupSSL() -> bool
     }
     catch (gnutls::exception &e)
     {
-        std::cerr << "TLS error: " << e.what() << std::endl;
+        FSS_LOG_ERROR("ssl", "TLS error: " << e.what());
     }
     if (ret < 0)
     {
-        std::cerr << "Failed to hand shake: " << ret << std::endl;
+        FSS_LOG_ERROR("ssl", "Failed to hand shake: " << ret);
         return false;
     }
 
@@ -172,11 +173,11 @@ flight_safety_system::transport_ssl::fss_connection_server::setupSSL() -> bool
     }
     catch(gnutls::exception &e)
     {
-        std::cerr << "TLS error: " << e.what() << std::endl;
+        FSS_LOG_ERROR("ssl", "TLS error: " << e.what());
     }
     if (ret < 0)
     {
-        std::cerr << "Failed to hand shake: " << ret << std::endl;
+        FSS_LOG_ERROR("ssl", "Failed to hand shake: " << ret);
         return false;
     }
 
@@ -213,7 +214,7 @@ flight_safety_system::transport_ssl::fss_connection::sendMsg(const std::shared_p
 {
     if (!this->usable)
     {
-        std::cerr << "Attempt to send on unusable transport_ssl::fss_connection" << std::endl;
+        FSS_LOG_ERROR("ssl", "Attempt to send on unusable transport_ssl::fss_connection");
         return false;
     }
     size_t to_send = bl->getLength();
@@ -228,7 +229,7 @@ flight_safety_system::transport_ssl::fss_connection::sendMsg(const std::shared_p
         }
         catch (gnutls::exception &ex)
         {
-            std::cerr << "send: caught gnutls exception: " << ex.get_code() << ", " << ex.what() << std::endl;
+            FSS_LOG_ERROR("ssl", "send: caught gnutls exception: " << ex.get_code() << ", " << ex.what());
             this->usable = false;
             return false;
         }
@@ -247,7 +248,7 @@ flight_safety_system::transport_ssl::fss_connection::recvBytes(void *t_bytes, si
 {
     if (!this->usable)
     {
-        std::cerr << "Attempt to recv on unusable transport_ssl::fss_connection" << std::endl;
+        FSS_LOG_ERROR("ssl", "Attempt to recv on unusable transport_ssl::fss_connection");
         return -2;
     }
     ssize_t bytes_recved = -1;
@@ -257,7 +258,7 @@ flight_safety_system::transport_ssl::fss_connection::recvBytes(void *t_bytes, si
     }
     catch (gnutls::exception &ex)
     {
-        std::cerr << "recv: caught gnutls exception: " << ex.get_code() << ", " << ex.what() << std::endl;
+        FSS_LOG_ERROR("ssl", "recv: caught gnutls exception: " << ex.get_code() << ", " << ex.what());
         if (ex.get_code() != GNUTLS_E_AGAIN)
         {
             this->usable = false;
