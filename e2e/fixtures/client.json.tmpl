@@ -1,0 +1,14 @@
+{
+    "name": "${CLIENT_NAME}",
+    "ssl": {
+        "ca_public_key": "${CERTS_DIR}/ca.public.pem",
+        "client_private_key": "${CERTS_DIR}/${CLIENT_NAME}.private.pem",
+        "client_public_key": "${CERTS_DIR}/${CLIENT_NAME}.public.pem"
+    },
+    "servers": [
+        {
+            "address": "localhost",
+            "port": ${SERVER_PORT}
+        }
+    ]
+}
