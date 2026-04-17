@@ -15,6 +15,7 @@
 
 #include "fss-transport.hpp"
 #include "fss-client-ssl.hpp"
+#include "test_helpers.hpp"
 
 constexpr const char * CA_PUBLIC_FILE = "certs/ca.public.pem";
 constexpr const char * SERVER_PRIVATE_FILE = "certs/localhost.private.pem";
@@ -38,9 +39,7 @@ TEST_CASE("Client Base") {
     REQUIRE(client != nullptr);
     client->connectTo("localhost", listen_port, true);
 
-    sleep (1);
-
-    REQUIRE(client_conn != nullptr);
+    REQUIRE(fss_test::wait_for([]() { return client_conn != nullptr; }));
 
     client_conn = nullptr;
 }

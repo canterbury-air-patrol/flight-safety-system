@@ -15,6 +15,7 @@
 #include <unistd.h>
 
 #include "fss-transport-ssl.hpp"
+#include "test_helpers.hpp"
 
 constexpr const char * CA_PUBLIC_FILE = "certs/ca.public.pem";
 constexpr const char * SERVER_PRIVATE_FILE = "certs/localhost.private.pem";
@@ -53,20 +54,21 @@ TEST_CASE("SSL - Listen Socket") {
     auto send_msg = std::make_shared<flight_safety_system::transport::fss_message_identity>("testClient");
     conn->sendMsg(send_msg);
 
-    sleep(1);
+    REQUIRE(fss_test::wait_for([]() { return client_conn != nullptr; }));
 
     conn = nullptr;
 
-    sleep(1);
-
-    REQUIRE(client_conn != nullptr);
-    auto msg = client_conn->getMsg();
-
-    REQUIRE(msg != nullptr);
+    std::shared_ptr<flight_safety_system::transport::fss_message> msg;
+    REQUIRE(fss_test::wait_for([&]() {
+        msg = client_conn->getMsg();
+        return msg != nullptr;
+    }));
     REQUIRE(msg->getType() == flight_safety_system::transport::message_type_identity);
 
-    msg = client_conn->getMsg();
-    REQUIRE(msg != nullptr);
+    REQUIRE(fss_test::wait_for([&]() {
+        msg = client_conn->getMsg();
+        return msg != nullptr;
+    }));
     REQUIRE(msg->getType() == flight_safety_system::transport::message_type_closed);
 
     msg = client_conn->getMsg();
@@ -103,9 +105,7 @@ TEST_CASE("SSL - Listen - Callback")
 
     conn->sendMsg(std::make_shared<flight_safety_system::transport::fss_message_identity>("testClient"));
 
-    sleep (1);
-
-    REQUIRE(client_conn != nullptr);
+    REQUIRE(fss_test::wait_for([]() { return client_conn != nullptr; }));
 
     auto cb = std::make_shared<test_ssl_message_cb>(client_conn);
     REQUIRE(cb->connected());
@@ -116,9 +116,7 @@ TEST_CASE("SSL - Listen - Callback")
 
     cb->sendMsg(std::make_shared<flight_safety_system::transport::fss_message_rtt_request>());
 
-    sleep(1);
-
-    REQUIRE(cb->getFirstMsg() != nullptr);
+    REQUIRE(fss_test::wait_for([&]() { return cb->getFirstMsg() != nullptr; }));
 
     cb->disconnect();
     REQUIRE(!cb->connected());

@@ -3,3 +3,5 @@
 *_test.log
 *_test.trs
 test-suite.log
+certs/
+certs-alt/
