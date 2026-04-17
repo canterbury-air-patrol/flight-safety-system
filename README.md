@@ -1,5 +1,8 @@
 # Flight-Safety-System
 
+[![C/C++ CI](https://github.com/canterbury-air-patrol/flight-safety-system/actions/workflows/c-cpp.yml/badge.svg?branch=develop)](https://github.com/canterbury-air-patrol/flight-safety-system/actions/workflows/c-cpp.yml)
+[![codecov](https://codecov.io/gh/canterbury-air-patrol/flight-safety-system/branch/develop/graph/badge.svg)](https://codecov.io/gh/canterbury-air-patrol/flight-safety-system)
+
 Flight-Safety-System is a system for maintaining control of RPAS. 
 
 FSS provides a means of sending basic commands (RTL, Hold, Resume, etc) to an aircraft while monitoring the position, battery status, and mission progress.

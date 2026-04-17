@@ -34,6 +34,22 @@ AM_CONDITIONAL([ENABLE_TESTS], [test "x$enable_tests" == "xyes"])
 AM_CONDITIONAL([COVERAGE], [test "x$enable_coverage" == "xyes"])
 AM_CONDITIONAL([FAKE_CLIENT], [test "x$enable_fake_client" == "xyes"])
 
+AS_IF([test "x$enable_coverage" == "xyes"], [
+    CODE_COVERAGE_CFLAGS="--coverage"
+    CODE_COVERAGE_CXXFLAGS="--coverage"
+    CODE_COVERAGE_CPPFLAGS=""
+    CODE_COVERAGE_LDFLAGS="--coverage"
+], [
+    CODE_COVERAGE_CFLAGS=""
+    CODE_COVERAGE_CXXFLAGS=""
+    CODE_COVERAGE_CPPFLAGS=""
+    CODE_COVERAGE_LDFLAGS=""
+])
+AC_SUBST([CODE_COVERAGE_CFLAGS])
+AC_SUBST([CODE_COVERAGE_CXXFLAGS])
+AC_SUBST([CODE_COVERAGE_CPPFLAGS])
+AC_SUBST([CODE_COVERAGE_LDFLAGS])
+
 PKG_PROG_PKG_CONFIG
 AC_ARG_WITH([systemdsystemunitdir],
      [AS_HELP_STRING([--with-systemdsystemunitdir=DIR], [Directory for systemd service files])],,

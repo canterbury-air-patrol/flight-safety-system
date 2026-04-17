@@ -1,0 +1,41 @@
+---
+# Enabled check families (Phase 3 baseline).
+# readability-magic-numbers is disabled: the codebase uses numeric constants
+# in wire-protocol packing/unpacking where named constants would obscure the
+# byte-layout intent.
+Checks: >-
+  bugprone-*,
+  performance-*,
+  modernize-*,
+  cppcoreguidelines-pro-type-*,
+  -readability-magic-numbers,
+  -modernize-use-scoped-lock,
+  -modernize-concat-nested-namespaces,
+  -modernize-use-override,
+  -modernize-pass-by-value,
+  -modernize-avoid-c-style-cast,
+  -modernize-avoid-c-arrays,
+  -modernize-use-emplace,
+  -bugprone-implicit-widening-of-multiplication-result,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-multi-level-implicit-pointer-conversion,
+  -bugprone-narrowing-conversions,
+  -bugprone-switch-missing-default-case,
+  -cppcoreguidelines-pro-type-reinterpret-cast,
+  -cppcoreguidelines-pro-type-cstyle-cast,
+  -performance-unnecessary-value-param,
+  -performance-for-range-copy,
+  -performance-no-int-to-ptr,
+  -clang-analyzer-deadcode.DeadStores,
+  -clang-analyzer-optin.cplusplus.VirtualCall
+
+# Headers under src/ are part of the project; include findings from them.
+HeaderFilterRegex: "src/.*"
+
+# Extra per-check options.
+CheckOptions:
+  - key: modernize-use-default-member-init.UseAssignment
+    value: "true"
+  - key: cppcoreguidelines-pro-type-reinterpret-cast.StrictMode
+    value: "false"
+...
