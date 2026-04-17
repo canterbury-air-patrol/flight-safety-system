@@ -61,6 +61,7 @@ def test_client_reconnects_after_server_bounce(
 
     def spawn_server(log_name: str) -> tuple[subprocess.Popen, IO[bytes]]:
         log_fp = (tmp_path / log_name).open("wb")
+        # sourcery skip: dangerous-subprocess-use-audit
         p = subprocess.Popen(
             [str(SERVER_BIN), str(config_path)],
             cwd=str(REPO_ROOT), env=env,
@@ -99,11 +100,14 @@ def test_client_reconnects_after_server_bounce(
     )
     client_log = tmp_path / "client-test1.log"
     client_fp = client_log.open("wb")
+    # sourcery skip: dangerous-subprocess-use-audit
     client = subprocess.Popen(
         [str(FAKE_CLIENT_BIN), str(client_cfg)],
         cwd=str(REPO_ROOT), env=env,
         stdout=client_fp, stderr=subprocess.STDOUT,
     )
+
+    server2_log = None
 
     try:
         conn = psycopg2.connect(

@@ -63,7 +63,47 @@ def _docker_available() -> bool:
 
 @pytest.fixture(scope="session")
 def pg_container() -> Iterator[Dict[str, object]]:
-    """Start a Postgres+PostGIS container; yield connection parameters."""
+    """Provide Postgres+PostGIS connection parameters.
+
+    Three modes (checked in order):
+    1. FSS_E2E_EXTERNAL_DB is set — use an already-running Postgres (e.g.
+       a GitHub Actions service container).  No Docker is started.
+    2. FSS_E2E_DOCKER_HOST_NET=1 — start mdillon/postgis with --network=host
+       so the container shares the host network (needed on some sandboxes).
+    3. Default — start mdillon/postgis with a mapped port.
+    """
+    external = os.environ.get("FSS_E2E_EXTERNAL_DB")
+    if external:
+        # Parse simple "key=value ..." style connection string.
+        params: Dict[str, object] = {}
+        for token in external.split():
+            k, _, v = token.partition("=")
+            params[k] = v
+        params.setdefault("host", "127.0.0.1")
+        params.setdefault("port", 5432)
+        params.setdefault("user", "postgres")
+        params.setdefault("password", "e2e")
+        params.setdefault("dbname", "postgres")
+        params["container"] = None
+        params["port"] = int(params["port"])
+
+        def ready() -> bool:
+            try:
+                c = psycopg2.connect(
+                    host=params["host"], port=params["port"],
+                    user=params["user"], password=params["password"],
+                    dbname=params["dbname"], connect_timeout=2,
+                )
+                c.close()
+                return True
+            except psycopg2.Error:
+                return False
+
+        if not _wait_for(ready, STARTUP_TIMEOUT_S, poll=0.5):
+            raise RuntimeError("external postgres did not become ready")
+        yield params
+        return
+
     if not _docker_available():
         pytest.skip("docker daemon not reachable")
 
@@ -76,8 +116,7 @@ def pg_container() -> Iterator[Dict[str, object]]:
     # set FSS_E2E_DOCKER_HOST_NET=1 to share the host network namespace.
     if os.environ.get("FSS_E2E_DOCKER_HOST_NET") == "1":
         port = _pick_port()
-        net_args = ["--network=host",
-                    "-e", f"PGPORT={port}"]
+        net_args = ["--network=host", "-e", f"PGPORT={port}"]
     else:
         port = _pick_port()
         net_args = ["-p", f"{port}:5432"]
@@ -176,6 +215,7 @@ def reset_db(db_conn: psycopg2.extensions.connection) -> Iterator[None]:
         "assets_asset",
     ]
     with db_conn.cursor() as cur:
+        # sourcery skip: sqlalchemy-execute-raw-query
         cur.execute("TRUNCATE " + ", ".join(tables) + " RESTART IDENTITY CASCADE")
     yield
 
@@ -199,6 +239,7 @@ def certs_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
     for script in ("generate-ca.sh", "generate-server.sh", "generate-client.sh"):
         (target / script).chmod(0o755)
 
+    # sourcery skip: dangerous-subprocess-use-audit
     def run(cmd: List[str]) -> None:
         subprocess.check_call(cmd, cwd=str(target))
 
@@ -249,6 +290,7 @@ def server_proc(
     env["PGPASSWORD"] = str(migrated_db["password"])
 
     log_fp = log_path.open("wb")
+    # sourcery skip: dangerous-subprocess-use-audit
     proc = subprocess.Popen(
         [str(SERVER_BIN), str(config_path)],
         cwd=str(REPO_ROOT),
@@ -324,6 +366,7 @@ def fake_client(
         env = os.environ.copy()
         env["LD_LIBRARY_PATH"] = str(REPO_ROOT / "src" / ".libs")
         log_fp = log_path.open("wb")
+        # sourcery skip: dangerous-subprocess-use-audit
         proc = subprocess.Popen(
             [str(FAKE_CLIENT_BIN), str(config_path)],
             cwd=str(REPO_ROOT),

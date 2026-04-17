@@ -1,0 +1,105 @@
+# Pre-existing cppcheck findings as of Phase 3 baseline.
+# New findings in the same file/line WILL be caught; new files with the
+# same issue ID will also fail CI.  Fix the underlying issue and remove
+# the suppression when cleaning up each area.
+
+# fss-log.hpp
+syntaxError:src/fss-log.hpp:20
+constVariablePointer:src/fss-log.hpp:66
+
+# client-ssl.cpp
+useStlAlgorithm:src/client-ssl.cpp:130
+
+# fss-transport-ssl.hpp — deleted-operator= re-declared in derived class
+duplInheritedMember:src/fss-transport-ssl.hpp:29
+duplInheritedMember:src/fss-transport-ssl.hpp:30
+
+# server.cpp
+missingOverride:src/server.cpp:136
+useStlAlgorithm:src/server.cpp:173
+useStlAlgorithm:src/server.cpp:349
+
+# transport.cpp — C-style casts in low-level network address handling
+dangerousTypeCast:src/transport.cpp:33
+dangerousTypeCast:src/transport.cpp:34
+dangerousTypeCast:src/transport.cpp:38
+dangerousTypeCast:src/transport.cpp:39
+duplicateBreak:src/transport.cpp:35
+duplicateBreak:src/transport.cpp:40
+cstyleCast:src/transport.cpp:207
+constVariablePointer:src/transport.cpp:207
+
+# transport-helpers.cpp — network address utility C-style casts + AF_UNSPEC tautology
+dangerousTypeCast:src/transport-helpers.cpp:22
+cstyleCast:src/transport-helpers.cpp:22
+dangerousTypeCast:src/transport-helpers.cpp:35
+cstyleCast:src/transport-helpers.cpp:35
+dangerousTypeCast:src/transport-helpers.cpp:59
+cstyleCast:src/transport-helpers.cpp:59
+dangerousTypeCast:src/transport-helpers.cpp:64
+cstyleCast:src/transport-helpers.cpp:64
+knownConditionTrueFalse:src/transport-helpers.cpp:16
+
+# transport-messages.cpp — wire-protocol packing; C-style casts are intentional
+functionStatic:src/transport-messages.cpp:164
+functionStatic:src/transport-messages.cpp:218
+cstyleCast:src/transport-messages.cpp:403
+cstyleCast:src/transport-messages.cpp:404
+cstyleCast:src/transport-messages.cpp:592
+cstyleCast:src/transport-messages.cpp:728
+dangerousTypeCast:src/transport-messages.cpp:18
+cstyleCast:src/transport-messages.cpp:18
+dangerousTypeCast:src/transport-messages.cpp:22
+cstyleCast:src/transport-messages.cpp:22
+dangerousTypeCast:src/transport-messages.cpp:331
+cstyleCast:src/transport-messages.cpp:331
+dangerousTypeCast:src/transport-messages.cpp:392
+cstyleCast:src/transport-messages.cpp:392
+dangerousTypeCast:src/transport-messages.cpp:393
+cstyleCast:src/transport-messages.cpp:393
+dangerousTypeCast:src/transport-messages.cpp:394
+cstyleCast:src/transport-messages.cpp:394
+dangerousTypeCast:src/transport-messages.cpp:395
+cstyleCast:src/transport-messages.cpp:395
+dangerousTypeCast:src/transport-messages.cpp:396
+cstyleCast:src/transport-messages.cpp:396
+dangerousTypeCast:src/transport-messages.cpp:397
+cstyleCast:src/transport-messages.cpp:397
+dangerousTypeCast:src/transport-messages.cpp:398
+cstyleCast:src/transport-messages.cpp:398
+dangerousTypeCast:src/transport-messages.cpp:399
+cstyleCast:src/transport-messages.cpp:399
+dangerousTypeCast:src/transport-messages.cpp:400
+cstyleCast:src/transport-messages.cpp:400
+dangerousTypeCast:src/transport-messages.cpp:402
+cstyleCast:src/transport-messages.cpp:402
+dangerousTypeCast:src/transport-messages.cpp:593
+cstyleCast:src/transport-messages.cpp:593
+dangerousTypeCast:src/transport-messages.cpp:594
+cstyleCast:src/transport-messages.cpp:594
+dangerousTypeCast:src/transport-messages.cpp:654
+cstyleCast:src/transport-messages.cpp:654
+dangerousTypeCast:src/transport-messages.cpp:655
+cstyleCast:src/transport-messages.cpp:655
+dangerousTypeCast:src/transport-messages.cpp:656
+cstyleCast:src/transport-messages.cpp:656
+dangerousTypeCast:src/transport-messages.cpp:724
+cstyleCast:src/transport-messages.cpp:724
+dangerousTypeCast:src/transport-messages.cpp:725
+cstyleCast:src/transport-messages.cpp:725
+dangerousTypeCast:src/transport-messages.cpp:726
+cstyleCast:src/transport-messages.cpp:726
+dangerousTypeCast:src/transport-messages.cpp:727
+cstyleCast:src/transport-messages.cpp:727
+dangerousTypeCast:src/transport-messages.cpp:846
+cstyleCast:src/transport-messages.cpp:846
+dangerousTypeCast:src/transport-messages.cpp:906
+cstyleCast:src/transport-messages.cpp:906
+variableScope:src/transport-messages.cpp:413
+variableScope:src/transport-messages.cpp:414
+truncLongCastAssignment:src/transport-messages.cpp:760
+truncLongCastAssignment:src/transport-messages.cpp:761
+unreadVariable:src/transport-messages.cpp:413
+unreadVariable:src/transport-messages.cpp:414
+unreadVariable:src/transport-messages.cpp:501
+unreadVariable:src/transport-messages.cpp:619
