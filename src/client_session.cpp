@@ -13,6 +13,7 @@ namespace fss = flight_safety_system;
 
 constexpr int sec_to_msec = 1000;
 constexpr uint64_t rtt_retry_interval = 10 * sec_to_msec;
+constexpr uint64_t rtt_timeout = 30 * sec_to_msec;
 
 fss::server::smm_settings::smm_settings(std::string t_address, std::string t_username, std::string t_password) : address(std::move(t_address)), username(std::move(t_username)), password(std::move(t_password))
 {
@@ -116,20 +117,43 @@ fss::server::fss_client::sendCommand()
 }
 
 void
+fss::server::fss_client::setClock(std::shared_ptr<fss::IClock> t_clock)
+{
+    if (t_clock == nullptr)
+    {
+        return;
+    }
+    this->clock = std::move(t_clock);
+}
+
+void
 fss::server::fss_client::sendRTTRequest(const std::shared_ptr<fss::transport::fss_message_rtt_request> &rtt_req)
 {
-    std::lock_guard<std::mutex> guard(this->client_lock);
-    uint64_t ts = fss_current_timestamp();
-    if (!this->outstanding_rtt_requests.empty())
+    bool timed_out = false;
     {
-        auto &last = this->outstanding_rtt_requests.back();
-        if (ts - last->getTimeStamp() < rtt_retry_interval)
+        std::lock_guard<std::mutex> guard(this->client_lock);
+        uint64_t now = this->clock->now_ms();
+        if (!this->outstanding_rtt_requests.empty())
         {
-            return;
+            if (now - this->outstanding_rtt_requests.front()->getTimeStamp() > rtt_timeout)
+            {
+                timed_out = true;
+            }
+            else if (now - this->outstanding_rtt_requests.back()->getTimeStamp() < rtt_retry_interval)
+            {
+                return;
+            }
+        }
+        if (!timed_out)
+        {
+            this->getConnection()->sendMsg(rtt_req);
+            this->outstanding_rtt_requests.push_back(std::make_shared<fss_client_rtt>(now, rtt_req->getId()));
         }
     }
-    this->getConnection()->sendMsg(rtt_req);
-    this->outstanding_rtt_requests.push_back(std::make_shared<fss_client_rtt>(ts, rtt_req->getId()));
+    if (timed_out)
+    {
+        this->client_handler->clientDisconnected(this);
+    }
 }
 
 void
@@ -198,6 +222,11 @@ fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss_mess
                     });
                 }
                 if (!name_valid)
+                {
+                    this->client_handler->clientDisconnected(this);
+                    return;
+                }
+                if (this->dbc->getAssetId(client_name) == 0)
                 {
                     this->client_handler->clientDisconnected(this);
                     return;
