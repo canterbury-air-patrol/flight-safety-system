@@ -45,6 +45,29 @@ auto make_listener(uint16_t port)
         port, accept_cb, CA_PUBLIC_FILE, SERVER_PRIVATE_FILE, SERVER_PUBLIC_FILE);
 }
 
+struct FakeClock : public flight_safety_system::IClock {
+    uint64_t t{0};
+    auto now_ms() const -> uint64_t override { return t; }
+    void advance(uint64_t ms) { t += ms; }
+};
+
+class CountingServer : public flight_safety_system::client_ssl::fss_server {
+public:
+    using fss_server::fss_server;
+    CountingServer(const CountingServer&) = delete;
+    CountingServer(CountingServer&&) = delete;
+    auto operator=(const CountingServer&) -> CountingServer& = delete;
+    auto operator=(CountingServer&&) -> CountingServer& = delete;
+    ~CountingServer() override = default;
+    int attempts{0};
+protected:
+    auto reconnect_to() -> bool override
+    {
+        ++attempts;
+        return false;
+    }
+};
+
 } // namespace
 
 TEST_CASE("reconnect: client reconnects after listener bounce")
@@ -116,6 +139,64 @@ TEST_CASE("reconnect: attemptReconnect is throttled within the retry window")
     for (int i = 0; i < 100; ++i) { client->attemptReconnect(); }
     auto elapsed = std::chrono::steady_clock::now() - start;
     REQUIRE(std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count() < 500);
+}
+
+TEST_CASE("reconnect: fake clock throttles attempts within retry window")
+{
+    auto client = std::make_shared<flight_safety_system::client_ssl::fss_client>(
+        CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE);
+    auto server = std::make_shared<CountingServer>(
+        client.get(), "127.0.0.1", static_cast<uint16_t>(20599),
+        CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE);
+    auto fake = std::make_shared<FakeClock>();
+    server->setClock(fake);
+
+    /* last_tried starts at 0 and retry_delay at 1000ms. The throttle is
+     * strict >: elapsed of exactly 1000 is still a no-op. */
+    server->reconnect();
+    REQUIRE(server->attempts == 0);
+
+    fake->advance(1000);
+    server->reconnect();
+    REQUIRE(server->attempts == 0);
+
+    fake->advance(1);
+    server->reconnect();
+    REQUIRE(server->attempts == 1);
+}
+
+TEST_CASE("reconnect: fake clock exposes exponential backoff growth")
+{
+    auto client = std::make_shared<flight_safety_system::client_ssl::fss_client>(
+        CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE);
+    auto server = std::make_shared<CountingServer>(
+        client.get(), "127.0.0.1", static_cast<uint16_t>(20600),
+        CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE);
+    auto fake = std::make_shared<FakeClock>();
+    server->setClock(fake);
+
+    /* First attempt: clock must exceed the initial 1000ms retry delay. */
+    fake->advance(1001);
+    server->reconnect();
+    REQUIRE(server->attempts == 1);
+
+    /* Retry delay has doubled to 2000ms. A 1001ms gap must not fire. */
+    fake->advance(1001);
+    server->reconnect();
+    REQUIRE(server->attempts == 1);
+
+    /* 2001ms since last_tried → attempt 2, delay doubles to 4000. */
+    fake->advance(1001);
+    server->reconnect();
+    REQUIRE(server->attempts == 2);
+
+    fake->advance(4000);
+    server->reconnect();
+    REQUIRE(server->attempts == 2);
+
+    fake->advance(1);
+    server->reconnect();
+    REQUIRE(server->attempts == 3);
 }
 
 TEST_CASE("reconnect: multi-server failover keeps secondary reachable")

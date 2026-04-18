@@ -246,10 +246,19 @@ flight_safety_system::client_ssl::fss_server::reconnect_to() -> bool
     return this->getConnection()->connectTo(this->getAddress(), this->getPort());
 }
 
+void
+flight_safety_system::client_ssl::fss_server::setClock(std::shared_ptr<flight_safety_system::IClock> t_clock)
+{
+    if (t_clock == nullptr) {
+        return;
+    }
+    this->clock = std::move(t_clock);
+}
+
 auto
 flight_safety_system::client_ssl::fss_server::reconnect() -> bool
 {
-    uint64_t ts = fss_current_timestamp();
+    uint64_t ts = this->clock->now_ms();
     uint64_t elapsed_time = ts - this->last_tried;
 
     if (this->getConnection() != nullptr)

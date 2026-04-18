@@ -1,4 +1,5 @@
 #include <fss-transport-ssl.hpp>
+#include <fss.hpp>
 
 #include <list>
 #include <memory>
@@ -63,8 +64,9 @@ private:
     static constexpr uint64_t retry_delay_start = 1000;
     static constexpr uint64_t retry_delay_cap = 30000;
     uint64_t retry_delay{retry_delay_start};
+    std::shared_ptr<flight_safety_system::IClock> clock{std::make_shared<flight_safety_system::WallClock>()};
 protected:
-    auto reconnect_to() -> bool;
+    virtual auto reconnect_to() -> bool;
 public:
     fss_server(fss_client *t_client, std::string t_address, uint16_t t_port, std::string t_ca, std::string t_private_key, std::string t_public_key);
     fss_server(fss_server &other) = delete;
@@ -78,6 +80,7 @@ public:
     virtual auto reconnect() -> bool;
     virtual auto getClient() -> fss_client *;
     virtual void sendIdentify();
+    void setClock(std::shared_ptr<flight_safety_system::IClock> t_clock);
 };
 
 
