@@ -7,6 +7,7 @@ extern "C" {
 
 #include <mutex>
 #include <string>
+#include <vector>
 
 flight_safety_system::server::db_connection::db_connection(const std::string &host, const std::string &user, const std::string &pass, const std::string &db) : db_lock()
 {
@@ -19,105 +20,80 @@ flight_safety_system::server::db_connection::~db_connection()
 }
 
 auto
-flight_safety_system::server::db_connection::check_asset(const std::string &asset_name) -> bool
+flight_safety_system::server::db_connection::getAssetId(const std::string &name) -> uint64_t
 {
     std::lock_guard<std::mutex> guard(this->db_lock);
-    uint64_t asset_id = db_get_asset_id(asset_name.c_str());
-    return asset_id != 0;
+    return db_get_asset_id(name.c_str());
 }
 
 void
-flight_safety_system::server::db_connection::asset_add_rtt(const std::string &asset_name, uint64_t delta)
+flight_safety_system::server::db_connection::recordRtt(uint64_t asset_id, uint64_t rtt_ms)
 {
     std::lock_guard<std::mutex> guard(this->db_lock);
-    uint64_t asset_id = db_get_asset_id(asset_name.c_str());
-    if (asset_id != 0)
-    {
-        db_rtt_create_entry(asset_id, delta);
-    }
+    db_rtt_create_entry(asset_id, rtt_ms);
 }
 
 void
-flight_safety_system::server::db_connection::asset_add_status(const std::string &asset_name, uint8_t bat_percent, uint32_t bat_mah_used, double bat_voltage)
+flight_safety_system::server::db_connection::recordStatus(uint64_t asset_id, uint8_t bat_percent, uint32_t bat_mah_used, double bat_voltage)
 {
     std::lock_guard<std::mutex> guard(this->db_lock);
-    uint64_t asset_id = db_get_asset_id(asset_name.c_str());
-    if (asset_id != 0)
-    {
-        db_status_create_entry(asset_id, bat_percent, bat_mah_used, bat_voltage);
-    }
+    db_status_create_entry(asset_id, bat_percent, bat_mah_used, bat_voltage);
 }
 
 void
-flight_safety_system::server::db_connection::asset_add_search_status(const std::string &asset_name, uint64_t search_id, uint64_t search_completed, uint64_t search_total)
+flight_safety_system::server::db_connection::recordSearchStatus(uint64_t asset_id, uint64_t search_id, uint64_t completed, uint64_t total)
 {
     std::lock_guard<std::mutex> guard(this->db_lock);
-    uint64_t asset_id = db_get_asset_id(asset_name.c_str());
-    if (asset_id != 0)
-    {
-        db_search_status_create_entry(asset_id, search_id, search_completed, search_total);
-    }
+    db_search_status_create_entry(asset_id, search_id, completed, total);
 }
 
 void
-flight_safety_system::server::db_connection::asset_add_position(const std::string &asset_name, double latitude, double longitude, uint16_t altitude)
+flight_safety_system::server::db_connection::recordPosition(uint64_t asset_id, double latitude, double longitude, uint16_t altitude)
 {
     std::lock_guard<std::mutex> guard(this->db_lock);
-    uint64_t asset_id = db_get_asset_id(asset_name.c_str());
-    if (asset_id != 0)
-    {
-        db_position_create_entry(asset_id, latitude, longitude, altitude);
-    }
+    db_position_create_entry(asset_id, latitude, longitude, altitude);
 }
 
 auto
-flight_safety_system::server::db_connection::asset_get_command(const std::string &asset_name) -> std::shared_ptr<asset_command>
+flight_safety_system::server::db_connection::getCommand(uint64_t asset_id) -> std::shared_ptr<asset_command>
 {
     std::shared_ptr<asset_command> res = nullptr;
     {
         std::lock_guard<std::mutex> guard(this->db_lock);
-        uint64_t asset_id = db_get_asset_id(asset_name.c_str());
-        if (asset_id != 0)
+        struct asset_command_s *command = db_asset_command_get(asset_id);
+        if (command)
         {
-            struct asset_command_s *command = db_asset_command_get(asset_id);
-            if (command)
-            {
-                res = std::make_shared<asset_command>(command->dbid, command->timestamp, std::string(command->command), command->latitude, command->longitude, command->altitude);
-                free (command->command);
-                free (command);
-            }
+            res = std::make_shared<asset_command>(command->dbid, command->timestamp, std::string(command->command), command->latitude, command->longitude, command->altitude);
+            free (command->command);
+            free (command);
         }
     }
     return res;
 }
 
 auto
-flight_safety_system::server::db_connection::asset_get_smm_settings(const std::string &asset_name) -> std::shared_ptr<smm_settings>
+flight_safety_system::server::db_connection::getSmmSettings(uint64_t asset_id) -> std::shared_ptr<smm_settings>
 {
     std::shared_ptr<smm_settings> res = nullptr;
     {
         std::lock_guard<std::mutex> guard(this->db_lock);
-        uint64_t asset_id = db_get_asset_id(asset_name.c_str());
-        if (asset_id != 0)
+        struct smm_settings_s *settings = db_asset_smm_settings_get(asset_id);
+        if (settings)
         {
-            struct smm_settings_s *settings = db_asset_smm_settings_get(asset_id);
-            if (settings)
-            {
-                res = std::make_shared<smm_settings>(std::string(settings->address), std::string(settings->username), std::string(settings->password));
-                free (settings->address);
-                free (settings->username);
-                free (settings->password);
-                free (settings);
-            }
+            res = std::make_shared<smm_settings>(std::string(settings->address), std::string(settings->username), std::string(settings->password));
+            free (settings->address);
+            free (settings->username);
+            free (settings->password);
+            free (settings);
         }
     }
     return res;
 }
 
 auto
-flight_safety_system::server::db_connection::get_active_fss_servers() -> std::list<std::shared_ptr<fss_server_details>>
+flight_safety_system::server::db_connection::getActiveServers() -> std::vector<fss_server_details>
 {
-    std::list<std::shared_ptr<fss_server_details>> res;
+    std::vector<fss_server_details> res;
     struct fss_server_s **servers = nullptr;
     {
         std::lock_guard<std::mutex> guard(this->db_lock);
@@ -127,7 +103,7 @@ flight_safety_system::server::db_connection::get_active_fss_servers() -> std::li
     {
         for(size_t i = 0; servers[i] != nullptr; i++)
         {
-            res.push_back(std::make_shared<fss_server_details>(servers[i]->address, servers[i]->port));
+            res.emplace_back(servers[i]->address, servers[i]->port);
             free (servers[i]->address);
             free (servers[i]);
         }

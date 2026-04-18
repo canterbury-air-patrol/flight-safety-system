@@ -1,9 +1,13 @@
+#pragma once
+
 #include "fss-transport.hpp"
 
 #include <atomic>
+#include <memory>
 #include <string>
 #include <list>
 #include <mutex>
+#include <vector>
 
 namespace  flight_safety_system {
 namespace server {
@@ -48,7 +52,28 @@ public:
     auto getAltitude() -> uint16_t;
 };
 
-class db_connection {
+/* Pure-virtual database seam: lets ClientSession be unit-tested against
+ * an in-memory mock without a live PostgreSQL. db_connection implements
+ * it in production; tests/mock_database.hpp implements it in Catch2. */
+class IDatabase {
+public:
+    IDatabase() = default;
+    IDatabase(const IDatabase &) = delete;
+    IDatabase(IDatabase &&) = delete;
+    auto operator=(const IDatabase &) -> IDatabase & = delete;
+    auto operator=(IDatabase &&) -> IDatabase & = delete;
+    virtual ~IDatabase() = default;
+    virtual auto getAssetId(const std::string &name) -> uint64_t = 0;
+    virtual void recordPosition(uint64_t asset_id, double latitude, double longitude, uint16_t altitude) = 0;
+    virtual void recordRtt(uint64_t asset_id, uint64_t rtt_ms) = 0;
+    virtual void recordStatus(uint64_t asset_id, uint8_t bat_percent, uint32_t bat_mah_used, double bat_voltage) = 0;
+    virtual void recordSearchStatus(uint64_t asset_id, uint64_t search_id, uint64_t completed, uint64_t total) = 0;
+    virtual auto getCommand(uint64_t asset_id) -> std::shared_ptr<asset_command> = 0;
+    virtual auto getActiveServers() -> std::vector<fss_server_details> = 0;
+    virtual auto getSmmSettings(uint64_t asset_id) -> std::shared_ptr<smm_settings> = 0;
+};
+
+class db_connection: public IDatabase {
 private:
     std::mutex db_lock;
 public:
@@ -57,15 +82,15 @@ public:
     db_connection(db_connection&&) = delete;
     auto operator=(db_connection&) -> db_connection& = delete;
     auto operator=(db_connection&&) -> db_connection& = delete;
-    ~db_connection();
-    auto check_asset(const std::string &asset_name) -> bool;
-    void asset_add_rtt(const std::string &asset_name, uint64_t rtt);
-    void asset_add_status(const std::string &asset_name, uint8_t bat_percent, uint32_t bat_mah_used, double bat_voltage);
-    void asset_add_search_status(const std::string &asset_name, uint64_t search_id, uint64_t search_completed, uint64_t search_total);
-    void asset_add_position(const std::string &asset_name, double latitude, double longitude, uint16_t altitude);
-    auto asset_get_command(const std::string &asset_name) -> std::shared_ptr<asset_command>;
-    auto asset_get_smm_settings(const std::string &asset_name) -> std::shared_ptr<smm_settings>;
-    auto get_active_fss_servers() -> std::list<std::shared_ptr<fss_server_details>>;
+    ~db_connection() override;
+    auto getAssetId(const std::string &name) -> uint64_t override;
+    void recordPosition(uint64_t asset_id, double latitude, double longitude, uint16_t altitude) override;
+    void recordRtt(uint64_t asset_id, uint64_t rtt_ms) override;
+    void recordStatus(uint64_t asset_id, uint8_t bat_percent, uint32_t bat_mah_used, double bat_voltage) override;
+    void recordSearchStatus(uint64_t asset_id, uint64_t search_id, uint64_t completed, uint64_t total) override;
+    auto getCommand(uint64_t asset_id) -> std::shared_ptr<asset_command> override;
+    auto getActiveServers() -> std::vector<fss_server_details> override;
+    auto getSmmSettings(uint64_t asset_id) -> std::shared_ptr<smm_settings> override;
 };
 
 class fss_client_rtt {
@@ -97,10 +122,10 @@ private:
     auto getName() -> std::string;
     uint64_t last_command_send_ts{0};
     uint64_t last_command_dbid{0};
-    std::shared_ptr<db_connection> dbc;
+    IDatabase *dbc;
     fss_client_handler *client_handler;
 public:
-    fss_client(std::shared_ptr<transport::fss_connection> conn, std::shared_ptr<db_connection> t_dbc, fss_client_handler *t_handler);
+    fss_client(std::shared_ptr<transport::fss_connection> conn, IDatabase *t_dbc, fss_client_handler *t_handler);
     fss_client(fss_client&) = delete;
     fss_client(fss_client&&) = delete;
     auto operator=(fss_client&) -> fss_client& = delete;

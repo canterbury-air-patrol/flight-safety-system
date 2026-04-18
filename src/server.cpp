@@ -4,6 +4,7 @@
 #include "fss.hpp"
 #include "fss-server.hpp"
 
+#include <algorithm>
 #include <iostream>
 #include <fstream>
 #include <csignal>
@@ -19,110 +20,13 @@
 
 #include <unistd.h>
 
-constexpr int sec_to_msec = 1000;
-constexpr uint64_t rtt_retry_interval = 10 * sec_to_msec;
-
-flight_safety_system::server::smm_settings::smm_settings(std::string t_address, std::string t_username, std::string t_password) : address(std::move(t_address)), username(std::move(t_username)), password(std::move(t_password))
-{
-}
-
-auto
-flight_safety_system::server::smm_settings::getAddress() -> std::string
-{
-    return this->address;
-}
-auto
-flight_safety_system::server::smm_settings::getUsername() -> std::string
-{
-    return this->username;
-}
-auto
-flight_safety_system::server::smm_settings::getPassword() -> std::string
-{
-    return this->password;
-}
-
-flight_safety_system::server::fss_server_details::fss_server_details(std::string t_address, uint16_t t_port) : address(std::move(t_address)), port(t_port)
-{
-}
-
-auto
-flight_safety_system::server::fss_server_details::getAddress() -> std::string
-{
-    return this->address;
-}
-auto
-flight_safety_system::server::fss_server_details::getPort() -> uint16_t
-{
-    return this->port;
-}
-
-flight_safety_system::server::asset_command::asset_command(uint64_t t_dbid, uint64_t t_timestamp, const std::string &t_cmd, double t_latitude, double t_longitude, uint16_t t_altitude) : dbid(t_dbid), timestamp(t_timestamp), latitude(t_latitude), longitude(t_longitude), altitude(t_altitude)
-{
-    if (t_cmd == "RTL") {
-        this->command = transport::asset_command_rtl;
-    } else if (t_cmd == "HOLD") {
-        this->command = transport::asset_command_hold;
-    } else if (t_cmd == "GOTO") {
-        this->command = transport::asset_command_goto;
-    } else if (t_cmd == "RON") {
-        this->command = transport::asset_command_resume;
-    } else if (t_cmd == "DISARM") {
-        this->command = transport::asset_command_disarm;
-    } else if (t_cmd == "ALT") {
-        this->command = transport::asset_command_altitude;
-    } else if (t_cmd == "TERM") {
-        this->command = transport::asset_command_terminate;
-    } else if (t_cmd == "MAN") {
-        this->command = transport::asset_command_manual;
-    }
-}
-
-auto
-flight_safety_system::server::asset_command::getDBId() -> uint64_t
-{
-    return this->dbid;
-}
-auto
-flight_safety_system::server::asset_command::getTimeStamp() -> uint64_t
-{
-    return this->timestamp;
-}
-auto
-flight_safety_system::server::asset_command::getCommand() -> transport::fss_asset_command
-{
-    return this->command;
-}
-auto
-flight_safety_system::server::asset_command::getLatitude() -> double
-{
-    return this->latitude;
-}
-auto
-flight_safety_system::server::asset_command::getLongitude() -> double
-{
-    return this->longitude;
-}
-auto
-flight_safety_system::server::asset_command::getAltitude() -> uint16_t
-{
-    return this->altitude;
-}
-
-flight_safety_system::server::fss_client_rtt::fss_client_rtt(uint64_t t_timestamp, uint64_t t_reqid) : timestamp(t_timestamp), reqid(t_reqid)
-{
-}
-
-auto
-flight_safety_system::server::fss_client_rtt::getTimeStamp() -> uint64_t
-{
-    return this->timestamp;
-}
-auto
-flight_safety_system::server::fss_client_rtt::getRequestId() -> uint64_t
-{
-    return this->reqid;
-}
+namespace flight_safety_system {
+namespace server {
+/* Defined in client_session.cpp. Exposed here so the periodic broadcast
+ * of the active server list can reuse the helper. */
+auto build_server_list_msg(IDatabase *dbc) -> std::shared_ptr<transport::fss_message_server_list>;
+} // namespace server
+} // namespace flight_safety_system
 
 class server_clients : public flight_safety_system::server::fss_client_handler {
 private:
@@ -134,7 +38,6 @@ private:
 public:
     server_clients() = default;
     ~server_clients() {
-        /* Prevent changes while we empty the client list */
         this->shutting_down = true;
         std::lock_guard<std::mutex> guard(this->lock);
         for (const auto &c: this->clients)
@@ -164,17 +67,15 @@ public:
     };
     void clientDisconnected(flight_safety_system::server::fss_client *client) override
     {
-        /* If we are shutting down, don't worry */
         std::lock_guard<std::mutex> guard(this->lock);
         if (this->shutting_down) return;
-        for (const auto &c : this->clients)
+        auto it = std::find_if(this->clients.begin(), this->clients.end(), [client](const auto &c) {
+            return c.get() == client;
+        });
+        if (it != this->clients.end())
         {
-            if (c.get() == client)
-            {
-                this->disconnected.push(c);
-                this->clients.remove(c);
-                break;
-            }
+            this->disconnected.push(*it);
+            this->clients.erase(it);
         }
     };
     void broadcastMsg(const std::shared_ptr<flight_safety_system::transport::fss_message> &msg, flight_safety_system::server::fss_client *except = nullptr) override
@@ -214,261 +115,6 @@ public:
     };
 };
 
-flight_safety_system::server::fss_client::fss_client(std::shared_ptr<flight_safety_system::transport::fss_connection> t_conn, std::shared_ptr<flight_safety_system::server::db_connection> t_dbc, flight_safety_system::server::fss_client_handler *t_handler) : fss_message_cb(std::move(t_conn)), dbc(std::move(t_dbc)), client_handler(t_handler)
-{
-    this->getConnection()->setHandler(this);
-}
-
-flight_safety_system::server::fss_client::~fss_client() = default;
-
-void
-flight_safety_system::server::fss_client::sendCommand()
-{
-    std::lock_guard<std::mutex> guard(this->client_lock);
-    uint64_t ts = fss_current_timestamp();
-    auto ac = this->dbc->asset_get_command(this->name);
-    constexpr int timeout_time = 10 * sec_to_msec;
-    if (ac != nullptr && (ac->getDBId() != this->last_command_dbid || ts > (this->last_command_send_ts + timeout_time)))
-    {
-        /* New command or time to re-send */
-        this->last_command_send_ts = ts;
-        this->last_command_dbid = ac->getDBId();
-        std::shared_ptr<flight_safety_system::transport::fss_message_asset_command> msg = nullptr;
-        auto command = ac->getCommand();
-        switch (command)
-        {
-            case flight_safety_system::transport::asset_command_goto:
-                msg = std::make_shared<flight_safety_system::transport::fss_message_asset_command>(command, ac->getTimeStamp(), ac->getLatitude(), ac->getLongitude());
-                break;
-            case flight_safety_system::transport::asset_command_altitude:
-                msg = std::make_shared<flight_safety_system::transport::fss_message_asset_command>(command, ac->getTimeStamp(), ac->getAltitude());
-                break;
-            default:
-                msg = std::make_shared<flight_safety_system::transport::fss_message_asset_command>(command, ac->getTimeStamp());
-                break;
-        }
-        this->getConnection()->sendMsg(msg);
-    }
-}
-
-auto
-flight_safety_system::server::fss_client::isAircraft() -> bool
-{
-    return this->aircraft;
-}
-
-auto
-flight_safety_system::server::fss_client::getName() -> std::string
-{
-    std::lock_guard<std::mutex> guard(this->client_lock);
-    return this->name;
-}
-
-
-void
-flight_safety_system::server::fss_client::sendRTTRequest(const std::shared_ptr<flight_safety_system::transport::fss_message_rtt_request> &rtt_req)
-{
-    std::lock_guard<std::mutex> guard(this->client_lock);
-    uint64_t ts = fss_current_timestamp();
-    /* Back off if there are unanswered RTT requests, but retry periodically */
-    if (!this->outstanding_rtt_requests.empty())
-    {
-        auto &last = this->outstanding_rtt_requests.back();
-        if (ts - last->getTimeStamp() < rtt_retry_interval)
-        {
-            return;
-        }
-    }
-    this->getConnection()->sendMsg(rtt_req);
-    this->outstanding_rtt_requests.push_back(std::make_shared<fss_client_rtt>(ts, rtt_req->getId()));
-}
-
-void
-flight_safety_system::server::fss_client::sendSMMSettings()
-{
-    std::string client_name;
-    {
-        std::lock_guard<std::mutex> guard(this->client_lock);
-        client_name = this->name;
-    }
-    auto smm = this->dbc->asset_get_smm_settings(client_name);
-    if (smm != nullptr)
-    {
-        auto settings_msg = std::make_shared<flight_safety_system::transport::fss_message_smm_settings>(smm->getAddress(), smm->getUsername(), smm->getPassword());
-        this->getConnection()->sendMsg(settings_msg);
-    }
-}
-
-auto getServersListMsg(const std::shared_ptr<flight_safety_system::server::db_connection> &dbc) -> std::shared_ptr<flight_safety_system::transport::fss_message_server_list>
-{
-    auto known_servers = dbc->get_active_fss_servers();
-    auto server_list = std::make_shared<flight_safety_system::transport::fss_message_server_list>();
-    for (const auto &server_details : known_servers)
-    {
-        server_list->addServer(server_details->getAddress(),server_details->getPort());
-    }
-    return server_list;
-}
-
-void
-flight_safety_system::server::fss_client::processMessage(std::shared_ptr<flight_safety_system::transport::fss_message> msg)
-{
-    if (msg == nullptr)
-    {
-        return;
-    }
-#ifdef DEBUG
-    std::cout << "Got message " << msg->getType() << std::endl;
-#endif
-    if (msg->getType() == flight_safety_system::transport::message_type_closed)
-    {
-        /* Connection has been closed, cleanup */
-        this->client_handler->clientDisconnected(this);
-        return;
-    }
-    if (!this->identified)
-    {
-        /* Only accept identify messages */
-        if (msg->getType() == flight_safety_system::transport::message_type_identity)
-        {
-            auto identity_msg = std::dynamic_pointer_cast<flight_safety_system::transport::fss_message_identity>(msg);
-            if (identity_msg != nullptr)
-            {
-                auto client_name = identity_msg->getName();
-                auto possible_names = this->getConnection()->getClientNames();
-                bool name_valid = false;
-                if (possible_names.empty())
-                {
-                    FSS_LOG_ERROR("server", "Rejecting client: no CN found in certificate");
-                }
-                else
-                {
-                    for (const auto &possible_name: possible_names)
-                    {
-                        if (possible_name == client_name)
-                        {
-                            name_valid = true;
-                            break;
-                        }
-                    }
-                }
-                if (!name_valid)
-                {
-                    this->client_handler->clientDisconnected(this);
-                    return;
-                }
-                {
-                    std::lock_guard<std::mutex> guard(this->client_lock);
-                    this->name = std::move(client_name);
-                }
-                this->aircraft = true;
-                this->identified = true;
-                /* send the current command */
-                this->sendCommand();
-                /* send SMM config and servers list */
-                this->sendSMMSettings();
-                /* Send all the known fss servers */
-                this->getConnection()->sendMsg(getServersListMsg(this->dbc));
-            }
-        }
-        else if(msg->getType() == flight_safety_system::transport::message_type_identity_non_aircraft)
-        {
-            this->identified = true;
-            this->aircraft = false;
-        }
-        else
-        {
-            this->sendMsg(std::make_shared<flight_safety_system::transport::fss_message_identity_required>());
-        }
-    }
-    else
-    {
-        std::string client_name = this->getName();
-        switch (msg->getType())
-        {
-            case flight_safety_system::transport::message_type_unknown:
-            case flight_safety_system::transport::message_type_closed:
-            case flight_safety_system::transport::message_type_identity:
-            case flight_safety_system::transport::message_type_identity_non_aircraft:
-            case flight_safety_system::transport::message_type_identity_required:
-                break;
-            case flight_safety_system::transport::message_type_rtt_request:
-            {
-                /* Send a response */
-                auto reply_msg = std::make_shared<flight_safety_system::transport::fss_message_rtt_response>(msg->getId());
-                this->getConnection()->sendMsg(reply_msg);
-            }
-                break;
-            case flight_safety_system::transport::message_type_rtt_response:
-            {
-                /* Find the original message and calculate the response time */
-                std::shared_ptr<fss_client_rtt> rtt_req = nullptr;
-                uint64_t current_ts = fss_current_timestamp();
-                auto rtt_resp_msg = std::dynamic_pointer_cast<flight_safety_system::transport::fss_message_rtt_response>(msg);
-                if (rtt_resp_msg != nullptr)
-                {
-                    std::lock_guard<std::mutex> guard(this->client_lock);
-                    for(const auto &req : this->outstanding_rtt_requests)
-                    {
-                        if(req->getRequestId() == rtt_resp_msg->getRequestId())
-                        {
-                            rtt_req = req;
-                        }
-                    }
-                    if (rtt_req != nullptr)
-                    {
-                        this->outstanding_rtt_requests.remove(rtt_req);
-                    }
-                }
-                if (rtt_req != nullptr)
-                {
-#ifdef DEBUG
-                    std::cout << "RTT for " << client_name << " is " << (current_ts - rtt_req->getTimeStamp()) << std::endl;
-#endif
-                    this->dbc->asset_add_rtt(client_name, current_ts - rtt_req->getTimeStamp());
-                }
-            }
-                break;
-            case flight_safety_system::transport::message_type_position_report:
-            {
-                if (this->aircraft)
-                {
-                    /* Capture and store in the database */
-                    this->dbc->asset_add_position(client_name, msg->getLatitude(), msg->getLongitude(), msg->getAltitude());
-                }
-                /* Reflect this message to all aircraft clients */
-                this->client_handler->broadcastMsg(msg, this);
-            }
-                break;
-            case flight_safety_system::transport::message_type_system_status:
-            {
-                /* Capture and store in the database */
-                auto status_msg = std::dynamic_pointer_cast<flight_safety_system::transport::fss_message_system_status>(msg);
-                if (status_msg != nullptr)
-                {
-                    this->dbc->asset_add_status(client_name, status_msg->getBatRemaining(), status_msg->getBatMAHUsed(), status_msg->getBatVoltage());
-                }
-            }
-                break;
-            case flight_safety_system::transport::message_type_search_status:
-            {
-                /* Capture and store in the database */
-                auto status_msg = std::dynamic_pointer_cast<flight_safety_system::transport::fss_message_search_status>(msg);
-                if (status_msg != nullptr)
-                {
-                    this->dbc->asset_add_search_status(client_name, status_msg->getSearchId(), status_msg->getSearchCompleted(), status_msg->getSearchTotal());
-                }
-            }
-                break;
-            /* These are server->client only */
-            case flight_safety_system::transport::message_type_command:
-            case flight_safety_system::transport::message_type_server_list:
-            case flight_safety_system::transport::message_type_smm_settings:
-                break;
-        }
-    }
-}
-
 volatile sig_atomic_t running = 1;
 
 void sigIntHandler(int signum __attribute__((unused)))
@@ -479,19 +125,16 @@ void sigIntHandler(int signum __attribute__((unused)))
 auto
 main(int argc, char *argv[]) -> int
 {
-    /* Watch out for sigint */
     struct sigaction sa_int = {};
     sa_int.sa_handler = sigIntHandler;
     sigemptyset(&sa_int.sa_mask);
     sa_int.sa_flags = 0;
     sigaction(SIGINT, &sa_int, nullptr);
-    /* Ignore sig pipe */
     struct sigaction sa_pipe = {};
     sa_pipe.sa_handler = SIG_IGN;
     sigemptyset(&sa_pipe.sa_mask);
     sa_pipe.sa_flags = 0;
     sigaction(SIGPIPE, &sa_pipe, nullptr);
-    /* Read config */
     std::string conf_file = (argc > 1 ? std::string(argv[1]) : "/etc/fss/server.json");
     std::ifstream configfile(conf_file);
     if (!configfile.is_open())
@@ -507,13 +150,10 @@ main(int argc, char *argv[]) -> int
         flight_safety_system::log::set_level(config["log_level"].asString());
     }
 
-    /* Connect to database */
     auto dbc = std::make_shared<flight_safety_system::server::db_connection>(config["postgres"]["host"].asString(), config["postgres"]["user"].asString(), config["postgres"]["pass"].asString(), config["postgres"]["db"].asString());
 
-    /* Create the clients tracking */
     auto clients = std::make_shared<server_clients>();
 
-    /* Open listen socket */
     std::shared_ptr<flight_safety_system::transport::fss_listen> listen;
     FSS_LOG_INFO("server", "Starting fss server in TLS mode");
     std::string ca_public_key = config["ssl"]["ca_public_key"].asString();
@@ -529,23 +169,10 @@ main(int argc, char *argv[]) -> int
 #ifdef DEBUG
             std::cout << "New client connected" << std::endl;
 #endif
-            clients->clientConnected(std::make_shared<flight_safety_system::server::fss_client>(std::move(conn), dbc, clients.get()));
+            clients->clientConnected(std::make_shared<flight_safety_system::server::fss_client>(std::move(conn), dbc.get(), clients.get()));
             return true;
         },
         config["ssl"]["ca_public_key"].asString(), config["ssl"]["server_private_key"].asString(), config["ssl"]["server_public_key"].asString());
-
-    /* Process client messages:
-       - Battery status
-       - Position (reflect to other clients)
-       - Search information
-     */
-    /* Events:
-       - Client Connect
-       - Client Disconnect
-     */
-    /* Periodic activity
-       - Per client, send RTT message
-     */
 
     uint64_t counter = 0;
     constexpr int send_config_period = 15;
@@ -553,17 +180,14 @@ main(int argc, char *argv[]) -> int
     {
         sleep (1);
         clients->cleanupRemovableClients();
-        /* Send RTT messages to all clients */
         {
             auto rtt_req = std::make_shared<flight_safety_system::transport::fss_message_rtt_request>();
             clients->sendRTTRequest(rtt_req);
             clients->sendCommand();
         }
-        /* Send Config settings to all clients */
         if ((counter % send_config_period) == 0)
         {
-            /* Send all the known fss servers */
-            clients->broadcastMsg(getServersListMsg(dbc));
+            clients->broadcastMsg(flight_safety_system::server::build_server_list_msg(dbc.get()));
             clients->sendSMMSettings();
         }
         counter++;
