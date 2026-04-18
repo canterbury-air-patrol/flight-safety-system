@@ -1,8 +1,8 @@
 #include <fss-client-ssl.hpp>
+#include "fss-log.hpp"
 
 #include <iostream>
 #include <fstream>
-#include <ostream>
 #include <string>
 #include <utility>
 
@@ -17,7 +17,7 @@ flight_safety_system::client_ssl::fss_client::fss_client(const std::string &t_fi
     std::ifstream configfile(t_fileName);
     if (!configfile.is_open())
     {
-        std::cerr << "Failed to load configuration" << std::endl;
+        FSS_LOG_ERROR("client", "Failed to load configuration");
         return;
     }
     Json::Value config;

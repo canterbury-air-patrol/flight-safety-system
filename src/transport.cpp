@@ -6,6 +6,7 @@
 #include <cstring>
 #include <vector>
 #include "fss-transport.hpp"
+#include "fss-log.hpp"
 
 #include <iostream>
 
@@ -101,12 +102,12 @@ flight_safety_system::transport::fss_connection::processMessages()
         auto msg = this->recvMsg();
         if (msg == nullptr)
         {
-            std::cerr << "Got a null msg" << std::endl;
+            FSS_LOG_WARN("transport", "Got a null msg");
             continue;
         }
         if (msg->getType() == message_type_closed)
         {
-            std::cerr << "Remote closed the connection" << std::endl;
+            FSS_LOG_INFO("transport", "Remote closed the connection");
             this->run.store(false);
         }
         {
@@ -148,7 +149,7 @@ flight_safety_system::transport::fss_connection::connectTo(const std::string &ad
     struct sockaddr_storage remote = {};
     if (!convert_str_to_sa (address, port, &remote))
     {
-        std::cerr << "Failed to convert '" << address << "' to a usable address\n";
+        FSS_LOG_ERROR("transport", "Failed to convert '" << address << "' to a usable address");
         return false;
     }
 
@@ -171,7 +172,7 @@ flight_safety_system::transport::fss_connection::connectTo(const std::string &ad
 
     if (connect(current_fd, reinterpret_cast<struct sockaddr *>(&remote), remote.ss_family == AF_INET ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6)) < 0)
     {
-        perror(("Failed to connect to " + address).c_str());
+        FSS_PERROR("transport", "Failed to connect to " + address);
         close(current_fd);
         this->fd.store(-1);
         return false;
@@ -301,7 +302,7 @@ flight_safety_system::transport::fss_connection::recvMsg() -> std::shared_ptr<fl
         }
         if (this_time < 0)
         {
-            perror("Failed to get header");
+            FSS_PERROR("transport", "Failed to get header");
             return std::make_shared<flight_safety_system::transport::fss_message_closed>();
         }
         received += this_time;
@@ -327,7 +328,7 @@ flight_safety_system::transport::fss_connection::recvMsg() -> std::shared_ptr<fl
         ssize_t this_time = this->recvBytes(&data[received], total_length - received);
         if (this_time < 0)
         {
-            perror("Error receiving data");
+            FSS_PERROR("transport", "Error receiving data");
             break;
         }
         else if (this_time == 0)
@@ -348,7 +349,7 @@ flight_safety_system::transport::fss_connection::recvMsg() -> std::shared_ptr<fl
     }
     else
     {
-        perror ("Failed to get all the data: ");
+        FSS_PERROR("transport", "Failed to get all the data");
     }
     return msg;
 }
@@ -390,7 +391,7 @@ flight_safety_system::transport::fss_listen::processMessages()
             {
                 return;
             }
-            perror("Failed to accept: ");
+            FSS_PERROR("transport", "Failed to accept");
             continue;
         }
 #ifdef DEBUG
@@ -427,7 +428,7 @@ flight_safety_system::transport::fss_listen::startListening() -> bool
         this->setFd(socket(PF_INET6, SOCK_STREAM, IPPROTO_TCP));
         if (this->getFd() < 0)
         {
-            perror("Failed to open socket: ");
+            FSS_PERROR("transport", "Failed to open socket");
             return false;
         }
     }
@@ -438,14 +439,14 @@ flight_safety_system::transport::fss_listen::startListening() -> bool
     bind_addr.sin6_port = htons(this->port);
     if (bind(this->getFd(), reinterpret_cast<struct sockaddr *>(&bind_addr), sizeof(bind_addr)) < 0)
     {
-        perror("Failed to bind socket: ");
+        FSS_PERROR("transport", "Failed to bind socket");
         close(this->getFd());
         this->setFd(-1);
         return false;
     }
     if(listen(this->getFd(), this->max_pending_connections) < 0)
     {
-        perror("Failed to listen on socket: ");
+        FSS_PERROR("transport", "Failed to listen on socket");
         close(this->getFd());
         this->setFd(-1);
         return false;
