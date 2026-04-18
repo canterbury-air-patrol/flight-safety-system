@@ -16,13 +16,15 @@ all_test_SOURCES = main.cpp messages.cpp connection.cpp client.cpp \
 	queue_test.cpp \
 	reconnect_test.cpp \
 	connection_negative_test.cpp \
-	ssl_failure_test.cpp
+	ssl_failure_test.cpp \
+	server_session_test.cpp \
+	../src/client_session.cpp
 all_test_LDADD = ../src/libfss-transport.la ../src/libfss-client-ssl.la ../src/libfss.la $(JSONCPP_LIBS)
 
 all_test_SOURCES += connection-ssl.cpp certs certs-alt certs/expired
 all_test_LDADD += ../src/libfss-transport-ssl.la $(GNUTLS_LIBS) $(CATCH2_LIBS)
 
-EXTRA_DIST = test_helpers.hpp
+EXTRA_DIST = test_helpers.hpp mock_database.hpp
 
 BUILT_SOURCES += certs certs-alt certs/expired
 certs:
