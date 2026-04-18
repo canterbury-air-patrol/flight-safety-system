@@ -13,7 +13,7 @@ AC_PROG_CXX
 AC_PROG_CC
 AM_PROG_AR
 
-AX_CXX_COMPILE_STDCXX([14],[],[mandatory])
+AX_CXX_COMPILE_STDCXX([17],[],[mandatory])
 
 LT_INIT([disable-static pic-only])
 
