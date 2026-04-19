@@ -5,6 +5,7 @@
 
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <arpa/inet.h>
 #include <netdb.h>
 
@@ -67,4 +68,17 @@ convert_str_to_sa(const std::string &addr, uint16_t port, struct sockaddr_storag
     }
     
     return family != AF_UNSPEC;
+}
+
+void
+set_tcp_keepalive(int fd)
+{
+    int val = 1;
+    setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &val, sizeof(val));
+    val = 15;
+    setsockopt(fd, IPPROTO_TCP, TCP_KEEPIDLE, &val, sizeof(val));
+    val = 5;
+    setsockopt(fd, IPPROTO_TCP, TCP_KEEPINTVL, &val, sizeof(val));
+    val = 3;
+    setsockopt(fd, IPPROTO_TCP, TCP_KEEPCNT, &val, sizeof(val));
 }

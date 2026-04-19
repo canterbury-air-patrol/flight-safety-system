@@ -86,6 +86,20 @@ flight_safety_system::client_ssl::fss_client::connectTo(const std::string &t_add
 void
 flight_safety_system::client_ssl::fss_client::attemptReconnect()
 {
+    std::list<fss_server *> timed_out;
+    for (const auto &server : this->servers)
+    {
+        if (server->isServerTimedOut())
+        {
+            timed_out.push_back(server.get());
+        }
+    }
+    for (auto *server : timed_out)
+    {
+        FSS_LOG_WARN("client", "Server connection timed out, scheduling reconnect");
+        this->serverRequiresReconnect(server);
+    }
+
     std::list<std::shared_ptr<fss_server>> reconnected;
     bool any_connected = false;
     for (auto const &server : this->reconnect_servers)
@@ -299,6 +313,13 @@ flight_safety_system::client_ssl::fss_server::reconnect() -> bool
     return false;
 }
 
+auto
+flight_safety_system::client_ssl::fss_server::isServerTimedOut() -> bool
+{
+    if (!this->liveness_active.load(std::memory_order_relaxed)) { return false; }
+    return (this->clock->now_ms() - this->last_message_received_time.load(std::memory_order_relaxed)) > this->server_timeout_ms;
+}
+
 void
 flight_safety_system::client_ssl::fss_server::processMessage(std::shared_ptr<flight_safety_system::transport::fss_message> msg)
 {
@@ -319,6 +340,8 @@ flight_safety_system::client_ssl::fss_server::processMessage(std::shared_ptr<fli
     }
     else
     {
+        this->liveness_active.store(true, std::memory_order_relaxed);
+        this->last_message_received_time.store(this->clock->now_ms(), std::memory_order_relaxed);
         switch (msg->getType())
         {
             case flight_safety_system::transport::message_type_unknown:

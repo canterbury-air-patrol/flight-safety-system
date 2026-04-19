@@ -26,19 +26,19 @@ dangerousTypeCast:src/transport.cpp:38
 dangerousTypeCast:src/transport.cpp:39
 duplicateBreak:src/transport.cpp:35
 duplicateBreak:src/transport.cpp:40
-cstyleCast:src/transport.cpp:207
-constVariablePointer:src/transport.cpp:207
+cstyleCast:src/transport.cpp:209
+constVariablePointer:src/transport.cpp:209
 
 # transport-helpers.cpp — network address utility C-style casts + AF_UNSPEC tautology
-dangerousTypeCast:src/transport-helpers.cpp:22
-cstyleCast:src/transport-helpers.cpp:22
-dangerousTypeCast:src/transport-helpers.cpp:35
-cstyleCast:src/transport-helpers.cpp:35
-dangerousTypeCast:src/transport-helpers.cpp:59
-cstyleCast:src/transport-helpers.cpp:59
-dangerousTypeCast:src/transport-helpers.cpp:64
-cstyleCast:src/transport-helpers.cpp:64
-knownConditionTrueFalse:src/transport-helpers.cpp:16
+dangerousTypeCast:src/transport-helpers.cpp:23
+cstyleCast:src/transport-helpers.cpp:23
+dangerousTypeCast:src/transport-helpers.cpp:36
+cstyleCast:src/transport-helpers.cpp:36
+dangerousTypeCast:src/transport-helpers.cpp:60
+cstyleCast:src/transport-helpers.cpp:60
+dangerousTypeCast:src/transport-helpers.cpp:65
+cstyleCast:src/transport-helpers.cpp:65
+knownConditionTrueFalse:src/transport-helpers.cpp:17
 
 # transport-messages.cpp — wire-protocol packing; C-style casts are intentional
 functionStatic:src/transport-messages.cpp:172

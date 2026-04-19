@@ -123,6 +123,9 @@ private:
     auto getName() -> std::string;
     uint64_t last_command_send_ts{0};
     uint64_t last_command_dbid{0};
+    bool liveness_active{false};
+    uint64_t last_rtt_response_time{0};
+    uint64_t client_timeout_ms{30000};
     IDatabase *dbc;
     fss_client_handler *client_handler;
     std::shared_ptr<IClock> clock{std::make_shared<WallClock>()};
@@ -139,6 +142,8 @@ public:
     void sendCommand();
     auto isAircraft() -> bool;
     void setClock(std::shared_ptr<IClock> t_clock);
+    void setTimeoutMs(uint64_t ms);
+    auto isTimedOut() -> bool;
 };
 } // namespace server
 } // namespace flight_safety_system

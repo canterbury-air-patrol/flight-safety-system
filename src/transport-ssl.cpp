@@ -104,6 +104,8 @@ flight_safety_system::transport_ssl::fss_connection_client::connectTo(const std:
         return false;
     }
 
+    set_tcp_keepalive(this->getFd());
+
     this->usable = this->setupSSL();
 
     if (this->usable)
