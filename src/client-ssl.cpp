@@ -288,13 +288,16 @@ flight_safety_system::client_ssl::fss_server::reconnect() -> bool
         this->clearConnection();
     }
 
-    if (elapsed_time > this->retry_delay)
+    if (elapsed_time > this->effective_delay)
     {
         this->retry_count++;
         if (this->retry_delay < retry_delay_cap)
         {
             this->retry_delay += this->retry_delay;
         }
+        int64_t jitter_range = static_cast<int64_t>(this->retry_delay) / 4;
+        std::uniform_int_distribution<int64_t> dist(-jitter_range, jitter_range);
+        this->effective_delay = static_cast<uint64_t>(static_cast<int64_t>(this->retry_delay) + dist(this->rng));
         this->last_tried = ts;
         if (!this->reconnect_to())
         {
@@ -307,6 +310,7 @@ flight_safety_system::client_ssl::fss_server::reconnect() -> bool
             this->retry_count = 0;
             this->last_tried = 0;
             this->retry_delay = retry_delay_start;
+            this->effective_delay = retry_delay_start;
             return true;
         }
     }

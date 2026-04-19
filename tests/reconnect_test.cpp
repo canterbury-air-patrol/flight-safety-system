@@ -10,11 +10,12 @@
 #error No catch header
 #endif
 
-#include <atomic>
+#include <algorithm>
 #include <chrono>
 #include <memory>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include "fss-transport.hpp"
 #include "fss-client-ssl.hpp"
@@ -175,28 +176,64 @@ TEST_CASE("reconnect: fake clock exposes exponential backoff growth")
     auto fake = std::make_shared<FakeClock>();
     server->setClock(fake);
 
-    /* First attempt: clock must exceed the initial 1000ms retry delay. */
+    /* First attempt: clock must exceed the initial 1000ms retry delay (no jitter yet). */
     fake->advance(1001);
     server->reconnect();
     REQUIRE(server->attempts == 1);
 
-    /* Retry delay has doubled to 2000ms. A 1001ms gap must not fire. */
-    fake->advance(1001);
+    /* Base doubles to 2000ms; with ±25% jitter effective_delay ∈ [1500, 2500].
+     * 1499ms < 1500ms (min) so this is always below the window. */
+    fake->advance(1499);
     server->reconnect();
     REQUIRE(server->attempts == 1);
 
-    /* 2001ms since last_tried → attempt 2, delay doubles to 4000. */
-    fake->advance(1001);
+    /* 2501ms > 2500ms (max) so this always fires regardless of jitter. */
+    fake->advance(1002);
     server->reconnect();
     REQUIRE(server->attempts == 2);
 
-    fake->advance(4000);
+    /* Base doubles to 4000ms; effective_delay ∈ [3000, 5000].
+     * 2999ms < 3000ms (min) so still below window. */
+    fake->advance(2999);
     server->reconnect();
     REQUIRE(server->attempts == 2);
 
-    fake->advance(1);
+    /* 5001ms > 5000ms (max) so always fires. */
+    fake->advance(2002);
     server->reconnect();
     REQUIRE(server->attempts == 3);
+}
+
+TEST_CASE("reconnect: jitter keeps effective delay within 25% of base")
+{
+    auto client = std::make_shared<flight_safety_system::client_ssl::fss_client>(
+        CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE);
+
+    /* Run enough instances to verify bounds and variation. */
+    std::vector<uint64_t> delays;
+    for (int i = 0; i < 20; ++i)
+    {
+        auto server = std::make_shared<CountingServer>(
+            client.get(), "127.0.0.1", static_cast<uint16_t>(20601),
+            CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE);
+        auto fake = std::make_shared<FakeClock>();
+        server->setClock(fake);
+
+        fake->advance(1001);
+        server->reconnect();
+        REQUIRE(server->attempts == 1);
+
+        /* Base doubled to 2000ms; effective_delay must be within [1500, 2500]. */
+        uint64_t eff = server->getEffectiveDelay();
+        REQUIRE(eff >= 1500);
+        REQUIRE(eff <= 2500);
+        delays.push_back(eff);
+    }
+
+    /* Delays must not all be identical — jitter should introduce variation. */
+    bool any_differ = std::any_of(delays.begin() + 1, delays.end(),
+                                  [&](uint64_t d) { return d != delays[0]; });
+    REQUIRE(any_differ);
 }
 
 TEST_CASE("reconnect: multi-server failover keeps secondary reachable")

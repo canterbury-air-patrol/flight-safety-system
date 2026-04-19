@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <list>
 #include <memory>
+#include <random>
 
 namespace flight_safety_system {
 namespace client_ssl {
@@ -66,6 +67,8 @@ private:
     static constexpr uint64_t retry_delay_start = 1000;
     static constexpr uint64_t retry_delay_cap = 30000;
     uint64_t retry_delay{retry_delay_start};
+    uint64_t effective_delay{retry_delay_start};
+    std::mt19937 rng{std::random_device{}()};
     std::shared_ptr<flight_safety_system::IClock> clock{std::make_shared<flight_safety_system::WallClock>()};
     std::atomic<bool> liveness_active{false};
     std::atomic<uint64_t> last_message_received_time{0};
@@ -88,6 +91,7 @@ public:
     void setClock(std::shared_ptr<flight_safety_system::IClock> t_clock);
     void setServerTimeoutMs(uint64_t ms) { this->server_timeout_ms = ms; }
     auto isServerTimedOut() -> bool;
+    auto getEffectiveDelay() const -> uint64_t { return this->effective_delay; }
 };
 
 
