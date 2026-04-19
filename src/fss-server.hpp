@@ -1,5 +1,6 @@
 #pragma once
 
+#include "fss.hpp"
 #include "fss-transport.hpp"
 
 #include <atomic>
@@ -124,6 +125,7 @@ private:
     uint64_t last_command_dbid{0};
     IDatabase *dbc;
     fss_client_handler *client_handler;
+    std::shared_ptr<IClock> clock{std::make_shared<WallClock>()};
 public:
     fss_client(std::shared_ptr<transport::fss_connection> conn, IDatabase *t_dbc, fss_client_handler *t_handler);
     fss_client(fss_client&) = delete;
@@ -136,6 +138,7 @@ public:
     void sendSMMSettings();
     void sendCommand();
     auto isAircraft() -> bool;
+    void setClock(std::shared_ptr<IClock> t_clock);
 };
 } // namespace server
 } // namespace flight_safety_system

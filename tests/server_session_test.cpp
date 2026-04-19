@@ -53,6 +53,12 @@ protected:
     }
 };
 
+struct FakeClock : public fss::IClock {
+    uint64_t t{0};
+    auto now_ms() const -> uint64_t override { return t; }
+    void advance(uint64_t ms) { t += ms; }
+};
+
 class NullClientHandler : public fss::server::fss_client_handler {
 public:
     int disconnects{0};
@@ -68,15 +74,8 @@ public:
 
 } // namespace
 
-TEST_CASE("session: rejects identify when asset unknown to database",
-          "[!shouldfail][todo16]")
+TEST_CASE("session: rejects identify when asset unknown to database")
 {
-    /* Desired behaviour: if IDatabase::getAssetId returns 0 at identify,
-     * the session must not send SMM settings, server list, or commands
-     * to the peer. Currently server.cpp accepts the identity and only
-     * the silent-drop happens inside DB methods, so the peer still sees
-     * application traffic — [!shouldfail] captures the target contract
-     * while we refactor. */
     fss_test::MockDatabase mock;
 
     auto conn = std::make_shared<FakeConnection>();
@@ -123,13 +122,8 @@ TEST_CASE("session: getCommand returns newest-timestamp entry")
     REQUIRE(saw_command);
 }
 
-TEST_CASE("session: RTT timeout disconnects client",
-          "[!shouldfail][todo17]")
+TEST_CASE("session: RTT timeout disconnects client")
 {
-    /* Pending todo/17: once ClientSession accepts an IClock seam, the
-     * test will advance time past the RTT timeout and assert that
-     * clientDisconnected fires. The production code has no timeout
-     * logic today, so this fails by design. */
     fss_test::MockDatabase mock;
     mock.asset_ids["craft"] = 1;
 
@@ -137,13 +131,18 @@ TEST_CASE("session: RTT timeout disconnects client",
     conn->cert_names.push_back("craft");
     NullClientHandler handler;
 
+    auto clock = std::make_shared<FakeClock>();
     auto session = std::make_shared<fss::server::fss_client>(conn, &mock, &handler);
+    session->setClock(clock);
     session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
 
-    auto rtt_req = std::make_shared<fss::transport::fss_message_rtt_request>();
-    session->sendRTTRequest(rtt_req);
+    auto rtt_req1 = std::make_shared<fss::transport::fss_message_rtt_request>();
+    session->sendRTTRequest(rtt_req1);      // queued at t=0
 
-    /* No clock seam yet: simulate "time past RTT timeout" by asserting
-     * the disconnect callback has fired. It has not. */
+    clock->advance(30001);                  // past rtt_timeout (30 s)
+
+    auto rtt_req2 = std::make_shared<fss::transport::fss_message_rtt_request>();
+    session->sendRTTRequest(rtt_req2);      // triggers timeout → disconnect
+
     REQUIRE(handler.disconnects > 0);
 }
