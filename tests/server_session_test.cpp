@@ -122,6 +122,37 @@ TEST_CASE("session: getCommand returns newest-timestamp entry")
     REQUIRE(saw_command);
 }
 
+TEST_CASE("session: server list sent on identify contains seeded servers")
+{
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 1;
+    mock.active_servers.emplace_back("10.0.0.1", uint16_t{8080});
+    mock.active_servers.emplace_back("10.0.0.2", uint16_t{9090});
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, &handler);
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+
+    std::shared_ptr<fss::transport::fss_message_server_list> server_list_msg;
+    for (const auto &msg : conn->sent)
+    {
+        if (msg->getType() == fss::transport::message_type_server_list)
+        {
+            server_list_msg = std::dynamic_pointer_cast<fss::transport::fss_message_server_list>(msg);
+        }
+    }
+    REQUIRE(server_list_msg != nullptr);
+    auto servers = server_list_msg->getServers();
+    REQUIRE(servers.size() == 2);
+    CHECK(servers[0].first == "10.0.0.1");
+    CHECK(servers[0].second == 8080);
+    CHECK(servers[1].first == "10.0.0.2");
+    CHECK(servers[1].second == 9090);
+}
+
 TEST_CASE("session: RTT timeout disconnects client")
 {
     fss_test::MockDatabase mock;
