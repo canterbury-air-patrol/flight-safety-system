@@ -23,7 +23,7 @@ libfss_la_SOURCES = fss-main.cpp fss.hpp
 
 include_HEADERS+= fss-transport.hpp
 pkgconfig_DATA+= fss-transport.pc
-libfss_transport_la_SOURCES = transport.cpp transport-helpers.cpp transport-messages.cpp transport.hpp
+libfss_transport_la_SOURCES = transport.cpp transport-helpers.cpp transport-messages.cpp transport.hpp fss-endian.hpp
 libfss_transport_la_LIBADD = $(pthread_LIBS)
 
 lib_LTLIBRARIES += libfss-transport-ssl.la
