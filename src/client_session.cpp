@@ -1,0 +1,317 @@
+#include "fss-transport.hpp"
+#include "fss.hpp"
+#include "fss-log.hpp"
+#include "fss-server.hpp"
+
+#include <algorithm>
+#include <iostream>
+#include <memory>
+#include <mutex>
+#include <utility>
+
+namespace fss = flight_safety_system;
+
+constexpr int sec_to_msec = 1000;
+constexpr uint64_t rtt_retry_interval = 10 * sec_to_msec;
+
+fss::server::smm_settings::smm_settings(std::string t_address, std::string t_username, std::string t_password) : address(std::move(t_address)), username(std::move(t_username)), password(std::move(t_password))
+{
+}
+
+auto fss::server::smm_settings::getAddress() -> std::string { return this->address; }
+auto fss::server::smm_settings::getUsername() -> std::string { return this->username; }
+auto fss::server::smm_settings::getPassword() -> std::string { return this->password; }
+
+fss::server::fss_server_details::fss_server_details(std::string t_address, uint16_t t_port) : address(std::move(t_address)), port(t_port)
+{
+}
+
+auto fss::server::fss_server_details::getAddress() -> std::string { return this->address; }
+auto fss::server::fss_server_details::getPort() -> uint16_t { return this->port; }
+
+fss::server::asset_command::asset_command(uint64_t t_dbid, uint64_t t_timestamp, const std::string &t_cmd, double t_latitude, double t_longitude, uint16_t t_altitude) : dbid(t_dbid), timestamp(t_timestamp), latitude(t_latitude), longitude(t_longitude), altitude(t_altitude)
+{
+    if (t_cmd == "RTL") {
+        this->command = transport::asset_command_rtl;
+    } else if (t_cmd == "HOLD") {
+        this->command = transport::asset_command_hold;
+    } else if (t_cmd == "GOTO") {
+        this->command = transport::asset_command_goto;
+    } else if (t_cmd == "RON") {
+        this->command = transport::asset_command_resume;
+    } else if (t_cmd == "DISARM") {
+        this->command = transport::asset_command_disarm;
+    } else if (t_cmd == "ALT") {
+        this->command = transport::asset_command_altitude;
+    } else if (t_cmd == "TERM") {
+        this->command = transport::asset_command_terminate;
+    } else if (t_cmd == "MAN") {
+        this->command = transport::asset_command_manual;
+    }
+}
+
+auto fss::server::asset_command::getDBId() -> uint64_t { return this->dbid; }
+auto fss::server::asset_command::getTimeStamp() -> uint64_t { return this->timestamp; }
+auto fss::server::asset_command::getCommand() -> fss::transport::fss_asset_command { return this->command; }
+auto fss::server::asset_command::getLatitude() -> double { return this->latitude; }
+auto fss::server::asset_command::getLongitude() -> double { return this->longitude; }
+auto fss::server::asset_command::getAltitude() -> uint16_t { return this->altitude; }
+
+fss::server::fss_client_rtt::fss_client_rtt(uint64_t t_timestamp, uint64_t t_reqid) : timestamp(t_timestamp), reqid(t_reqid)
+{
+}
+
+auto fss::server::fss_client_rtt::getTimeStamp() -> uint64_t { return this->timestamp; }
+auto fss::server::fss_client_rtt::getRequestId() -> uint64_t { return this->reqid; }
+
+fss::server::fss_client::fss_client(std::shared_ptr<fss::transport::fss_connection> t_conn, IDatabase *t_dbc, fss_client_handler *t_handler) : fss_message_cb(std::move(t_conn)), dbc(t_dbc), client_handler(t_handler)
+{
+    this->getConnection()->setHandler(this);
+}
+
+fss::server::fss_client::~fss_client() = default;
+
+auto
+fss::server::fss_client::isAircraft() -> bool
+{
+    return this->aircraft;
+}
+
+auto
+fss::server::fss_client::getName() -> std::string
+{
+    std::lock_guard<std::mutex> guard(this->client_lock);
+    return this->name;
+}
+
+void
+fss::server::fss_client::sendCommand()
+{
+    std::lock_guard<std::mutex> guard(this->client_lock);
+    uint64_t ts = fss_current_timestamp();
+    uint64_t asset_id = this->dbc->getAssetId(this->name);
+    if (asset_id == 0) { return; }
+    auto ac = this->dbc->getCommand(asset_id);
+    constexpr int timeout_time = 10 * sec_to_msec;
+    if (ac != nullptr && (ac->getDBId() != this->last_command_dbid || ts > (this->last_command_send_ts + timeout_time)))
+    {
+        this->last_command_send_ts = ts;
+        this->last_command_dbid = ac->getDBId();
+        std::shared_ptr<fss::transport::fss_message_asset_command> msg = nullptr;
+        auto command = ac->getCommand();
+        switch (command)
+        {
+            case fss::transport::asset_command_goto:
+                msg = std::make_shared<fss::transport::fss_message_asset_command>(command, ac->getTimeStamp(), ac->getLatitude(), ac->getLongitude());
+                break;
+            case fss::transport::asset_command_altitude:
+                msg = std::make_shared<fss::transport::fss_message_asset_command>(command, ac->getTimeStamp(), ac->getAltitude());
+                break;
+            default:
+                msg = std::make_shared<fss::transport::fss_message_asset_command>(command, ac->getTimeStamp());
+                break;
+        }
+        this->getConnection()->sendMsg(msg);
+    }
+}
+
+void
+fss::server::fss_client::sendRTTRequest(const std::shared_ptr<fss::transport::fss_message_rtt_request> &rtt_req)
+{
+    std::lock_guard<std::mutex> guard(this->client_lock);
+    uint64_t ts = fss_current_timestamp();
+    if (!this->outstanding_rtt_requests.empty())
+    {
+        auto &last = this->outstanding_rtt_requests.back();
+        if (ts - last->getTimeStamp() < rtt_retry_interval)
+        {
+            return;
+        }
+    }
+    this->getConnection()->sendMsg(rtt_req);
+    this->outstanding_rtt_requests.push_back(std::make_shared<fss_client_rtt>(ts, rtt_req->getId()));
+}
+
+void
+fss::server::fss_client::sendSMMSettings()
+{
+    std::string client_name;
+    {
+        std::lock_guard<std::mutex> guard(this->client_lock);
+        client_name = this->name;
+    }
+    uint64_t asset_id = this->dbc->getAssetId(client_name);
+    if (asset_id == 0) { return; }
+    auto smm = this->dbc->getSmmSettings(asset_id);
+    if (smm != nullptr)
+    {
+        auto settings_msg = std::make_shared<fss::transport::fss_message_smm_settings>(smm->getAddress(), smm->getUsername(), smm->getPassword());
+        this->getConnection()->sendMsg(settings_msg);
+    }
+}
+
+namespace {
+auto getServersListMsg(fss::server::IDatabase *dbc) -> std::shared_ptr<fss::transport::fss_message_server_list>
+{
+    auto server_list = std::make_shared<fss::transport::fss_message_server_list>();
+    for (auto &server_details : dbc->getActiveServers())
+    {
+        server_list->addServer(server_details.getAddress(), server_details.getPort());
+    }
+    return server_list;
+}
+} // namespace
+
+void
+fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss_message> msg)
+{
+    if (msg == nullptr)
+    {
+        return;
+    }
+#ifdef DEBUG
+    std::cout << "Got message " << msg->getType() << std::endl;
+#endif
+    if (msg->getType() == fss::transport::message_type_closed)
+    {
+        this->client_handler->clientDisconnected(this);
+        return;
+    }
+    if (!this->identified)
+    {
+        if (msg->getType() == fss::transport::message_type_identity)
+        {
+            auto identity_msg = std::dynamic_pointer_cast<fss::transport::fss_message_identity>(msg);
+            if (identity_msg != nullptr)
+            {
+                auto client_name = identity_msg->getName();
+                auto possible_names = this->getConnection()->getClientNames();
+                bool name_valid = false;
+                if (possible_names.empty())
+                {
+                    FSS_LOG_ERROR("server", "Rejecting client: no CN found in certificate");
+                }
+                else
+                {
+                    name_valid = std::any_of(possible_names.begin(), possible_names.end(), [&client_name](const auto &n) {
+                        return n == client_name;
+                    });
+                }
+                if (!name_valid)
+                {
+                    this->client_handler->clientDisconnected(this);
+                    return;
+                }
+                {
+                    std::lock_guard<std::mutex> guard(this->client_lock);
+                    this->name = std::move(client_name);
+                }
+                this->aircraft = true;
+                this->identified = true;
+                this->sendCommand();
+                this->sendSMMSettings();
+                this->getConnection()->sendMsg(getServersListMsg(this->dbc));
+            }
+        }
+        else if(msg->getType() == fss::transport::message_type_identity_non_aircraft)
+        {
+            this->identified = true;
+            this->aircraft = false;
+        }
+        else
+        {
+            this->sendMsg(std::make_shared<fss::transport::fss_message_identity_required>());
+        }
+    }
+    else
+    {
+        std::string client_name = this->getName();
+        uint64_t asset_id = this->dbc->getAssetId(client_name);
+        switch (msg->getType())
+        {
+            case fss::transport::message_type_unknown:
+            case fss::transport::message_type_closed:
+            case fss::transport::message_type_identity:
+            case fss::transport::message_type_identity_non_aircraft:
+            case fss::transport::message_type_identity_required:
+                break;
+            case fss::transport::message_type_rtt_request:
+            {
+                auto reply_msg = std::make_shared<fss::transport::fss_message_rtt_response>(msg->getId());
+                this->getConnection()->sendMsg(reply_msg);
+            }
+                break;
+            case fss::transport::message_type_rtt_response:
+            {
+                std::shared_ptr<fss_client_rtt> rtt_req = nullptr;
+                uint64_t current_ts = fss_current_timestamp();
+                auto rtt_resp_msg = std::dynamic_pointer_cast<fss::transport::fss_message_rtt_response>(msg);
+                if (rtt_resp_msg != nullptr)
+                {
+                    std::lock_guard<std::mutex> guard(this->client_lock);
+                    for(const auto &req : this->outstanding_rtt_requests)
+                    {
+                        if(req->getRequestId() == rtt_resp_msg->getRequestId())
+                        {
+                            rtt_req = req;
+                        }
+                    }
+                    if (rtt_req != nullptr)
+                    {
+                        this->outstanding_rtt_requests.remove(rtt_req);
+                    }
+                }
+                if (rtt_req != nullptr && asset_id != 0)
+                {
+#ifdef DEBUG
+                    std::cout << "RTT for " << client_name << " is " << (current_ts - rtt_req->getTimeStamp()) << std::endl;
+#endif
+                    this->dbc->recordRtt(asset_id, current_ts - rtt_req->getTimeStamp());
+                }
+            }
+                break;
+            case fss::transport::message_type_position_report:
+            {
+                if (this->aircraft && asset_id != 0)
+                {
+                    this->dbc->recordPosition(asset_id, msg->getLatitude(), msg->getLongitude(), msg->getAltitude());
+                }
+                this->client_handler->broadcastMsg(msg, this);
+            }
+                break;
+            case fss::transport::message_type_system_status:
+            {
+                auto status_msg = std::dynamic_pointer_cast<fss::transport::fss_message_system_status>(msg);
+                if (status_msg != nullptr && asset_id != 0)
+                {
+                    this->dbc->recordStatus(asset_id, status_msg->getBatRemaining(), status_msg->getBatMAHUsed(), status_msg->getBatVoltage());
+                }
+            }
+                break;
+            case fss::transport::message_type_search_status:
+            {
+                auto status_msg = std::dynamic_pointer_cast<fss::transport::fss_message_search_status>(msg);
+                if (status_msg != nullptr && asset_id != 0)
+                {
+                    this->dbc->recordSearchStatus(asset_id, status_msg->getSearchId(), status_msg->getSearchCompleted(), status_msg->getSearchTotal());
+                }
+            }
+                break;
+            case fss::transport::message_type_command:
+            case fss::transport::message_type_server_list:
+            case fss::transport::message_type_smm_settings:
+                break;
+        }
+    }
+}
+
+namespace flight_safety_system {
+namespace server {
+/* Exposed so server.cpp can broadcast the server list without duplicating
+ * the helper. Not in the public header — only the server binary uses it. */
+auto build_server_list_msg(IDatabase *dbc) -> std::shared_ptr<transport::fss_message_server_list>
+{
+    return getServersListMsg(dbc);
+}
+} // namespace server
+} // namespace flight_safety_system
