@@ -1018,6 +1018,10 @@ flight_safety_system::transport::fss_message::decode(const std::shared_ptr<buf_l
             msg = std::make_shared<fss_message_identity_required>(msg_id, bl);
             break;
     }
-    
+
+    if (msg != nullptr && msg->getType() != type)
+    {
+        return nullptr;
+    }
     return msg;
 }
