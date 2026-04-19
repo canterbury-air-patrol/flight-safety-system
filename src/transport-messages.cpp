@@ -17,9 +17,13 @@ packString(const std::shared_ptr<flight_safety_system::transport::buf_len> &bl, 
     uint16_t len = htons(str_len);
     bl->addData((char *)&len, sizeof(uint16_t));
     bl->addData(val.c_str(), str_len);
-    /* align to 8-byte boundary (will add 1 to 8 bytes on '\0') */
+    /* align to 8-byte boundary */
     uint64_t empty = 0;
-    bl->addData((char *)&empty, sizeof(uint64_t) - (bl->getLength() % sizeof(uint64_t)));
+    size_t pack_remainder = bl->getLength() % sizeof(uint64_t);
+    if (pack_remainder != 0)
+    {
+        bl->addData((char *)&empty, sizeof(uint64_t) - pack_remainder);
+    }
 }
 
 static auto
@@ -40,7 +44,11 @@ unpackString(const char *data, size_t length, size_t &offset, std::string &resul
     result.assign(data + offset, len);
     offset += len;
     /* Align to 8-byte boundary */
-    offset += (sizeof(uint64_t) - offset % sizeof(uint64_t));
+    size_t unpack_remainder = offset % sizeof(uint64_t);
+    if (unpack_remainder != 0)
+    {
+        offset += sizeof(uint64_t) - unpack_remainder;
+    }
     return true;
 }
 
