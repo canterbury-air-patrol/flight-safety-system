@@ -43,7 +43,19 @@ flight_safety_system::client_ssl::fss_client::fss_client(std::string t_ca, std::
 {
 }
 
-flight_safety_system::client_ssl::fss_client::~fss_client() = default;
+flight_safety_system::client_ssl::fss_client::~fss_client()
+{
+    // Drain both lists before disconnecting so that any concurrent
+    // serverRequiresReconnect call sees empty lists and cannot push_back
+    // into a list that is already being destroyed.
+    std::list<std::shared_ptr<fss_server>> all;
+    all.splice(all.end(), this->servers);
+    all.splice(all.end(), this->reconnect_servers);
+    for (const auto &server : all)
+    {
+        server->disconnect();
+    }
+}
 
 void
 flight_safety_system::client_ssl::fss_client::disconnect()
