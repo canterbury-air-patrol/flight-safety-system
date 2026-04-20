@@ -456,6 +456,21 @@ TEST_CASE("Server List Message Check") {
     REQUIRE(sl3[0].second == server_port);
 }
 
+TEST_CASE("Position Report String Alignment") {
+    /* Callsign "AB" (2 bytes): buf is at 44 bytes when packString is called,
+       so len(2) + "AB"(2) = 4 bytes reaches offset 48, which is already 8-byte
+       aligned. The bug would add 8 extra padding bytes; the fix adds 0. */
+    constexpr size_t expected_packed_size = 56;
+    auto msg = std::make_shared<flight_safety_system::transport::fss_message_position_report>(
+        -43.5, 172.0, 100, 0, 0, 0, 0, "AB", 0, 0, 0, 0, 0, 0);
+    msg->setId(1);
+    auto bl = msg->getPacked();
+    REQUIRE(bl != nullptr);
+    REQUIRE(bl->getLength() == expected_packed_size);
+    auto decoded = std::make_shared<flight_safety_system::transport::fss_message_position_report>(1, bl);
+    REQUIRE(decoded->getCallSign() == "AB");
+}
+
 TEST_CASE("Identity (Non-Aircraft) Message Check") {
     auto msg_id = static_cast<uint64_t>(random());
     constexpr int bit_1 = 13;

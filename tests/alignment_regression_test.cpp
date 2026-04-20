@@ -83,7 +83,7 @@ TEST_CASE("alignment: non-aligned callsign lengths add no extra padding")
 }
 
 TEST_CASE("alignment: 8-byte-aligned callsign length adds 0 padding, not 8",
-          "[!shouldfail][bug10]")
+          "[bug10]")
 {
     /* L where (header + fixed + 2 + L) % 8 == 0 triggers the bug.
      * header(12) + fixed_before_cs(32) + 2 = 46; L such that (46 + L) % 8 == 0:
