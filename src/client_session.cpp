@@ -217,7 +217,7 @@ fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss_mess
                 }
                 else
                 {
-                    name_valid = std::any_of(possible_names.begin(), possible_names.end(), [&client_name](const auto &n) {
+                    name_valid = std::any_of(possible_names.begin(), possible_names.end(), [&client_name](const auto &n) -> auto {
                         return n == client_name;
                     });
                 }

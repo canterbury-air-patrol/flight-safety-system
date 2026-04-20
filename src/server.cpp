@@ -37,7 +37,7 @@ private:
     std::atomic<bool> shutting_down{false};
 public:
     server_clients() = default;
-    ~server_clients() {
+    ~server_clients() override {
         this->shutting_down = true;
         std::lock_guard<std::mutex> guard(this->lock);
         for (const auto &c: this->clients)
@@ -69,7 +69,7 @@ public:
     {
         std::lock_guard<std::mutex> guard(this->lock);
         if (this->shutting_down) return;
-        auto it = std::find_if(this->clients.begin(), this->clients.end(), [client](const auto &c) {
+        auto it = std::find_if(this->clients.begin(), this->clients.end(), [client](const auto &c) -> auto {
             return c.get() == client;
         });
         if (it != this->clients.end())
