@@ -1,6 +1,7 @@
 #include <fss-client-ssl.hpp>
 #include "fss-log.hpp"
 
+#include <algorithm>
 #include <iostream>
 #include <fstream>
 #include <string>
@@ -139,14 +140,9 @@ flight_safety_system::client_ssl::fss_client::addServer(const std::shared_ptr<fl
 static auto
 server_list_matches (const std::list<std::shared_ptr<flight_safety_system::client_ssl::fss_server>> &servers, const std::string &address, uint16_t port) -> bool
 {
-    for(auto const &server: servers)
-    {
-        if (server->getAddress().compare(address) == 0 && server->getPort() == port)
-        {
-            return true;
-        }
-    }
-    return false;
+    return std::any_of(servers.begin(), servers.end(), [&address, &port](const auto &n) -> auto {
+                          return (n->getAddress().compare(address) == 0 && n->getPort() == port);
+                       });
 }
 
 void
