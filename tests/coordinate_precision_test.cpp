@@ -24,19 +24,12 @@ using flight_safety_system::transport::fss_message_position_report;
 /* Regression for todo/11-coordinate-constant.md
  *
  * Coordinates are transported as int32_t fixed-point with scale factor
- * `flt_to_int` (currently 0.000001f in src/transport-messages.cpp). This
- * scale controls the precision of lat/long on the wire. The tests below
- * round-trip representative coordinates through pack+decode and assert
- * accuracy within the documented tolerance. A regression that changes
- * the scale, narrows the integer width, or introduces additional
+ * FSS_COORD_SCALE (0.0000001 / 1e-7, defined in src/fss-transport.hpp).
+ * This scale controls the precision of lat/long on the wire. The tests
+ * below round-trip representative coordinates through pack+decode and
+ * assert accuracy within the documented tolerance. A regression that
+ * changes the scale, narrows the integer width, or introduces additional
  * precision loss will surface here.
- *
- * The current code casts flt_to_int (float) up to double for division
- * and multiplication, so the *effective* scale is ~9.999999974752e-07
- * rather than exactly 1e-6. The tests target 1e-6 worst-case tolerance;
- * a tighter 1e-7 test is tagged [!shouldfail][bug11] and will start
- * passing once the todo lands and the scale becomes an exact double
- * (or the coord representation widens).
  */
 
 namespace {
@@ -119,14 +112,10 @@ TEST_CASE("coord: northernmost latitudes round-trip")
     }
 }
 
-TEST_CASE("coord: 7-decimal-place precision preserved",
-          "[!shouldfail][bug11]")
+TEST_CASE("coord: 7-decimal-place precision preserved")
 {
-    /* With the current float scale constant, the effective multiplier
-     * drifts from exact 1e-6 by ~2.5e-15 per unit count, so values that
-     * should be representable to 7dp actually lose a digit. This test
-     * documents the target precision once the scale becomes an exact
-     * double (per todo/11). */
+    /* FSS_COORD_SCALE = 1e-7 gives int32 resolution of 0.1 µdegree, so
+     * 7-decimal-place coordinates round-trip without loss. */
     double lat = 0.0, lng = 0.0;
     std::tie(lat, lng) = round_trip(-43.5000001, 172.5000001);
     REQUIRE(std::fabs(lat - (-43.5000001)) < 1e-7);
