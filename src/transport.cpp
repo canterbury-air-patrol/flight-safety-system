@@ -51,16 +51,23 @@ recv_msg_thread(flight_safety_system::transport::fss_connection *conn)
     conn->processMessages();
 }
 
-flight_safety_system::transport::fss_connection::fss_connection(int t_fd) : fd(t_fd)
+flight_safety_system::transport::fss_connection::fss_connection(int t_fd, size_t t_max_queue_size)
+    : fd(t_fd), max_queue_size(t_max_queue_size)
 {
 }
 
 auto
-flight_safety_system::transport::fss_connection::create(int t_fd) -> std::shared_ptr<fss_connection>
+flight_safety_system::transport::fss_connection::create(int t_fd, size_t t_max_queue_size) -> std::shared_ptr<fss_connection>
 {
-    auto conn = std::shared_ptr<fss_connection>(new fss_connection(t_fd));
+    auto conn = std::shared_ptr<fss_connection>(new fss_connection(t_fd, t_max_queue_size));
     conn->startRecvThread(std::thread(recv_msg_thread, conn.get()));
     return conn;
+}
+
+auto
+flight_safety_system::transport::fss_connection::getDroppedMessages() -> uint64_t
+{
+    return this->dropped_messages.load();
 }
 
 void
@@ -118,6 +125,15 @@ flight_safety_system::transport::fss_connection::processMessages()
             }
             else
             {
+                if (this->max_queue_size != 0 && this->messages.size() >= this->max_queue_size)
+                {
+                    this->messages.pop();
+                    uint64_t dropped = ++this->dropped_messages;
+                    if (dropped == 1 || dropped % 100 == 0)
+                    {
+                        FSS_LOG_WARN("transport", "Message queue full, dropping oldest message. Total dropped: " << dropped);
+                    }
+                }
                 this->messages.push(msg);
             }
         }
