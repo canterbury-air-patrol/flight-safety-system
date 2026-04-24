@@ -85,6 +85,47 @@ class test_message_cb: public flight_safety_system::transport::fss_message_cb
 };
 
 
+class small_queue_listen : public flight_safety_system::transport::fss_listen {
+public:
+    static constexpr size_t queue_limit = 5;
+    small_queue_listen(uint16_t t_port, flight_safety_system::transport::fss_connect_cb t_cb)
+        : fss_listen(t_port, std::move(t_cb)) {}
+protected:
+    auto newConnection(int t_fd) -> std::shared_ptr<flight_safety_system::transport::fss_connection> override {
+        return flight_safety_system::transport::fss_connection::create(t_fd, queue_limit);
+    }
+};
+
+TEST_CASE("Queue overflow drops oldest messages")
+{
+    constexpr size_t extra = 3;
+    const auto port = fss_test::pick_port();
+    REQUIRE(port != 0);
+
+    auto listen = std::make_shared<small_queue_listen>(port, test_client_connect_cb);
+    REQUIRE(listen != nullptr);
+
+    auto conn = std::make_shared<flight_safety_system::transport::fss_connection>();
+    REQUIRE(conn != nullptr);
+    REQUIRE(conn->connectTo("localhost", port));
+
+    REQUIRE(fss_test::wait_for([]() { return client_conn != nullptr; }));
+
+    for (size_t i = 0; i < small_queue_listen::queue_limit + extra; ++i) {
+        conn->sendMsg(std::make_shared<flight_safety_system::transport::fss_message_rtt_request>());
+    }
+
+    REQUIRE(fss_test::wait_for([&]() { return client_conn->getDroppedMessages() >= extra; }));
+    REQUIRE(client_conn->getDroppedMessages() == extra);
+
+    size_t count = 0;
+    while (client_conn->getMsg() != nullptr) { ++count; }
+    REQUIRE(count == small_queue_listen::queue_limit);
+
+    conn = nullptr;
+    client_conn = nullptr;
+}
+
 TEST_CASE("Listen - Callback")
 {
     constexpr int listen_port = 20203;

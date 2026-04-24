@@ -37,6 +37,16 @@ auto accept_cb(std::shared_ptr<fss_connection> new_conn) -> bool
     return true;
 }
 
+class large_queue_listen : public fss_listen {
+public:
+    large_queue_listen(uint16_t t_port, flight_safety_system::transport::fss_connect_cb t_cb)
+        : fss_listen(t_port, std::move(t_cb)) {}
+protected:
+    auto newConnection(int t_fd) -> std::shared_ptr<fss_connection> override {
+        return fss_connection::create(t_fd, 20000);
+    }
+};
+
 } // namespace
 
 TEST_CASE("queue: FIFO ordering is preserved across many messages")
@@ -118,7 +128,7 @@ TEST_CASE("queue: 10k messages over loopback with no drops")
 {
     server_side_conn = nullptr;
     constexpr uint16_t port = 20504;
-    auto listen = std::make_shared<fss_listen>(port, accept_cb);
+    auto listen = std::make_shared<large_queue_listen>(port, accept_cb);
     REQUIRE(listen != nullptr);
 
     auto client = std::make_shared<fss_connection>();

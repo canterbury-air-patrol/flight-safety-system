@@ -3,6 +3,7 @@
 #include <atomic>
 #include <functional>
 #include <memory>
+#include <queue>
 #include <sys/types.h>
 #include <thread>
 #include <list>
@@ -106,6 +107,7 @@ public:
 };
 
 class fss_connection {
+    static constexpr size_t default_max_queue_size = 1000;
     std::atomic<bool> run{false};
     std::atomic<int> fd{-1};
     std::atomic<uint64_t> last_msg_id{0};
@@ -114,6 +116,8 @@ class fss_connection {
     std::thread recv_thread{};
     std::mutex send_lock{};
     std::mutex msg_lock{};
+    size_t max_queue_size{default_max_queue_size};
+    std::atomic<uint64_t> dropped_messages{0};
 protected:
     auto recvMsg() -> std::shared_ptr<fss_message>;
     auto getMessageId() -> uint64_t;
@@ -122,10 +126,11 @@ protected:
     auto getFd() -> int;
     void setFd(int new_fd);
     void startRecvThread(std::thread t_recv_thread);
-    explicit fss_connection(int fd);
+    explicit fss_connection(int fd, size_t t_max_queue_size = default_max_queue_size);
 public:
     fss_connection();
-    static auto create(int fd) -> std::shared_ptr<fss_connection>;
+    static auto create(int fd, size_t t_max_queue_size = default_max_queue_size) -> std::shared_ptr<fss_connection>;
+    auto getDroppedMessages() -> uint64_t;
     fss_connection(fss_connection&) = delete;
     fss_connection(fss_connection&&) = delete;
     auto operator=(fss_connection &) -> fss_connection& = delete;
