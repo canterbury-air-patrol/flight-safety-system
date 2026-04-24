@@ -48,7 +48,7 @@ flight_safety_system::server::db_connection::recordSearchStatus(uint64_t asset_i
 }
 
 void
-flight_safety_system::server::db_connection::recordPosition(uint64_t asset_id, double latitude, double longitude, uint16_t altitude)
+flight_safety_system::server::db_connection::recordPosition(uint64_t asset_id, double latitude, double longitude, uint32_t altitude)
 {
     std::lock_guard<std::mutex> guard(this->db_lock);
     db_position_create_entry(asset_id, latitude, longitude, altitude);

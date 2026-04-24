@@ -16,6 +16,7 @@
 #include "fss-server.hpp"
 #include "fss-client-ssl.hpp"
 #include "mock_database.hpp"
+#include "db-write-queue.hpp"
 
 namespace fss = flight_safety_system;
 
@@ -43,6 +44,15 @@ protected:
     auto sendMsg(const std::shared_ptr<fss::transport::buf_len> &) -> bool override { return true; }
 };
 
+/* These tests never send message types that invoke the writer (rtt_response,
+ * position_report, system_status, search_status), so a no-op sink suffices. */
+auto make_null_writer() -> std::shared_ptr<fss::server::db_write_queue>
+{
+    return std::make_shared<fss::server::db_write_queue>(
+        std::size_t{64},
+        [](const fss::server::db_write_task &) -> void {});
+}
+
 class NullClientHandler : public fss::server::fss_client_handler {
 public:
     int disconnects{0};
@@ -61,7 +71,8 @@ TEST_CASE("timeout: isTimedOut false before identification")
     fss_test::MockDatabase mock;
     auto conn = std::make_shared<FakeConnection>();
     NullClientHandler handler;
-    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, &handler);
+    auto writer = make_null_writer();
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
     auto clock = std::make_shared<FakeClock>();
     session->setClock(clock);
 
@@ -76,7 +87,8 @@ TEST_CASE("timeout: isTimedOut false right after identification")
     auto conn = std::make_shared<FakeConnection>();
     conn->cert_names.push_back("craft");
     NullClientHandler handler;
-    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, &handler);
+    auto writer = make_null_writer();
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
     auto clock = std::make_shared<FakeClock>();
     session->setClock(clock);
 
@@ -92,7 +104,8 @@ TEST_CASE("timeout: isTimedOut true after timeout without RTT response")
     auto conn = std::make_shared<FakeConnection>();
     conn->cert_names.push_back("craft");
     NullClientHandler handler;
-    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, &handler);
+    auto writer = make_null_writer();
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
     auto clock = std::make_shared<FakeClock>();
     session->setClock(clock);
 
@@ -109,7 +122,8 @@ TEST_CASE("timeout: isTimedOut reset by RTT response")
     auto conn = std::make_shared<FakeConnection>();
     conn->cert_names.push_back("craft");
     NullClientHandler handler;
-    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, &handler);
+    auto writer = make_null_writer();
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
     auto clock = std::make_shared<FakeClock>();
     session->setClock(clock);
 
@@ -142,7 +156,8 @@ TEST_CASE("timeout: setTimeoutMs overrides default threshold")
     auto conn = std::make_shared<FakeConnection>();
     conn->cert_names.push_back("craft");
     NullClientHandler handler;
-    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, &handler);
+    auto writer = make_null_writer();
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
     auto clock = std::make_shared<FakeClock>();
     session->setClock(clock);
     session->setTimeoutMs(5000);

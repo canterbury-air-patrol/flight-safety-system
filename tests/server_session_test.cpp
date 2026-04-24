@@ -18,6 +18,7 @@
 #include "fss-transport.hpp"
 #include "fss-server.hpp"
 #include "mock_database.hpp"
+#include "db-write-queue.hpp"
 
 namespace fss = flight_safety_system;
 
@@ -59,6 +60,21 @@ struct FakeClock : public fss::IClock {
     void advance(uint64_t ms) { t += ms; }
 };
 
+/* Builds a db_write_queue that forwards to the mock — tests that don't care
+ * about telemetry still need a non-null writer for the fss_client ctor. */
+auto make_mock_writer(fss_test::MockDatabase &mock) -> std::shared_ptr<fss::server::db_write_queue>
+{
+    auto sink = [&mock](const fss::server::db_write_task &task) -> void {
+        std::visit(fss::server::overloaded{
+            [&](const fss::server::rtt_write &w) -> void { mock.recordRtt(w.asset_id, w.rtt_ms); },
+            [&](const fss::server::position_write &w) -> void { mock.recordPosition(w.asset_id, w.latitude, w.longitude, w.altitude); },
+            [&](const fss::server::status_write &w) -> void { mock.recordStatus(w.asset_id, w.bat_percent, w.bat_mah_used, w.bat_voltage); },
+            [&](const fss::server::search_status_write &w) -> void { mock.recordSearchStatus(w.asset_id, w.search_id, w.completed, w.total); },
+        }, task);
+    };
+    return std::make_shared<fss::server::db_write_queue>(std::size_t{1024}, sink);
+}
+
 class NullClientHandler : public fss::server::fss_client_handler {
 public:
     int disconnects{0};
@@ -82,7 +98,8 @@ TEST_CASE("session: rejects identify when asset unknown to database")
     conn->cert_names.push_back("unknownAsset");
     NullClientHandler handler;
 
-    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, &handler);
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
     auto identify = std::make_shared<fss::transport::fss_message_identity>("unknownAsset");
     session->processMessage(identify);
 
@@ -106,7 +123,8 @@ TEST_CASE("session: getCommand returns newest-timestamp entry")
     conn->cert_names.push_back("craft");
     NullClientHandler handler;
 
-    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, &handler);
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
     /* Drive the session to identify + send initial command. */
     session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
 
@@ -133,7 +151,8 @@ TEST_CASE("session: server list sent on identify contains seeded servers")
     conn->cert_names.push_back("craft");
     NullClientHandler handler;
 
-    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, &handler);
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
     session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
 
     std::shared_ptr<fss::transport::fss_message_server_list> server_list_msg;
@@ -163,7 +182,8 @@ TEST_CASE("session: RTT timeout disconnects client")
     NullClientHandler handler;
 
     auto clock = std::make_shared<FakeClock>();
-    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, &handler);
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
     session->setClock(clock);
     session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
 

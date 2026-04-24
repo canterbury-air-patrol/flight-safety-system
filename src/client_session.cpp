@@ -64,7 +64,7 @@ fss::server::fss_client_rtt::fss_client_rtt(uint64_t t_timestamp, uint64_t t_req
 auto fss::server::fss_client_rtt::getTimeStamp() -> uint64_t { return this->timestamp; }
 auto fss::server::fss_client_rtt::getRequestId() -> uint64_t { return this->reqid; }
 
-fss::server::fss_client::fss_client(std::shared_ptr<fss::transport::fss_connection> t_conn, IDatabase *t_dbc, fss_client_handler *t_handler) : fss_message_cb(std::move(t_conn)), dbc(t_dbc), client_handler(t_handler)
+fss::server::fss_client::fss_client(std::shared_ptr<fss::transport::fss_connection> t_conn, IDatabase *t_dbc, std::shared_ptr<db_write_queue> t_writer, fss_client_handler *t_handler) : fss_message_cb(std::move(t_conn)), dbc(t_dbc), writer(std::move(t_writer)), client_handler(t_handler)
 {
     this->getConnection()->setHandler(this);
 }
@@ -312,7 +312,7 @@ fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss_mess
 #ifdef DEBUG
                     std::cout << "RTT for " << client_name << " is " << (current_ts - rtt_req->getTimeStamp()) << std::endl;
 #endif
-                    this->dbc->recordRtt(asset_id, current_ts - rtt_req->getTimeStamp());
+                    this->writer->enqueue(rtt_write{asset_id, current_ts - rtt_req->getTimeStamp()});
                 }
             }
                 break;
@@ -320,7 +320,7 @@ fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss_mess
             {
                 if (this->aircraft && asset_id != 0)
                 {
-                    this->dbc->recordPosition(asset_id, msg->getLatitude(), msg->getLongitude(), msg->getAltitude());
+                    this->writer->enqueue(position_write{asset_id, msg->getLatitude(), msg->getLongitude(), msg->getAltitude()});
                 }
                 this->client_handler->broadcastMsg(msg, this);
             }
@@ -330,7 +330,7 @@ fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss_mess
                 auto status_msg = std::dynamic_pointer_cast<fss::transport::fss_message_system_status>(msg);
                 if (status_msg != nullptr && asset_id != 0)
                 {
-                    this->dbc->recordStatus(asset_id, status_msg->getBatRemaining(), status_msg->getBatMAHUsed(), status_msg->getBatVoltage());
+                    this->writer->enqueue(status_write{asset_id, status_msg->getBatRemaining(), status_msg->getBatMAHUsed(), status_msg->getBatVoltage()});
                 }
             }
                 break;
@@ -339,7 +339,7 @@ fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss_mess
                 auto status_msg = std::dynamic_pointer_cast<fss::transport::fss_message_search_status>(msg);
                 if (status_msg != nullptr && asset_id != 0)
                 {
-                    this->dbc->recordSearchStatus(asset_id, status_msg->getSearchId(), status_msg->getSearchCompleted(), status_msg->getSearchTotal());
+                    this->writer->enqueue(search_status_write{asset_id, status_msg->getSearchId(), status_msg->getSearchCompleted(), status_msg->getSearchTotal()});
                 }
             }
                 break;

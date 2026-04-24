@@ -22,7 +22,7 @@ public:
     std::vector<flight_safety_system::server::fss_server_details> active_servers{};
 
     struct recorded_rtt { uint64_t asset_id; uint64_t rtt_ms; };
-    struct recorded_pos { uint64_t asset_id; double latitude; double longitude; uint16_t altitude; };
+    struct recorded_pos { uint64_t asset_id; double latitude; double longitude; uint32_t altitude; };
     struct recorded_status { uint64_t asset_id; uint8_t bat_percent; uint32_t bat_mah_used; double bat_voltage; };
     struct recorded_search { uint64_t asset_id; uint64_t search_id; uint64_t completed; uint64_t total; };
 
@@ -44,7 +44,7 @@ public:
         return it == asset_ids.end() ? 0 : it->second;
     }
 
-    void recordPosition(uint64_t asset_id, double latitude, double longitude, uint16_t altitude) override
+    void recordPosition(uint64_t asset_id, double latitude, double longitude, uint32_t altitude) override
     {
         positions.push_back({asset_id, latitude, longitude, altitude});
     }

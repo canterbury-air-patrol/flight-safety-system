@@ -48,7 +48,7 @@ pkgconfig_DATA += fss-client-ssl.pc
 if SERVER
 sbin_PROGRAMS += fss-server
 
-fss_server_SOURCES = server.cpp client_session.cpp fss-server.hpp db.cpp server-db.pgc server-db.h
+fss_server_SOURCES = server.cpp client_session.cpp fss-server.hpp db.cpp server-db.pgc server-db.h db-write-queue.cpp db-write-queue.hpp
 fss_server_CXXFLAGS = $(AM_CXXFLAGS) $(JSONCPP_CFLAGS)
 fss_server_CFLAGS = $(AM_CFLAGS) $(ECPG_CFLAGS)
 fss_server_LDADD = libfss.la libfss-transport.la $(JSONCPP_LIBS) $(ECPG_LIBS)
