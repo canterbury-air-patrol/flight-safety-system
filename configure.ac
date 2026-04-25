@@ -66,7 +66,7 @@ AS_IF([test "x$with_systemdsystemunitdir" != "xno"],
       [AC_SUBST([systemdsystemunitdir], [$with_systemdsystemunitdir])])
 AM_CONDITIONAL([HAVE_SYSTEMD], [test "x$with_systemdsystemunitdir" != "xno"])
 
-AS_IF([test "x$enable_server" == "xyes"], [
+AS_IF([test "x$enable_server" == "xyes" -o "x$enable_tests" == "xyes"], [
     PKG_CHECK_MODULES([ECPG], [libecpg])
 ])
 

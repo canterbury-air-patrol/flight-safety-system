@@ -171,6 +171,12 @@ main(int argc, char *argv[]) -> int
 
     auto dbc = std::make_shared<flight_safety_system::server::db_connection>(config["postgres"]["host"].asString(), config["postgres"]["user"].asString(), config["postgres"]["pass"].asString(), config["postgres"]["db"].asString());
 
+    if (!dbc->isConnected())
+    {
+        FSS_LOG_ERROR("server", "Failed to connect to database; aborting");
+        return 1;
+    }
+
     constexpr std::size_t default_db_queue_depth = 10000;
     std::size_t db_queue_depth = config.isMember("db_queue_depth") ? config["db_queue_depth"].asUInt() : default_db_queue_depth;
     flight_safety_system::server::db_write_sink sink =

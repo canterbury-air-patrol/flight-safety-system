@@ -53,4 +53,9 @@ fss_server_CXXFLAGS = $(AM_CXXFLAGS) $(JSONCPP_CFLAGS)
 fss_server_CFLAGS = $(AM_CFLAGS) $(ECPG_CFLAGS)
 fss_server_LDADD = libfss.la libfss-transport.la $(JSONCPP_LIBS) $(ECPG_LIBS)
 fss_server_LDADD += libfss-transport-ssl.la
+else
+if ENABLE_TESTS
+BUILT_SOURCES = server-db.c
+CLEANFILES = server-db.c
+endif
 endif
