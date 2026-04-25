@@ -216,8 +216,38 @@ fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss_mess
         this->client_handler->clientDisconnected(this);
         return;
     }
+    if (msg->getType() == fss::transport::message_type_version)
+    {
+        auto version_msg = std::dynamic_pointer_cast<fss::transport::fss_message_version>(msg);
+        if (version_msg != nullptr)
+        {
+            uint16_t peer_version = version_msg->getProtocolVersion();
+            uint16_t peer_min = version_msg->getMinSupportedVersion();
+            if (peer_version < fss::transport::FSS_PROTOCOL_MIN_VERSION
+                || peer_min > fss::transport::FSS_PROTOCOL_VERSION)
+            {
+                FSS_LOG_ERROR("server", "Client protocol version incompatible: peer=" << peer_version << " peer_min=" << peer_min << " us=" << fss::transport::FSS_PROTOCOL_VERSION << " us_min=" << fss::transport::FSS_PROTOCOL_MIN_VERSION);
+                this->client_handler->clientDisconnected(this);
+                return;
+            }
+            uint16_t negotiated = std::min(peer_version, fss::transport::FSS_PROTOCOL_VERSION);
+            this->getConnection()->setNegotiatedVersion(negotiated);
+            this->version_received = true;
+            auto resp = std::make_shared<fss::transport::fss_message_version>();
+            this->getConnection()->sendMsg(resp);
+        }
+        return;
+    }
     if (!this->identified)
     {
+        /* todo02: legacy clients (pre-version-handshake) send identity
+         * directly. Log once so the legacy connection is visible, then
+         * fall through with negotiated_version = LEGACY (0). */
+        if (!this->version_received)
+        {
+            FSS_LOG_WARN("server", "Legacy client: no protocol version handshake (assuming version 0)");
+            this->version_received = true;
+        }
         if (msg->getType() == fss::transport::message_type_identity)
         {
             auto identity_msg = std::dynamic_pointer_cast<fss::transport::fss_message_identity>(msg);
@@ -280,6 +310,7 @@ fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss_mess
             case fss::transport::message_type_identity:
             case fss::transport::message_type_identity_non_aircraft:
             case fss::transport::message_type_identity_required:
+            case fss::transport::message_type_version:
                 break;
             case fss::transport::message_type_rtt_request:
             {

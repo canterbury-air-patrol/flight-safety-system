@@ -260,3 +260,89 @@ TEST_CASE("session: RTT timeout disconnects client")
 
     REQUIRE(handler.disconnects > 0);
 }
+
+TEST_CASE("session: version handshake stores negotiated version and replies")
+{
+    /* todo02: version exchange — when the client opens with a version
+     * message, the server records the negotiated version on the
+     * connection and replies with its own version. */
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 1;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+
+    REQUIRE(conn->getNegotiatedVersion() == fss::transport::FSS_PROTOCOL_VERSION_LEGACY);
+
+    auto version = std::make_shared<fss::transport::fss_message_version>(
+        fss::transport::FSS_PROTOCOL_VERSION,
+        fss::transport::FSS_PROTOCOL_MIN_VERSION,
+        0U);
+    session->processMessage(version);
+
+    REQUIRE(conn->getNegotiatedVersion() == fss::transport::FSS_PROTOCOL_VERSION);
+    REQUIRE(handler.disconnects == 0);
+
+    bool saw_version_response = false;
+    for (const auto &m : conn->sent)
+    {
+        if (m->getType() == fss::transport::message_type_version) { saw_version_response = true; }
+    }
+    REQUIRE(saw_version_response);
+}
+
+TEST_CASE("session: version handshake rejects incompatible peer")
+{
+    /* todo02: when the client's max version is below our minimum, the
+     * server disconnects rather than continuing in an unsupported
+     * dialect. */
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 1;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+
+    /* Peer claims to only support version 0 (max = 0). Our min is 1, so
+     * this is a hard reject. */
+    auto version = std::make_shared<fss::transport::fss_message_version>(
+        /*version*/ 0U, /*min_version*/ 0U, /*flags*/ 0U);
+    session->processMessage(version);
+
+    REQUIRE(handler.disconnects > 0);
+}
+
+TEST_CASE("session: legacy client (no version handshake) is accepted")
+{
+    /* todo02: pre-versioning clients send identity directly. The server
+     * must accept this and treat the connection as legacy (version 0). */
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 1;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+
+    /* No version message — go straight to identity, like an old client. */
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+
+    REQUIRE(handler.disconnects == 0);
+    REQUIRE(conn->getNegotiatedVersion() == fss::transport::FSS_PROTOCOL_VERSION_LEGACY);
+
+    bool saw_server_list = false;
+    for (const auto &m : conn->sent)
+    {
+        if (m->getType() == fss::transport::message_type_server_list) { saw_server_list = true; }
+    }
+    REQUIRE(saw_server_list);
+}

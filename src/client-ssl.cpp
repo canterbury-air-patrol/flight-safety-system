@@ -261,6 +261,13 @@ flight_safety_system::client_ssl::fss_server::sendIdentify()
     this->getConnection()->sendMsg(ident_msg);
 }
 
+void
+flight_safety_system::client_ssl::fss_server::sendVersion()
+{
+    auto version_msg = std::make_shared<flight_safety_system::transport::fss_message_version>();
+    this->getConnection()->sendMsg(version_msg);
+}
+
 auto
 flight_safety_system::client_ssl::fss_server::reconnect_to() -> bool
 {
@@ -306,6 +313,9 @@ flight_safety_system::client_ssl::fss_server::reconnect() -> bool
         else
         {
             this->getConnection()->setHandler(this);
+            /* todo02: protocol version handshake must be the first message
+             * exchanged after TLS connect, before identity. */
+            this->sendVersion();
             this->sendIdentify();
             this->retry_count = 0;
             this->last_tried = 0;
@@ -354,6 +364,24 @@ flight_safety_system::client_ssl::fss_server::processMessage(std::shared_ptr<fli
             case flight_safety_system::transport::message_type_identity_non_aircraft:
             case flight_safety_system::transport::message_type_identity_required:
                 break;
+            case flight_safety_system::transport::message_type_version:
+            {
+                auto version_msg = std::dynamic_pointer_cast<flight_safety_system::transport::fss_message_version>(msg);
+                if (version_msg != nullptr)
+                {
+                    uint16_t peer_version = version_msg->getProtocolVersion();
+                    uint16_t peer_min = version_msg->getMinSupportedVersion();
+                    if (peer_version < flight_safety_system::transport::FSS_PROTOCOL_MIN_VERSION
+                        || peer_min > flight_safety_system::transport::FSS_PROTOCOL_VERSION)
+                    {
+                        FSS_LOG_ERROR("client", "Server protocol version incompatible: peer=" << peer_version << " peer_min=" << peer_min << " us=" << flight_safety_system::transport::FSS_PROTOCOL_VERSION << " us_min=" << flight_safety_system::transport::FSS_PROTOCOL_MIN_VERSION);
+                        this->getClient()->serverRequiresReconnect(this);
+                        return;
+                    }
+                    uint16_t negotiated = std::min(peer_version, flight_safety_system::transport::FSS_PROTOCOL_VERSION);
+                    this->getConnection()->setNegotiatedVersion(negotiated);
+                }
+            } break;
             case flight_safety_system::transport::message_type_rtt_request:
             {
                 /* Send a response */

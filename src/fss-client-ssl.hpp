@@ -88,6 +88,7 @@ public:
     virtual auto reconnect() -> bool;
     virtual auto getClient() -> fss_client *;
     virtual void sendIdentify();
+    virtual void sendVersion();
     void setClock(std::shared_ptr<flight_safety_system::IClock> t_clock);
     void setServerTimeoutMs(uint64_t ms) { this->server_timeout_ms = ms; }
     auto isServerTimedOut() -> bool;

@@ -962,6 +962,51 @@ flight_safety_system::transport::fss_message_identity_required::fss_message_iden
 {
 }
 
+flight_safety_system::transport::fss_message_version::fss_message_version() : fss_message(message_type_version)
+{
+}
+
+flight_safety_system::transport::fss_message_version::fss_message_version(uint16_t t_version, uint16_t t_min_version, uint32_t t_flags) : fss_message(message_type_version), protocol_version(t_version), min_supported_version(t_min_version), feature_flags(t_flags)
+{
+}
+
+flight_safety_system::transport::fss_message_version::fss_message_version(uint64_t t_id, const std::shared_ptr<buf_len> &bl) : fss_message(t_id, message_type_version)
+{
+    this->unpackData(bl);
+}
+
+void
+flight_safety_system::transport::fss_message_version::packData(std::shared_ptr<buf_len> bl)
+{
+    uint16_t version_n = fss_htobe16(this->protocol_version);
+    uint16_t min_version_n = fss_htobe16(this->min_supported_version);
+    uint32_t flags_n = fss_htobe32(this->feature_flags);
+    bl->addData(reinterpret_cast<const char *>(&version_n), sizeof(uint16_t));
+    bl->addData(reinterpret_cast<const char *>(&min_version_n), sizeof(uint16_t));
+    bl->addData(reinterpret_cast<const char *>(&flags_n), sizeof(uint32_t));
+}
+
+void
+flight_safety_system::transport::fss_message_version::unpackData(const std::shared_ptr<buf_len> &bl)
+{
+    size_t offset = this->headerLength();
+    const char *data = bl->getData();
+    size_t length = bl->getLength();
+    if (length - offset >= sizeof(uint16_t) + sizeof(uint16_t) + sizeof(uint32_t))
+    {
+        uint16_t tmp16;
+        memcpy(&tmp16, data + offset, sizeof(uint16_t));
+        this->protocol_version = fss_be16toh(tmp16);
+        offset += sizeof(uint16_t);
+        memcpy(&tmp16, data + offset, sizeof(uint16_t));
+        this->min_supported_version = fss_be16toh(tmp16);
+        offset += sizeof(uint16_t);
+        uint32_t tmp32;
+        memcpy(&tmp32, data + offset, sizeof(uint32_t));
+        this->feature_flags = fss_be32toh(tmp32);
+    }
+}
+
 
 auto
 flight_safety_system::transport::fss_message::decode(const std::shared_ptr<buf_len> &bl) -> std::shared_ptr<flight_safety_system::transport::fss_message>
@@ -1016,6 +1061,9 @@ flight_safety_system::transport::fss_message::decode(const std::shared_ptr<buf_l
             break;
         case message_type_identity_required:
             msg = std::make_shared<fss_message_identity_required>(msg_id, bl);
+            break;
+        case message_type_version:
+            msg = std::make_shared<fss_message_version>(msg_id, bl);
             break;
     }
 
