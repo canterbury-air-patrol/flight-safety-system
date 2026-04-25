@@ -90,6 +90,53 @@ public:
 
 } // namespace
 
+TEST_CASE("session: rejects identify when claimed name does not match cert CN")
+{
+    /* todo15: identity name must match a CN from the peer certificate.
+     * A client presenting cert CN=craft must not be allowed to claim
+     * identity "imposter" — that would let any holder of any valid
+     * client cert masquerade as any aircraft. */
+    fss_test::MockDatabase mock;
+    mock.asset_ids["imposter"] = 1;
+    mock.asset_ids["craft"] = 2;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("imposter"));
+
+    REQUIRE(handler.disconnects > 0);
+    /* No server-list / command messages should leak out before disconnect. */
+    for (const auto &m : conn->sent)
+    {
+        REQUIRE(m->getType() != fss::transport::message_type_server_list);
+        REQUIRE(m->getType() != fss::transport::message_type_command);
+    }
+}
+
+TEST_CASE("session: rejects identify when no cert CN present")
+{
+    /* todo15: getClientNames() returns empty when the peer presented no
+     * cert (or the leaf had no CN). The server must refuse to identify
+     * such a connection rather than treating absence of a CN as
+     * permission to claim any name. */
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 1;
+
+    auto conn = std::make_shared<FakeConnection>();
+    /* cert_names intentionally empty */
+    NullClientHandler handler;
+
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+
+    REQUIRE(handler.disconnects > 0);
+}
+
 TEST_CASE("session: rejects identify when asset unknown to database")
 {
     fss_test::MockDatabase mock;
