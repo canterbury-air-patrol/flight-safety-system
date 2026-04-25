@@ -291,8 +291,24 @@ fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss_mess
         }
         else if(msg->getType() == fss::transport::message_type_identity_non_aircraft)
         {
-            this->identified = true;
+            /* todo16: identify the non-aircraft client by its leaf cert CN.
+             * Without this check any holder of any cert valid against the
+             * CA could become a non-aircraft session anonymously, bypassing
+             * the per-asset identity contract aircraft connections enforce
+             * (todo15). */
+            auto possible_names = this->getConnection()->getClientNames();
+            if (possible_names.empty())
+            {
+                FSS_LOG_ERROR("server", "Rejecting non-aircraft client: no CN found in certificate");
+                this->client_handler->clientDisconnected(this);
+                return;
+            }
+            {
+                std::lock_guard<std::mutex> guard(this->client_lock);
+                this->name = possible_names.front();
+            }
             this->aircraft = false;
+            this->identified = true;
         }
         else
         {
