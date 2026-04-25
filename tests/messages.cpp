@@ -502,3 +502,45 @@ TEST_CASE("Identity (Non-Aircraft) Message Check") {
     REQUIRE(decoded_generic->getType() == flight_safety_system::transport::message_type_identity_non_aircraft);
     REQUIRE(decoded_generic->getId() == msg_id);
 }
+
+TEST_CASE("Version Message Round-trip") {
+    auto msg_id = static_cast<uint64_t>(random());
+    constexpr uint16_t version = 3;
+    constexpr uint16_t min_version = 2;
+    constexpr uint32_t flags = 0xDEADBEEFU;
+
+    auto msg = std::make_shared<flight_safety_system::transport::fss_message_version>(version, min_version, flags);
+    REQUIRE(msg->getType() == flight_safety_system::transport::message_type_version);
+    REQUIRE(msg->getProtocolVersion() == version);
+    REQUIRE(msg->getMinSupportedVersion() == min_version);
+    REQUIRE(msg->getFeatureFlags() == flags);
+
+    msg->setId(msg_id);
+    auto bl = msg->getPacked();
+    REQUIRE(bl != nullptr);
+
+    auto decoded = std::make_shared<flight_safety_system::transport::fss_message_version>(msg_id, bl);
+    REQUIRE(decoded->getType() == flight_safety_system::transport::message_type_version);
+    REQUIRE(decoded->getId() == msg_id);
+    REQUIRE(decoded->getProtocolVersion() == version);
+    REQUIRE(decoded->getMinSupportedVersion() == min_version);
+    REQUIRE(decoded->getFeatureFlags() == flags);
+
+    auto decoded_generic = flight_safety_system::transport::fss_message::decode(bl);
+    REQUIRE(decoded_generic != nullptr);
+    REQUIRE(decoded_generic->getType() == flight_safety_system::transport::message_type_version);
+    REQUIRE(decoded_generic->getId() == msg_id);
+    auto decoded_generic_version = std::dynamic_pointer_cast<flight_safety_system::transport::fss_message_version>(decoded_generic);
+    REQUIRE(decoded_generic_version != nullptr);
+    REQUIRE(decoded_generic_version->getProtocolVersion() == version);
+    REQUIRE(decoded_generic_version->getMinSupportedVersion() == min_version);
+    REQUIRE(decoded_generic_version->getFeatureFlags() == flags);
+}
+
+TEST_CASE("Version Message Defaults") {
+    auto msg = std::make_shared<flight_safety_system::transport::fss_message_version>();
+    REQUIRE(msg->getType() == flight_safety_system::transport::message_type_version);
+    REQUIRE(msg->getProtocolVersion() == flight_safety_system::transport::FSS_PROTOCOL_VERSION);
+    REQUIRE(msg->getMinSupportedVersion() == flight_safety_system::transport::FSS_PROTOCOL_MIN_VERSION);
+    REQUIRE(msg->getFeatureFlags() == 0);
+}

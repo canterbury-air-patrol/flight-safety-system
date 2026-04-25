@@ -121,6 +121,7 @@ class fss_client: public transport::fss_message_cb {
 private:
     std::atomic<bool> identified{false};
     std::atomic<bool> aircraft{false};
+    std::atomic<bool> version_received{false};
     std::string name{};
     std::mutex client_lock{};
     std::list<std::shared_ptr<fss_client_rtt>> outstanding_rtt_requests{};

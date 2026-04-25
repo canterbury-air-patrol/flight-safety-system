@@ -15,6 +15,18 @@ namespace flight_safety_system {
 namespace transport {
 
 static constexpr double FSS_COORD_SCALE = 0.0000001;
+
+/* Wire-protocol version handshake (todo02).
+ * - FSS_PROTOCOL_VERSION_LEGACY (0): unversioned protocol that pre-dates the
+ *   handshake. Used as the negotiated value when the peer never sends a
+ *   version message (e.g. an old client still in the field).
+ * - FSS_PROTOCOL_VERSION: the highest version this build speaks.
+ * - FSS_PROTOCOL_MIN_VERSION: the lowest version this build still accepts.
+ *   If the peer's max < our min (or vice-versa), we disconnect. */
+static constexpr uint16_t FSS_PROTOCOL_VERSION_LEGACY = 0;
+static constexpr uint16_t FSS_PROTOCOL_VERSION = 1;
+static constexpr uint16_t FSS_PROTOCOL_MIN_VERSION = 1;
+
 class fss_connection;
 class fss_listen;
 class fss_message;
@@ -47,6 +59,10 @@ using fss_message_type = enum fss_message_type_e {
 
     /* Please send identity */
     message_type_identity_required,
+
+    /* Protocol version handshake (todo02). Sent first by both peers after
+     * TLS handshake; the negotiated version is min(peer max, our max). */
+    message_type_version,
 };
 
 using fss_asset_command = enum fss_asset_command_e {
@@ -120,6 +136,7 @@ class fss_connection {
     std::mutex msg_lock{};
     size_t max_queue_size{default_max_queue_size};
     std::atomic<uint64_t> dropped_messages{0};
+    std::atomic<uint16_t> negotiated_version{FSS_PROTOCOL_VERSION_LEGACY};
 protected:
     auto recvMsg() -> std::shared_ptr<fss_message>;
     auto getMessageId() -> uint64_t;
@@ -140,6 +157,8 @@ public:
     virtual ~fss_connection();
     void setHandler(fss_message_cb *cb);
     virtual auto connectTo(const std::string &address, uint16_t port) -> bool;
+    auto getNegotiatedVersion() -> uint16_t { return this->negotiated_version.load(); }
+    void setNegotiatedVersion(uint16_t v) { this->negotiated_version.store(v); }
     auto sendMsg(const std::shared_ptr<fss_message> &msg) -> bool;
     auto getMsg() -> std::shared_ptr<fss_message>;
     virtual void processMessages();
@@ -378,6 +397,23 @@ protected:
 public:
     fss_message_identity_required();
     fss_message_identity_required(uint64_t t_id, const std::shared_ptr<buf_len> &bl);
+};
+
+class fss_message_version : public fss_message {
+private:
+    uint16_t protocol_version{FSS_PROTOCOL_VERSION};
+    uint16_t min_supported_version{FSS_PROTOCOL_MIN_VERSION};
+    uint32_t feature_flags{0};
+protected:
+    void unpackData(const std::shared_ptr<buf_len> &bl);
+    void packData(std::shared_ptr<buf_len> bl) override;
+public:
+    fss_message_version();
+    fss_message_version(uint16_t t_version, uint16_t t_min_version, uint32_t t_flags);
+    fss_message_version(uint64_t t_id, const std::shared_ptr<buf_len> &bl);
+    auto getProtocolVersion() const -> uint16_t { return this->protocol_version; }
+    auto getMinSupportedVersion() const -> uint16_t { return this->min_supported_version; }
+    auto getFeatureFlags() const -> uint32_t { return this->feature_flags; }
 };
 } // namespace transport
 } // namespace flight_safety_system
