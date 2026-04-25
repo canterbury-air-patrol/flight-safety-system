@@ -7,20 +7,18 @@
 #define SMM_SERVER_LEN 256
 #define SMM_PASSWORD_LEN 256
 
-void db_connect(const char *host, const char *user, const char *pass, const char *db)
+int db_connect(const char *host, const char *user, const char *pass, const char *db)
 {
     char *target = NULL;
     if (asprintf(&target, "%s@%s", db, host) < 0)
     {
-        return;
+        return 0;
     }
     EXEC SQL BEGIN DECLARE SECTION;
     const char *db_target = target;
     const char *db_user = user;
     const char *db_pass = pass;
     EXEC SQL END DECLARE SECTION;
-
-    EXEC SQL WHENEVER SQLERROR SQLPRINT;
 
     if (db_pass != NULL && strlen(db_pass) > 0)
     {
@@ -30,10 +28,25 @@ void db_connect(const char *host, const char *user, const char *pass, const char
     {
         EXEC SQL CONNECT TO :db_target AS conn USER :db_user;
     }
-    
+
+    if (sqlca.sqlcode < 0)
+    {
+        sqlprint();
+        free(target);
+        return 0;
+    }
+
     EXEC SQL SET AUTOCOMMIT TO ON;
-    
+
+    if (sqlca.sqlcode < 0)
+    {
+        sqlprint();
+        free(target);
+        return 0;
+    }
+
     free(target);
+    return 1;
 }
 
 unsigned long long db_get_asset_id(const char *asset_name_arg)

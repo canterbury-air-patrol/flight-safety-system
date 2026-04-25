@@ -11,7 +11,13 @@ extern "C" {
 
 flight_safety_system::server::db_connection::db_connection(const std::string &host, const std::string &user, const std::string &pass, const std::string &db) : db_lock()
 {
-    db_connect(host.c_str(), user.c_str(), pass.c_str(), db.c_str());
+    connected_ = (db_connect(host.c_str(), user.c_str(), pass.c_str(), db.c_str()) == 1);
+}
+
+auto
+flight_safety_system::server::db_connection::isConnected() const -> bool
+{
+    return connected_;
 }
 
 flight_safety_system::server::db_connection::~db_connection()

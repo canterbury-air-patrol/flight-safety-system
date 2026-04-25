@@ -76,11 +76,13 @@ public:
     virtual auto getCommand(uint64_t asset_id) -> std::shared_ptr<asset_command> = 0;
     virtual auto getActiveServers() -> std::vector<fss_server_details> = 0;
     virtual auto getSmmSettings(uint64_t asset_id) -> std::shared_ptr<smm_settings> = 0;
+    virtual auto isConnected() const -> bool = 0;
 };
 
 class db_connection: public IDatabase {
 private:
     std::mutex db_lock;
+    bool connected_{false};
 public:
     db_connection(const std::string &host, const std::string &user, const std::string &pass, const std::string &db);
     db_connection(db_connection&) = delete;
@@ -96,6 +98,7 @@ public:
     auto getCommand(uint64_t asset_id) -> std::shared_ptr<asset_command> override;
     auto getActiveServers() -> std::vector<fss_server_details> override;
     auto getSmmSettings(uint64_t asset_id) -> std::shared_ptr<smm_settings> override;
+    auto isConnected() const -> bool override;
 };
 
 class fss_client_rtt {

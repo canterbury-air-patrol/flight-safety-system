@@ -90,6 +90,8 @@ public:
         return it == smm.end() ? nullptr : it->second;
     }
 
+    auto isConnected() const -> bool override { return true; }
+
     void pushCommand(uint64_t asset_id, std::shared_ptr<flight_safety_system::server::asset_command> cmd)
     {
         commands[asset_id].push_back(std::move(cmd));
