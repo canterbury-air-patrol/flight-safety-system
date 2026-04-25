@@ -185,27 +185,38 @@ flight_safety_system::transport_ssl::fss_connection_server::setupSSL() -> bool
 
     std::vector<gnutls_datum_t> cert_list;
 
-    if (this->session->get_peers_certificate(cert_list))
+    /* Only the leaf cert (index 0) carries the peer's identity; CNs of
+     * intermediate CAs in the chain are issuer names, not identities, and
+     * must not be accepted as a valid client name. */
+    if (this->session->get_peers_certificate(cert_list) && !cert_list.empty())
     {
-        for (auto cert : cert_list)
+        gnutls_x509_crt_t cert_data = {};
+
+        int rc = gnutls_x509_crt_init(&cert_data);
+        if (rc < 0)
         {
-            gnutls_x509_crt_t cert_data = {};
-
-            gnutls_x509_crt_init(&cert_data);
-
-            gnutls_x509_crt_import(cert_data, &cert, GNUTLS_X509_FMT_DER);
-
-            const size_t dn_max_len = 512;
-            char name_buf[dn_max_len];
-            size_t name_len = dn_max_len;
-            int rc = gnutls_x509_crt_get_dn_by_oid(cert_data, GNUTLS_OID_X520_COMMON_NAME,
-                                                     0, 0, name_buf, &name_len);
-            if (rc == GNUTLS_E_SUCCESS && name_len > 0)
-            {
-                this->possible_names.push_back(std::string(name_buf, name_len));
-            }
-            gnutls_x509_crt_deinit(cert_data);
+            FSS_LOG_ERROR("ssl", "Failed to initialize X.509 certificate: " << gnutls_strerror(rc));
+            return false;
         }
+
+        rc = gnutls_x509_crt_import(cert_data, &cert_list[0], GNUTLS_X509_FMT_DER);
+        if (rc < 0)
+        {
+            FSS_LOG_ERROR("ssl", "Failed to import X.509 certificate: " << gnutls_strerror(rc));
+            gnutls_x509_crt_deinit(cert_data);
+            return false;
+        }
+
+        const size_t dn_max_len = 512;
+        char name_buf[dn_max_len];
+        size_t name_len = dn_max_len;
+        rc = gnutls_x509_crt_get_dn_by_oid(cert_data, GNUTLS_OID_X520_COMMON_NAME,
+                                                 0, 0, name_buf, &name_len);
+        if (rc == GNUTLS_E_SUCCESS && name_len > 0)
+        {
+            this->possible_names.push_back(std::string(name_buf, name_len));
+        }
+        gnutls_x509_crt_deinit(cert_data);
     }
 
     return true;
