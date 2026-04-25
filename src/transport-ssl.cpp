@@ -26,11 +26,11 @@ recv_msg_thread(flight_safety_system::transport_ssl::fss_connection *conn)
     conn->processMessages();
 }
 
-flight_safety_system::transport_ssl::fss_connection::fss_connection(std::string t_ca, std::string t_private_key, std::string t_public_key) : flight_safety_system::transport::fss_connection(), credentials(new gnutls::certificate_credentials()), ca_file(std::move(t_ca)), private_key_file(std::move(t_private_key)), public_key_file(std::move(t_public_key))
+flight_safety_system::transport_ssl::fss_connection::fss_connection(std::string t_ca, std::string t_private_key, std::string t_public_key, std::string t_crl) : flight_safety_system::transport::fss_connection(), credentials(new gnutls::certificate_credentials()), ca_file(std::move(t_ca)), private_key_file(std::move(t_private_key)), public_key_file(std::move(t_public_key)), crl_file(std::move(t_crl))
 {
 }
 
-flight_safety_system::transport_ssl::fss_connection::fss_connection(int t_fd, std::string t_ca, std::string t_private_key, std::string t_public_key) : flight_safety_system::transport::fss_connection(t_fd), credentials(new gnutls::certificate_credentials()), ca_file(std::move(t_ca)), private_key_file(std::move(t_private_key)), public_key_file(std::move(t_public_key))
+flight_safety_system::transport_ssl::fss_connection::fss_connection(int t_fd, std::string t_ca, std::string t_private_key, std::string t_public_key, std::string t_crl) : flight_safety_system::transport::fss_connection(t_fd), credentials(new gnutls::certificate_credentials()), ca_file(std::move(t_ca)), private_key_file(std::move(t_private_key)), public_key_file(std::move(t_public_key)), crl_file(std::move(t_crl))
 {
 }
 
@@ -55,7 +55,7 @@ flight_safety_system::transport_ssl::fss_connection_client::~fss_connection_clie
 
 flight_safety_system::transport_ssl::fss_connection_server::~fss_connection_server() = default;
 
-flight_safety_system::transport_ssl::fss_connection_server::fss_connection_server(int t_fd, std::string t_ca, std::string t_private_key, std::string t_public_key) : flight_safety_system::transport_ssl::fss_connection(std::move(t_ca), std::move(t_private_key), std::move(t_public_key))
+flight_safety_system::transport_ssl::fss_connection_server::fss_connection_server(int t_fd, std::string t_ca, std::string t_private_key, std::string t_public_key, std::string t_crl) : flight_safety_system::transport_ssl::fss_connection(std::move(t_ca), std::move(t_private_key), std::move(t_public_key), std::move(t_crl))
 {
     this->setFd(t_fd);
     this->usable = this->setupSSL();
@@ -116,16 +116,29 @@ flight_safety_system::transport_ssl::fss_connection_client::connectTo(const std:
     return this->usable;
 }
 
-void
-flight_safety_system::transport_ssl::fss_connection::setupSession()
+auto
+flight_safety_system::transport_ssl::fss_connection::setupSession() -> bool
 {
     this->session->set_priority (nullptr, nullptr);
 
     this->credentials->set_x509_trust_file(this->ca_file.c_str(), GNUTLS_X509_FMT_PEM);
     this->credentials->set_x509_key_file(this->public_key_file.c_str(), this->private_key_file.c_str(), GNUTLS_X509_FMT_PEM);
+    if (!this->crl_file.empty())
+    {
+        try
+        {
+            this->credentials->set_x509_crl_file(this->crl_file.c_str(), GNUTLS_X509_FMT_PEM);
+        }
+        catch (gnutls::exception &e)
+        {
+            FSS_LOG_ERROR("ssl", "Failed to load CRL file '" << this->crl_file << "': " << e.what());
+            return false;
+        }
+    }
     this->session->set_credentials(*this->credentials);
 
     this->session->set_transport_ptr((gnutls_transport_ptr_t)(intptr_t)this->getFd());
+    return true;
 }
 
 auto
@@ -135,7 +148,10 @@ flight_safety_system::transport_ssl::fss_connection_client::setupSSL() -> bool
 
     this->session = std::unique_ptr<gnutls::session>(clientSession);
 
-    this->setupSession();
+    if (!this->setupSession())
+    {
+        return false;
+    }
 
     clientSession->set_verify_cert(this->hostname.c_str(), 0);
 
@@ -164,7 +180,10 @@ flight_safety_system::transport_ssl::fss_connection_server::setupSSL() -> bool
 
     this->session = std::unique_ptr<gnutls::session>(serverSession);
 
-    this->setupSession();
+    if (!this->setupSession())
+    {
+        return false;
+    }
 
     serverSession->set_certificate_request(GNUTLS_CERT_REQUIRE);
 
@@ -283,10 +302,10 @@ flight_safety_system::transport_ssl::fss_connection::recvBytes(void *t_bytes, si
 auto
 flight_safety_system::transport_ssl::fss_listen::newConnection(int t_newfd) -> std::shared_ptr<flight_safety_system::transport::fss_connection>
 {
-    return std::make_shared<flight_safety_system::transport_ssl::fss_connection_server>(t_newfd, this->ca_file, this->private_key_file, this->public_key_file);
+    return std::make_shared<flight_safety_system::transport_ssl::fss_connection_server>(t_newfd, this->ca_file, this->private_key_file, this->public_key_file, this->crl_file);
 }
 
-flight_safety_system::transport_ssl::fss_listen::fss_listen(uint16_t t_port, flight_safety_system::transport::fss_connect_cb t_cb, std::string t_ca, std::string t_private_key, std::string t_public_key) : flight_safety_system::transport::fss_listen(t_port, t_cb), ca_file(std::move(t_ca)), private_key_file(std::move(t_private_key)), public_key_file(std::move(t_public_key))
+flight_safety_system::transport_ssl::fss_listen::fss_listen(uint16_t t_port, flight_safety_system::transport::fss_connect_cb t_cb, std::string t_ca, std::string t_private_key, std::string t_public_key, std::string t_crl) : flight_safety_system::transport::fss_listen(t_port, t_cb), ca_file(std::move(t_ca)), private_key_file(std::move(t_private_key)), public_key_file(std::move(t_public_key)), crl_file(std::move(t_crl))
 {
 }
 

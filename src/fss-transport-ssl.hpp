@@ -15,15 +15,16 @@ private:
     std::string ca_file;
     std::string private_key_file;
     std::string public_key_file;
+    std::string crl_file;
 protected:
     std::unique_ptr<gnutls::session> session{nullptr};
     bool usable{false};
     auto sendMsg(const std::shared_ptr<flight_safety_system::transport::buf_len> &bl) -> bool override;
     auto recvBytes(void *bytes, size_t max_bytes) -> ssize_t override;
-    void setupSession();
+    auto setupSession() -> bool;
 public:
-    fss_connection(std::string t_ca, std::string t_private_key, std::string t_public_key);
-    fss_connection(int t_fd, std::string t_ca, std::string t_private_key, std::string t_public_key);
+    fss_connection(std::string t_ca, std::string t_private_key, std::string t_public_key, std::string t_crl = {});
+    fss_connection(int t_fd, std::string t_ca, std::string t_private_key, std::string t_public_key, std::string t_crl = {});
     fss_connection(fss_connection&) = delete;
     fss_connection(fss_connection&&) = delete;
     auto operator=(fss_connection&) -> fss_connection& = delete;
@@ -53,7 +54,7 @@ private:
 protected:
     auto setupSSL() -> bool;
 public:
-    fss_connection_server(int t_fd, std::string t_ca, std::string t_private_key, std::string t_public_key);
+    fss_connection_server(int t_fd, std::string t_ca, std::string t_private_key, std::string t_public_key, std::string t_crl = {});
     fss_connection_server(fss_connection_server&) = delete;
     fss_connection_server(fss_connection_server&&) = delete;
     auto operator=(fss_connection_server&) -> fss_connection_server& = delete;
@@ -67,10 +68,11 @@ private:
     std::string ca_file;
     std::string private_key_file;
     std::string public_key_file;
+    std::string crl_file;
 protected:
     auto newConnection(int fd) -> std::shared_ptr<flight_safety_system::transport::fss_connection> override;
 public:
-    fss_listen(uint16_t t_port, flight_safety_system::transport::fss_connect_cb t_cb, std::string t_ca, std::string t_private_key, std::string t_public_key);
+    fss_listen(uint16_t t_port, flight_safety_system::transport::fss_connect_cb t_cb, std::string t_ca, std::string t_private_key, std::string t_public_key, std::string t_crl = {});
 };
 } // namespace transport_ssl
 } // namespace flight_safety_system

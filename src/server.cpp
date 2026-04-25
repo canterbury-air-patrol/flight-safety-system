@@ -208,6 +208,11 @@ main(int argc, char *argv[]) -> int
         FSS_LOG_ERROR("server", "Missing ssl parameter, all of these are required: 'ca_public_key', 'server_private_key', 'server_public_key'");
         exit(-1);
     }
+    std::string crl_file = config["ssl"].isMember("crl_file") ? config["ssl"]["crl_file"].asString() : std::string{};
+    if (!crl_file.empty())
+    {
+        FSS_LOG_INFO("server", "CRL file configured: " << crl_file);
+    }
     listen = std::make_shared<flight_safety_system::transport_ssl::fss_listen>(config["port"].asInt(),
         [dbc, writer, &clients](std::shared_ptr<flight_safety_system::transport::fss_connection> conn) -> bool {
 #ifdef DEBUG
@@ -216,7 +221,7 @@ main(int argc, char *argv[]) -> int
             clients->clientConnected(std::make_shared<flight_safety_system::server::fss_client>(std::move(conn), dbc.get(), writer, clients.get()));
             return true;
         },
-        config["ssl"]["ca_public_key"].asString(), config["ssl"]["server_private_key"].asString(), config["ssl"]["server_public_key"].asString());
+        config["ssl"]["ca_public_key"].asString(), config["ssl"]["server_private_key"].asString(), config["ssl"]["server_public_key"].asString(), crl_file);
 
     /* Split tick: sendCommand runs every command_poll_ms so safety-critical
      * commands (TERM, DISARM) reach aircraft in <=100ms instead of <=1s.
