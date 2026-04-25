@@ -13,6 +13,9 @@
 
 namespace  flight_safety_system {
 namespace server {
+
+constexpr int command_poll_ms = 100;
+
 class smm_settings {
 private:
     std::string address;

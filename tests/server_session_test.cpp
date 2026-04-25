@@ -172,6 +172,69 @@ TEST_CASE("session: server list sent on identify contains seeded servers")
     CHECK(servers[1].second == 9090);
 }
 
+TEST_CASE("session: rapid sendCommand does not duplicate a single pending command")
+{
+    /* todo09: the main loop now calls sendCommand every 100ms to drop
+     * command delivery latency. That is only safe if repeated calls with
+     * the same pending row do not resend the message. Verify idempotency
+     * by driving sendCommand for 2s worth of ticks against one
+     * queued command and counting command messages on the wire. */
+    fss_test::MockDatabase mock;
+    constexpr uint64_t asset_id = 7;
+    mock.asset_ids["craft"] = asset_id;
+    mock.pushCommand(asset_id, std::make_shared<fss::server::asset_command>(
+        /*dbid*/ 1, /*ts*/ 100, "TERM", 0.0, 0.0, 0));
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+
+    constexpr int ticks_per_sec = 1000 / fss::server::command_poll_ms;
+    for (int i = 0; i < 2 * ticks_per_sec; ++i) { session->sendCommand(); }
+
+    int command_count = 0;
+    for (const auto &msg : conn->sent)
+    {
+        if (msg->getType() == fss::transport::message_type_command) { ++command_count; }
+    }
+    REQUIRE(command_count == 1);
+}
+
+TEST_CASE("session: a freshly queued command is delivered on the very next sendCommand")
+{
+    /* todo09: the latency claim is "next 100ms tick picks it up". Model
+     * that by pushing a command AFTER identify, then issuing a single
+     * sendCommand and asserting the message appears immediately. */
+    fss_test::MockDatabase mock;
+    constexpr uint64_t asset_id = 9;
+    mock.asset_ids["craft"] = asset_id;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+
+    const std::size_t sent_before = conn->sent.size();
+
+    mock.pushCommand(asset_id, std::make_shared<fss::server::asset_command>(
+        /*dbid*/ 42, /*ts*/ 500, "DISARM", 0.0, 0.0, 0));
+    session->sendCommand();
+
+    bool delivered = false;
+    for (std::size_t i = sent_before; i < conn->sent.size(); ++i)
+    {
+        if (conn->sent[i]->getType() == fss::transport::message_type_command) { delivered = true; }
+    }
+    REQUIRE(delivered);
+}
+
 TEST_CASE("session: RTT timeout disconnects client")
 {
     fss_test::MockDatabase mock;

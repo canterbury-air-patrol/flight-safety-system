@@ -218,24 +218,35 @@ main(int argc, char *argv[]) -> int
         },
         config["ssl"]["ca_public_key"].asString(), config["ssl"]["server_private_key"].asString(), config["ssl"]["server_public_key"].asString());
 
-    uint64_t counter = 0;
-    constexpr int send_config_period = 15;
+    /* Split tick: sendCommand runs every command_poll_ms so safety-critical
+     * commands (TERM, DISARM) reach aircraft in <=100ms instead of <=1s.
+     * Per-second tasks (RTT, timeout sweep) and per-15s tasks (server list,
+     * SMM settings) retain their original cadence via the tick counter. */
+    constexpr int command_poll_ms = flight_safety_system::server::command_poll_ms;
+    static_assert(1000 % command_poll_ms == 0, "command_poll_ms must evenly divide 1000 to avoid tick skew");
+    static_assert(1000 / command_poll_ms > 0, "command_poll_ms must be <= 1000ms");
+
+    constexpr int usec_per_msec = 1000;
+    constexpr int ticks_per_sec = 1000 / command_poll_ms;
+    constexpr int send_config_period_ticks = 15 * ticks_per_sec;
+    uint64_t tick_counter = 0;
     while (running == 1)
     {
-        sleep (1);
-        clients->cleanupRemovableClients();
-        clients->checkTimeouts();
+        usleep(command_poll_ms * usec_per_msec);
+        clients->sendCommand();
+        if ((tick_counter % ticks_per_sec) == 0)
         {
+            clients->cleanupRemovableClients();
+            clients->checkTimeouts();
             auto rtt_req = std::make_shared<flight_safety_system::transport::fss_message_rtt_request>();
             clients->sendRTTRequest(rtt_req);
-            clients->sendCommand();
         }
-        if ((counter % send_config_period) == 0)
+        if ((tick_counter % send_config_period_ticks) == 0)
         {
             clients->broadcastMsg(flight_safety_system::server::build_server_list_msg(dbc.get()));
             clients->sendSMMSettings();
         }
-        counter++;
+        tick_counter++;
     }
 
     /* Explicit shutdown ordering: stop accepting before disconnecting
