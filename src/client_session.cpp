@@ -112,6 +112,7 @@ fss::server::fss_client::sendCommand()
                 break;
         }
         this->getConnection()->sendMsg(msg);
+        FSS_LOG_INFO("server", "dispatched command dbid=" << ac->getDBId() << " to " << this->name);
     }
 }
 
