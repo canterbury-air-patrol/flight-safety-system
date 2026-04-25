@@ -19,8 +19,28 @@
 using flight_safety_system::transport::buf_len;
 using flight_safety_system::transport::fss_message;
 using flight_safety_system::transport::fss_message_identity;
+using flight_safety_system::transport::fss_message_identity_non_aircraft;
+using flight_safety_system::transport::fss_message_identity_required;
 using flight_safety_system::transport::fss_message_position_report;
+using flight_safety_system::transport::fss_message_rtt_request;
+using flight_safety_system::transport::fss_message_rtt_response;
+using flight_safety_system::transport::fss_message_search_status;
+using flight_safety_system::transport::fss_message_asset_command;
+using flight_safety_system::transport::fss_message_server_list;
+using flight_safety_system::transport::fss_message_smm_settings;
+using flight_safety_system::transport::fss_message_system_status;
+using flight_safety_system::transport::asset_command_rtl;
+using flight_safety_system::transport::message_type_command;
 using flight_safety_system::transport::message_type_identity;
+using flight_safety_system::transport::message_type_identity_non_aircraft;
+using flight_safety_system::transport::message_type_identity_required;
+using flight_safety_system::transport::message_type_position_report;
+using flight_safety_system::transport::message_type_rtt_request;
+using flight_safety_system::transport::message_type_rtt_response;
+using flight_safety_system::transport::message_type_search_status;
+using flight_safety_system::transport::message_type_server_list;
+using flight_safety_system::transport::message_type_smm_settings;
+using flight_safety_system::transport::message_type_system_status;
 using flight_safety_system::transport::message_type_unknown;
 
 TEST_CASE("malformed: decode returns nullptr for buffer shorter than header")
@@ -78,6 +98,137 @@ TEST_CASE("malformed: zero-length string field decodes to empty string")
     auto bl = original->getPacked();
     auto decoded = std::make_shared<fss_message_identity>(1, bl);
     REQUIRE(decoded->getName().empty());
+}
+
+/* Regression for todo/13: decode() must return a message whose getType()
+ * matches the type field in the header.  These round-trip each concrete
+ * message class through getPacked() → decode() and verify the invariant. */
+TEST_CASE("decode type consistency: identity")
+{
+    auto orig = std::make_shared<fss_message_identity>("asset");
+    orig->setId(1);
+    auto decoded = fss_message::decode(orig->getPacked());
+    REQUIRE(decoded != nullptr);
+    REQUIRE(decoded->getType() == message_type_identity);
+    REQUIRE(std::dynamic_pointer_cast<fss_message_identity>(decoded) != nullptr);
+}
+
+TEST_CASE("decode type consistency: rtt_request")
+{
+    auto orig = std::make_shared<fss_message_rtt_request>();
+    orig->setId(2);
+    auto decoded = fss_message::decode(orig->getPacked());
+    REQUIRE(decoded != nullptr);
+    REQUIRE(decoded->getType() == message_type_rtt_request);
+    REQUIRE(std::dynamic_pointer_cast<fss_message_rtt_request>(decoded) != nullptr);
+}
+
+TEST_CASE("decode type consistency: rtt_response")
+{
+    auto orig = std::make_shared<fss_message_rtt_response>(99ULL);
+    orig->setId(3);
+    auto decoded = fss_message::decode(orig->getPacked());
+    REQUIRE(decoded != nullptr);
+    REQUIRE(decoded->getType() == message_type_rtt_response);
+    REQUIRE(std::dynamic_pointer_cast<fss_message_rtt_response>(decoded) != nullptr);
+}
+
+TEST_CASE("decode type consistency: system_status")
+{
+    auto orig = std::make_shared<fss_message_system_status>(80, 1200, 12.4);
+    orig->setId(4);
+    auto decoded = fss_message::decode(orig->getPacked());
+    REQUIRE(decoded != nullptr);
+    REQUIRE(decoded->getType() == message_type_system_status);
+    REQUIRE(std::dynamic_pointer_cast<fss_message_system_status>(decoded) != nullptr);
+}
+
+TEST_CASE("decode type consistency: search_status")
+{
+    auto orig = std::make_shared<fss_message_search_status>(1ULL, 50ULL, 100ULL);
+    orig->setId(5);
+    auto decoded = fss_message::decode(orig->getPacked());
+    REQUIRE(decoded != nullptr);
+    REQUIRE(decoded->getType() == message_type_search_status);
+    REQUIRE(std::dynamic_pointer_cast<fss_message_search_status>(decoded) != nullptr);
+}
+
+TEST_CASE("decode type consistency: server_list")
+{
+    auto orig = std::make_shared<fss_message_server_list>();
+    orig->setId(6);
+    auto decoded = fss_message::decode(orig->getPacked());
+    REQUIRE(decoded != nullptr);
+    REQUIRE(decoded->getType() == message_type_server_list);
+    REQUIRE(std::dynamic_pointer_cast<fss_message_server_list>(decoded) != nullptr);
+}
+
+TEST_CASE("decode type consistency: identity_non_aircraft")
+{
+    auto orig = std::make_shared<fss_message_identity_non_aircraft>();
+    orig->setId(7);
+    auto decoded = fss_message::decode(orig->getPacked());
+    REQUIRE(decoded != nullptr);
+    REQUIRE(decoded->getType() == message_type_identity_non_aircraft);
+    REQUIRE(std::dynamic_pointer_cast<fss_message_identity_non_aircraft>(decoded) != nullptr);
+}
+
+TEST_CASE("decode type consistency: position_report")
+{
+    auto orig = std::make_shared<fss_message_position_report>(
+        -33.8688, 151.2093, 100,
+        0, 0, 0,
+        0, "TEST", 0, 0, 0, 0, 0, 0ULL);
+    orig->setId(11);
+    auto decoded = fss_message::decode(orig->getPacked());
+    REQUIRE(decoded != nullptr);
+    REQUIRE(decoded->getType() == message_type_position_report);
+    REQUIRE(std::dynamic_pointer_cast<fss_message_position_report>(decoded) != nullptr);
+}
+
+TEST_CASE("decode type consistency: command")
+{
+    auto orig = std::make_shared<fss_message_asset_command>(asset_command_rtl, 0ULL);
+    orig->setId(9);
+    auto decoded = fss_message::decode(orig->getPacked());
+    REQUIRE(decoded != nullptr);
+    REQUIRE(decoded->getType() == message_type_command);
+    REQUIRE(std::dynamic_pointer_cast<fss_message_asset_command>(decoded) != nullptr);
+}
+
+TEST_CASE("decode type consistency: smm_settings")
+{
+    auto orig = std::make_shared<fss_message_smm_settings>("http://example.com", "user", "pass");
+    orig->setId(10);
+    auto decoded = fss_message::decode(orig->getPacked());
+    REQUIRE(decoded != nullptr);
+    REQUIRE(decoded->getType() == message_type_smm_settings);
+    REQUIRE(std::dynamic_pointer_cast<fss_message_smm_settings>(decoded) != nullptr);
+}
+
+TEST_CASE("decode type consistency: identity_required")
+{
+    auto orig = std::make_shared<fss_message_identity_required>();
+    orig->setId(8);
+    auto decoded = fss_message::decode(orig->getPacked());
+    REQUIRE(decoded != nullptr);
+    REQUIRE(decoded->getType() == message_type_identity_required);
+    REQUIRE(std::dynamic_pointer_cast<fss_message_identity_required>(decoded) != nullptr);
+}
+
+/* Regression for todo/13: a cast to the wrong subclass must yield nullptr,
+ * not a non-null pointer to a mismatched object — checked for every type. */
+TEST_CASE("decode type consistency: wrong cast always returns nullptr")
+{
+    auto id_msg = std::make_shared<fss_message_identity>("x");
+    id_msg->setId(1);
+    auto decoded = fss_message::decode(id_msg->getPacked());
+    REQUIRE(decoded != nullptr);
+    REQUIRE(std::dynamic_pointer_cast<fss_message_rtt_response>(decoded) == nullptr);
+    REQUIRE(std::dynamic_pointer_cast<fss_message_position_report>(decoded) == nullptr);
+    REQUIRE(std::dynamic_pointer_cast<fss_message_system_status>(decoded) == nullptr);
+    REQUIRE(std::dynamic_pointer_cast<fss_message_search_status>(decoded) == nullptr);
+    REQUIRE(std::dynamic_pointer_cast<fss_message_server_list>(decoded) == nullptr);
 }
 
 /* Defensive: the length field in the header claims more bytes than the
