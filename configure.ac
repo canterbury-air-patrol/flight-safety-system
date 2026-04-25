@@ -22,7 +22,7 @@ PKG_INSTALLDIR
 
 # Check for required pkg-config
 PKG_CHECK_MODULES([JSONCPP], [jsoncpp])
-PKG_CHECK_MODULES([GNUTLS], [gnutls >= 3.3.0])
+PKG_CHECK_MODULES([GNUTLS], [gnutls >= 3.6.0])
 
 AC_ARG_ENABLE([server],AS_HELP_STRING([--enable-server], [Build the server (fss-server)]))
 AC_ARG_ENABLE([tests],AS_HELP_STRING([--enable-tests], [Build the tests (Requires catch2)]))
