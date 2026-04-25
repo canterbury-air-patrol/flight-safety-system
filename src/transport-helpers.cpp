@@ -57,12 +57,12 @@ convert_str_to_sa(const std::string &addr, uint16_t port, struct sockaddr_storag
         case AF_INET:
         {
             auto sa_in = (struct sockaddr_in *)sa;
-            sa_in->sin_port = ntohs (port);
+            sa_in->sin_port = htons(port);
         } break;
         case AF_INET6:
         {
             auto sa_in = (struct sockaddr_in6 *)sa;
-            sa_in->sin6_port = ntohs (port);
+            sa_in->sin6_port = htons(port);
         }
     }
     
