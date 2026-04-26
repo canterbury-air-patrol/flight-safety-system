@@ -9,6 +9,7 @@
 #include <list>
 
 #include "fss.hpp"
+#include "secure-string.hpp"
 
 namespace flight_safety_system {
 
@@ -351,17 +352,17 @@ public:
 class fss_message_smm_settings: public fss_message {
 private:
     std::string server_url;
-    std::string username;
-    std::string password;
+    secure_string username;
+    secure_string password;
 protected:
     void unpackData(const std::shared_ptr<buf_len> &bl);
     void packData(std::shared_ptr<buf_len> bl) override;
 public:
-    fss_message_smm_settings(std::string t_server_url, std::string t_username, std::string t_password);
+    fss_message_smm_settings(std::string t_server_url, secure_string t_username, secure_string t_password);
     fss_message_smm_settings(uint64_t t_id, const std::shared_ptr<buf_len> &bl);
     virtual auto getServerURL() -> std::string;
-    virtual auto getUsername() -> std::string;
-    virtual auto getPassword() -> std::string;
+    virtual auto getUsername() -> const secure_string &;
+    virtual auto getPassword() -> const secure_string &;
 };
 
 class fss_message_server_list: public fss_message {

@@ -11,13 +11,12 @@ using flight_safety_system::fss_htobe64;
 using flight_safety_system::fss_be64toh;
 using flight_safety_system::transport::FSS_COORD_SCALE;
 
-void
-packString(const std::shared_ptr<flight_safety_system::transport::buf_len> &bl, const std::string &val)
+static void
+packStringRaw(const std::shared_ptr<flight_safety_system::transport::buf_len> &bl, const char *data, size_t str_len)
 {
-    size_t str_len = val.length();
     uint16_t len = fss_htobe16(str_len);
     bl->addData((char *)&len, sizeof(uint16_t));
-    bl->addData(val.c_str(), str_len);
+    bl->addData(data, str_len);
     /* align to 8-byte boundary */
     uint64_t empty = 0;
     size_t pack_remainder = bl->getLength() % sizeof(uint64_t);
@@ -27,8 +26,21 @@ packString(const std::shared_ptr<flight_safety_system::transport::buf_len> &bl, 
     }
 }
 
+void
+packString(const std::shared_ptr<flight_safety_system::transport::buf_len> &bl, const std::string &val)
+{
+    packStringRaw(bl, val.data(), val.size());
+}
+
+void
+packString(const std::shared_ptr<flight_safety_system::transport::buf_len> &bl, const flight_safety_system::secure_string &val)
+{
+    packStringRaw(bl, val.data(), val.size());
+}
+
+template<typename StringType>
 static auto
-unpackString(const char *data, size_t length, size_t &offset, std::string &result) -> bool
+unpackString(const char *data, size_t length, size_t &offset, StringType &result) -> bool
 {
     if (offset > length || length - offset < sizeof(uint16_t))
     {
@@ -820,7 +832,7 @@ flight_safety_system::transport::fss_message_smm_settings::unpackData(const std:
     unpackString(data, length, offset, this->password);
 }
 
-flight_safety_system::transport::fss_message_smm_settings::fss_message_smm_settings(std::string t_server_url, std::string t_username, std::string t_password) : fss_message(message_type_smm_settings), server_url(std::move(t_server_url)), username(std::move(t_username)), password(std::move(t_password))
+flight_safety_system::transport::fss_message_smm_settings::fss_message_smm_settings(std::string t_server_url, secure_string t_username, secure_string t_password) : fss_message(message_type_smm_settings), server_url(std::move(t_server_url)), username(std::move(t_username)), password(std::move(t_password))
 {
 }
 
@@ -836,13 +848,13 @@ flight_safety_system::transport::fss_message_smm_settings::getServerURL() -> std
 }
 
 auto
-flight_safety_system::transport::fss_message_smm_settings::getUsername() -> std::string
+flight_safety_system::transport::fss_message_smm_settings::getUsername() -> const secure_string &
 {
     return this->username;
 }
 
 auto
-flight_safety_system::transport::fss_message_smm_settings::getPassword() -> std::string
+flight_safety_system::transport::fss_message_smm_settings::getPassword() -> const secure_string &
 {
     return this->password;
 }

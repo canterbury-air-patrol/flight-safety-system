@@ -19,13 +19,13 @@ constexpr int command_poll_ms = 100;
 class smm_settings {
 private:
     std::string address;
-    std::string username;
-    std::string password;
+    secure_string username;
+    secure_string password;
 public:
-    smm_settings(std::string t_address, std::string t_username, std::string t_password);
+    smm_settings(std::string t_address, secure_string t_username, secure_string t_password);
     auto getAddress() -> std::string;
-    auto getUsername() -> std::string;
-    auto getPassword() -> std::string;
+    auto getUsername() -> const secure_string &;
+    auto getPassword() -> const secure_string &;
 };
 
 class fss_server_details
