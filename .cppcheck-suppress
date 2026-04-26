@@ -11,8 +11,8 @@ constVariablePointer:src/fss-log.hpp:66
 useStlAlgorithm:src/client-ssl.cpp:130
 
 # fss-transport-ssl.hpp — deleted-operator= re-declared in derived class
-duplInheritedMember:src/fss-transport-ssl.hpp:30
 duplInheritedMember:src/fss-transport-ssl.hpp:31
+duplInheritedMember:src/fss-transport-ssl.hpp:32
 
 # server.cpp
 missingOverride:src/server.cpp:136

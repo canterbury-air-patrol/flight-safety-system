@@ -127,7 +127,20 @@ flight_safety_system::transport_ssl::fss_connection_client::create(std::string t
 auto
 flight_safety_system::transport_ssl::fss_connection::setupSession() -> bool
 {
-    this->session->set_priority (nullptr, nullptr);
+    const char *err_pos = nullptr;
+    try
+    {
+        this->session->set_priority(
+            "SECURE256:+SECURE128:-VERS-TLS1.0:-VERS-TLS1.1:%SERVER_PRECEDENCE",
+            &err_pos);
+    }
+    catch (gnutls::exception &ex)
+    {
+        FSS_LOG_ERROR("ssl", "Failed to set TLS priority: " << ex.what()
+                      << (err_pos ? std::string(" near: ") + err_pos : ""));
+        this->usable = false;
+        return false;
+    }
 
     this->credentials->set_x509_trust_file(this->ca_file.c_str(), GNUTLS_X509_FMT_PEM);
     this->credentials->set_x509_key_file(this->public_key_file.c_str(), this->private_key_file.c_str(), GNUTLS_X509_FMT_PEM);
@@ -320,4 +333,14 @@ flight_safety_system::transport_ssl::fss_listen::fss_listen(uint16_t t_port, fli
 auto flight_safety_system::transport_ssl::fss_connection_server::getClientNames() -> std::list<std::string>
 {
     return this->possible_names;
+}
+
+auto flight_safety_system::transport_ssl::fss_connection::getSessionDesc() -> std::string
+{
+    if (!this->session) { return {}; }
+    char *desc = gnutls_session_get_desc(this->session->ptr());
+    if (desc == nullptr) { return {}; }
+    std::string result(desc);
+    gnutls_free(desc);
+    return result;
 }

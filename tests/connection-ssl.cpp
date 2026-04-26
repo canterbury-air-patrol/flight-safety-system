@@ -1,5 +1,6 @@
 #include <cstddef>
 #include <memory>
+#include <string>
 #ifdef HAVE_CATCH2_CATCH_ALL_HPP
 #include <catch2/catch_all.hpp>
 #elif HAVE_CATCH2_CATCH_HPP
@@ -120,6 +121,37 @@ TEST_CASE("SSL - Listen - Callback")
 
     cb->disconnect();
     REQUIRE(!cb->connected());
+
+    client_conn = nullptr;
+}
+
+TEST_CASE("SSL - Negotiated cipher suite is AEAD (TLS 1.2+)")
+{
+    const uint16_t listen_port = fss_test::pick_port();
+    REQUIRE(listen_port != 0);
+    client_conn = nullptr;
+
+    auto listen = std::make_shared<flight_safety_system::transport_ssl::fss_listen>(
+        listen_port, test_client_connect_cb, CA_PUBLIC_FILE, SERVER_PRIVATE_FILE, SERVER_PUBLIC_FILE);
+    REQUIRE(listen != nullptr);
+
+    auto conn = std::make_shared<flight_safety_system::transport_ssl::fss_connection_client>(
+        CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE);
+    REQUIRE(conn->connectTo("localhost", listen_port));
+
+    std::string desc = conn->getSessionDesc();
+    REQUIRE_FALSE(desc.empty());
+
+    // Protocol must be TLS 1.2 or TLS 1.3 — TLS 1.0/1.1 are excluded by the priority string
+    bool modern_tls = desc.find("TLS1.2") != std::string::npos ||
+                      desc.find("TLS1.3") != std::string::npos;
+    REQUIRE(modern_tls);
+
+    // Cipher must be AEAD (AES-GCM, AES-CCM, or ChaCha20-Poly1305)
+    bool aead = desc.find("GCM") != std::string::npos ||
+                desc.find("POLY1305") != std::string::npos ||
+                desc.find("-CCM") != std::string::npos;
+    REQUIRE(aead);
 
     client_conn = nullptr;
 }

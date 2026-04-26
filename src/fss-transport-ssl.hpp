@@ -1,6 +1,7 @@
 #include <fss-transport.hpp>
 
 #include <list>
+#include <string>
 
 namespace gnutls {
     class certificate_credentials;
@@ -30,6 +31,7 @@ public:
     auto operator=(fss_connection&) -> fss_connection& = delete;
     auto operator=(fss_connection&&) -> fss_connection& = delete;
     ~fss_connection() override;
+    auto getSessionDesc() -> std::string;
 };
 
 class fss_connection_client : public fss_connection {
