@@ -45,21 +45,23 @@ public:
     auto operator=(fss_connection_client &&) -> fss_connection& = delete;
     ~fss_connection_client() override;
     auto connectTo(const std::string &address, uint16_t port) -> bool override;
+    static auto create(std::string t_ca, std::string t_private_key, std::string t_public_key, const std::string &address, uint16_t port) -> std::shared_ptr<fss_connection_client>;
 };
 
 
 class fss_connection_server : public fss_connection {
 private:
     std::list<std::string> possible_names{};
+    fss_connection_server(int t_fd, std::string t_ca, std::string t_private_key, std::string t_public_key, std::string t_crl = {});
 protected:
     auto setupSSL() -> bool;
 public:
-    fss_connection_server(int t_fd, std::string t_ca, std::string t_private_key, std::string t_public_key, std::string t_crl = {});
     fss_connection_server(fss_connection_server&) = delete;
     fss_connection_server(fss_connection_server&&) = delete;
     auto operator=(fss_connection_server&) -> fss_connection_server& = delete;
     auto operator=(fss_connection_server&&) -> fss_connection_server& = delete;
     ~fss_connection_server() override;
+    static auto create(int t_fd, std::string t_ca, std::string t_private_key, std::string t_public_key, std::string t_crl) -> std::shared_ptr<fss_connection_server>;
     auto getClientNames() -> std::list<std::string> override;
 };
 

@@ -99,7 +99,7 @@ TEST_CASE("SSL - Listen - Callback")
     auto listen = std::make_shared<flight_safety_system::transport_ssl::fss_listen>(listen_port, test_client_connect_cb, CA_PUBLIC_FILE, SERVER_PRIVATE_FILE, SERVER_PUBLIC_FILE);
     REQUIRE(listen != nullptr);
 
-    flight_safety_system::transport::fss_connection *conn = new flight_safety_system::transport_ssl::fss_connection_client(CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE);
+    std::shared_ptr<flight_safety_system::transport::fss_connection> conn = std::make_shared<flight_safety_system::transport_ssl::fss_connection_client>(CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE);
     REQUIRE(conn != nullptr);
     REQUIRE(conn->connectTo("localhost", listen_port));
 
@@ -122,5 +122,4 @@ TEST_CASE("SSL - Listen - Callback")
     REQUIRE(!cb->connected());
 
     client_conn = nullptr;
-    delete conn;
 }

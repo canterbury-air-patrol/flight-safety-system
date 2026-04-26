@@ -88,7 +88,11 @@ TEST_CASE("reconnect: client reconnects after listener bounce")
     accepted_conn = nullptr;
 
     /* Drop the listener and the accepted connection — from the client's
-     * perspective, the server side has gone away. */
+     * perspective, the server side has gone away.  With the shared_ptr-capture
+     * thread design the recv thread keeps the connection alive until it exits,
+     * so we must explicitly disconnect before dropping the reference to ensure
+     * the TCP connection closes immediately. */
+    original->disconnect();
     original = nullptr;
     listen = nullptr;
 

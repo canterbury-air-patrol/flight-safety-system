@@ -20,12 +20,6 @@ extern const char *
 inet_ntop_stor(struct sockaddr_storage *src, char *dst, size_t dstlen, uint16_t *port);
 #endif
 
-static void
-recv_msg_thread(flight_safety_system::transport_ssl::fss_connection *conn)
-{
-    conn->processMessages();
-}
-
 flight_safety_system::transport_ssl::fss_connection::fss_connection(std::string t_ca, std::string t_private_key, std::string t_public_key, std::string t_crl) : flight_safety_system::transport::fss_connection(), credentials(new gnutls::certificate_credentials()), ca_file(std::move(t_ca)), private_key_file(std::move(t_private_key)), public_key_file(std::move(t_public_key)), crl_file(std::move(t_crl))
 {
 }
@@ -59,10 +53,17 @@ flight_safety_system::transport_ssl::fss_connection_server::fss_connection_serve
 {
     this->setFd(t_fd);
     this->usable = this->setupSSL();
-    if (this->usable)
+}
+
+auto
+flight_safety_system::transport_ssl::fss_connection_server::create(int t_fd, std::string t_ca, std::string t_private_key, std::string t_public_key, std::string t_crl) -> std::shared_ptr<fss_connection_server>
+{
+    auto conn = std::shared_ptr<fss_connection_server>(new fss_connection_server(t_fd, std::move(t_ca), std::move(t_private_key), std::move(t_public_key), std::move(t_crl)));
+    if (conn->usable)
     {
-        this->startRecvThread(std::thread(recv_msg_thread, this));
+        conn->startRecvThread(std::thread([conn]() -> void { conn->processMessages(); }));
     }
+    return conn;
 }
 
 flight_safety_system::transport_ssl::fss_connection_client::fss_connection_client(std::string t_ca, std::string t_private_key, std::string t_public_key) : fss_connection(std::move(t_ca), std::move(t_private_key), std::move(t_public_key))
@@ -108,12 +109,19 @@ flight_safety_system::transport_ssl::fss_connection_client::connectTo(const std:
 
     this->usable = this->setupSSL();
 
-    if (this->usable)
-    {
-        this->startRecvThread(std::thread(recv_msg_thread, this));
-    }
-
     return this->usable;
+}
+
+auto
+flight_safety_system::transport_ssl::fss_connection_client::create(std::string t_ca, std::string t_private_key, std::string t_public_key, const std::string &address, uint16_t port) -> std::shared_ptr<fss_connection_client>
+{
+    auto conn = std::make_shared<fss_connection_client>(std::move(t_ca), std::move(t_private_key), std::move(t_public_key));
+    if (!conn->connectTo(address, port))
+    {
+        return nullptr;
+    }
+    conn->startRecvThread(std::thread([conn]() -> void { conn->processMessages(); }));
+    return conn;
 }
 
 auto
@@ -302,7 +310,7 @@ flight_safety_system::transport_ssl::fss_connection::recvBytes(void *t_bytes, si
 auto
 flight_safety_system::transport_ssl::fss_listen::newConnection(int t_newfd) -> std::shared_ptr<flight_safety_system::transport::fss_connection>
 {
-    return std::make_shared<flight_safety_system::transport_ssl::fss_connection_server>(t_newfd, this->ca_file, this->private_key_file, this->public_key_file, this->crl_file);
+    return flight_safety_system::transport_ssl::fss_connection_server::create(t_newfd, this->ca_file, this->private_key_file, this->public_key_file, this->crl_file);
 }
 
 flight_safety_system::transport_ssl::fss_listen::fss_listen(uint16_t t_port, flight_safety_system::transport::fss_connect_cb t_cb, std::string t_ca, std::string t_private_key, std::string t_public_key, std::string t_crl) : flight_safety_system::transport::fss_listen(t_port, t_cb), ca_file(std::move(t_ca)), private_key_file(std::move(t_private_key)), public_key_file(std::move(t_public_key)), crl_file(std::move(t_crl))

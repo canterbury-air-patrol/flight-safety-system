@@ -45,12 +45,6 @@ inet_ntop_stor(struct sockaddr_storage *src, char *dst, size_t dstlen, uint16_t 
 
 flight_safety_system::transport::fss_connection::fss_connection() = default;
 
-static void
-recv_msg_thread(flight_safety_system::transport::fss_connection *conn)
-{
-    conn->processMessages();
-}
-
 flight_safety_system::transport::fss_connection::fss_connection(int t_fd, size_t t_max_queue_size)
     : fd(t_fd), max_queue_size(t_max_queue_size)
 {
@@ -60,7 +54,7 @@ auto
 flight_safety_system::transport::fss_connection::create(int t_fd, size_t t_max_queue_size) -> std::shared_ptr<fss_connection>
 {
     auto conn = std::shared_ptr<fss_connection>(new fss_connection(t_fd, t_max_queue_size));
-    conn->startRecvThread(std::thread(recv_msg_thread, conn.get()));
+    conn->startRecvThread(std::thread([conn]() -> void { conn->processMessages(); }));
     return conn;
 }
 
@@ -73,6 +67,7 @@ flight_safety_system::transport::fss_connection::getDroppedMessages() -> uint64_
 void
 flight_safety_system::transport::fss_connection::disconnect()
 {
+    this->run.store(false);
     int orig_fd = this->fd.exchange(-1);
     if (orig_fd != -1)
     {
@@ -81,7 +76,18 @@ flight_safety_system::transport::fss_connection::disconnect()
     }
     if (this->recv_thread.joinable())
     {
-        this->recv_thread.join();
+        if (this->recv_thread.get_id() == std::this_thread::get_id())
+        {
+            /* Destructor called from within the recv thread itself (possible
+             * when the lambda is the last shared_ptr owner).  Detach so the
+             * thread can finish normally without trying to join itself. */
+            this->recv_thread.detach();
+            this->recv_thread = std::thread();
+        }
+        else
+        {
+            this->recv_thread.join();
+        }
     }
 }
 
@@ -116,6 +122,18 @@ flight_safety_system::transport::fss_connection::processMessages()
         {
             FSS_LOG_INFO("transport", "Remote closed the connection");
             this->run.store(false);
+            {
+                std::lock_guard<std::mutex> lock_holder(this->msg_lock);
+                if (this->handler != nullptr)
+                {
+                    this->handler->processMessage(msg);
+                }
+                else
+                {
+                    this->messages.push(msg);
+                }
+            }
+            break;
         }
         {
             std::lock_guard<std::mutex> lock_holder(this->msg_lock);
@@ -196,7 +214,7 @@ flight_safety_system::transport::fss_connection::connectTo(const std::string &ad
 
     set_tcp_keepalive(current_fd);
 
-    this->recv_thread = std::thread(recv_msg_thread, this);
+    this->startRecvThread(std::thread([this]() -> void { this->processMessages(); }));
 
     return true;
 }
