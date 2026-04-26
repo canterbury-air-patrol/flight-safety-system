@@ -271,8 +271,13 @@ flight_safety_system::client_ssl::fss_server::sendVersion()
 auto
 flight_safety_system::client_ssl::fss_server::reconnect_to() -> bool
 {
-    this->setConnection(std::make_shared<flight_safety_system::transport_ssl::fss_connection_client>(this->ca_file, this->private_key_file, this->public_key_file));
-    return this->getConnection()->connectTo(this->getAddress(), this->getPort());
+    auto new_conn = flight_safety_system::transport_ssl::fss_connection_client::create(this->ca_file, this->private_key_file, this->public_key_file, this->getAddress(), this->getPort());
+    if (new_conn == nullptr)
+    {
+        return false;
+    }
+    this->setConnection(new_conn);
+    return true;
 }
 
 void
