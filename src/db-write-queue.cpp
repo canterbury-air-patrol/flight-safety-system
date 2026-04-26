@@ -71,6 +71,12 @@ db_write_queue::dropped_count() const -> uint64_t
 }
 
 auto
+db_write_queue::write_failure_count() const -> uint64_t
+{
+    return this->write_failures.load();
+}
+
+auto
 db_write_queue::pending_count() const -> std::size_t
 {
     std::lock_guard<std::mutex> guard(this->mtx);
@@ -96,11 +102,21 @@ db_write_queue::run()
         }
         catch (const std::exception &e)
         {
-            FSS_LOG_ERROR("db-writer", "sink threw exception: " << e.what());
+            uint64_t failures = ++this->write_failures;
+            constexpr uint64_t log_every = 100;
+            if (failures == 1 || (failures % log_every) == 0)
+            {
+                FSS_LOG_ERROR("db-writer", "sink failed (total=" << failures << "): " << e.what());
+            }
         }
         catch (...)
         {
-            FSS_LOG_ERROR("db-writer", "sink threw unknown exception");
+            uint64_t failures = ++this->write_failures;
+            constexpr uint64_t log_every = 100;
+            if (failures == 1 || (failures % log_every) == 0)
+            {
+                FSS_LOG_ERROR("db-writer", "sink failed (total=" << failures << "): unknown exception");
+            }
         }
     }
 }

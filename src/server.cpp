@@ -251,6 +251,13 @@ main(int argc, char *argv[]) -> int
             clients->checkTimeouts();
             auto rtt_req = std::make_shared<flight_safety_system::transport::fss_message_rtt_request>();
             clients->sendRTTRequest(rtt_req);
+            static uint64_t last_failure_count = 0;
+            uint64_t current_failures = writer->write_failure_count();
+            if (current_failures != last_failure_count)
+            {
+                FSS_LOG_ERROR("server", "DB write failures since start: " << current_failures);
+                last_failure_count = current_failures;
+            }
         }
         if ((tick_counter % send_config_period_ticks) == 0)
         {

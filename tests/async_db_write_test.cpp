@@ -214,6 +214,25 @@ TEST_CASE("db_write_queue: drop log message appears on stderr when queue fills")
     flight_safety_system::log::set_level("info");
 }
 
+TEST_CASE("db_write_queue: write_failure_count tracks sink exceptions")
+{
+    constexpr uint64_t task_count = 5;
+    auto throwing_sink = [](const fss::server::db_write_task &) -> void {
+        throw std::runtime_error("injected sink failure");
+    };
+
+    fss::server::db_write_queue q(100, throwing_sink);
+    for (uint64_t i = 1; i <= task_count; ++i)
+    {
+        q.enqueue(fss::server::rtt_write{i, 0});
+    }
+
+    REQUIRE(fss_test::wait_for([&]() -> bool { return q.write_failure_count() == task_count; }));
+    q.stop();
+
+    REQUIRE(q.write_failure_count() == task_count);
+}
+
 TEST_CASE("db_write_queue: destructor without explicit stop drains pending work")
 {
     auto cap = std::make_shared<CapturingSink>();
