@@ -133,6 +133,12 @@ fss::server::fss_client::setTimeoutMs(uint64_t ms)
     this->client_timeout_ms = ms;
 }
 
+void
+fss::server::fss_client::setRateLimits(uint64_t capacity, uint64_t refill_per_s)
+{
+    this->msg_rate = rate_limiter(capacity, refill_per_s);
+}
+
 auto
 fss::server::fss_client::isTimedOut() -> bool
 {
@@ -317,6 +323,27 @@ fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss_mess
     }
     else
     {
+        if (!this->msg_rate.consume(this->clock->now_ms()))
+        {
+            auto now_ms = this->clock->now_ms();
+            ++this->rate_limit_rejects;
+            FSS_LOG_DEBUG("server", "Rate-limiting client " << this->name
+                                                            << " (rejects=" << this->rate_limit_rejects << ")");
+            if (this->last_rate_limit_log_ms == 0)
+            {
+                this->last_rate_limit_log_ms = now_ms;
+            }
+            else if (now_ms - this->last_rate_limit_log_ms >= 1000)
+            {
+                FSS_LOG_WARN("server", "Rate-limiting client " << this->name
+                                                               << " - dropped " << this->rate_limit_rejects
+                                                               << " messages in the last "
+                                                               << (now_ms - this->last_rate_limit_log_ms) << "ms");
+                this->rate_limit_rejects = 0;
+                this->last_rate_limit_log_ms = now_ms;
+            }
+            return;
+        }
         std::string client_name = this->getName();
         uint64_t asset_id = this->dbc->getAssetId(client_name);
         switch (msg->getType())

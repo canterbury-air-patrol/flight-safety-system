@@ -404,6 +404,64 @@ TEST_CASE("session: version handshake rejects incompatible peer")
     REQUIRE(handler.disconnects > 0);
 }
 
+TEST_CASE("rate limiter: drops messages beyond burst capacity without disconnecting")
+{
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 1;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+
+    auto clock = std::make_shared<FakeClock>();
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    session->setClock(clock);
+    session->setRateLimits(100, 0);  // 100-message burst, no refill
+
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+
+    auto pos = std::make_shared<fss::transport::fss_message_position_report>(
+        0.0, 0.0, 0U, 0U, 0U, int16_t{0}, 0U, std::string{}, 0U, uint8_t{0}, 0U, uint8_t{0}, uint8_t{0}, uint64_t{0});
+    for (int i = 0; i < 200; ++i)
+    {
+        session->processMessage(pos);
+    }
+
+    REQUIRE(handler.disconnects == 0);
+    REQUIRE(handler.broadcasts.size() == 100);
+}
+
+TEST_CASE("rate limiter: refill allows messages after bucket drains")
+{
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 1;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+
+    auto clock = std::make_shared<FakeClock>();
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    session->setClock(clock);
+    session->setRateLimits(5, 10);  // 5-message burst, 10/s refill
+
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+
+    auto pos = std::make_shared<fss::transport::fss_message_position_report>(
+        0.0, 0.0, 0U, 0U, 0U, int16_t{0}, 0U, std::string{}, 0U, uint8_t{0}, 0U, uint8_t{0}, uint8_t{0}, uint64_t{0});
+    for (int i = 0; i < 10; ++i) { session->processMessage(pos); }
+    // 5 go through, 5 dropped
+    REQUIRE(handler.broadcasts.size() == 5);
+
+    // Advance 1 second → 10 new tokens (capped at 5)
+    clock->advance(1000);
+    for (int i = 0; i < 10; ++i) { session->processMessage(pos); }
+    REQUIRE(handler.broadcasts.size() == 10);
+    REQUIRE(handler.disconnects == 0);
+}
+
 TEST_CASE("session: legacy client (no version handshake) is accepted")
 {
     /* todo02: pre-versioning clients send identity directly. The server
