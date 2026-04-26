@@ -3,6 +3,7 @@
 #include "fss.hpp"
 #include "fss-transport.hpp"
 #include "db-write-queue.hpp"
+#include "rate-limiter.hpp"
 
 #include <atomic>
 #include <memory>
@@ -138,6 +139,9 @@ private:
     std::shared_ptr<db_write_queue> writer;
     fss_client_handler *client_handler;
     std::shared_ptr<IClock> clock{std::make_shared<WallClock>()};
+    rate_limiter msg_rate{100, 20};
+    uint64_t rate_limit_rejects{0};
+    uint64_t last_rate_limit_log_ms{0};
 public:
     fss_client(std::shared_ptr<transport::fss_connection> conn, IDatabase *t_dbc, std::shared_ptr<db_write_queue> t_writer, fss_client_handler *t_handler);
     fss_client(fss_client&) = delete;
@@ -152,6 +156,7 @@ public:
     auto isAircraft() -> bool;
     void setClock(std::shared_ptr<IClock> t_clock);
     void setTimeoutMs(uint64_t ms);
+    void setRateLimits(uint64_t capacity, uint64_t refill_per_s); // must be called before any messages are processed
     auto isTimedOut() -> bool;
 };
 } // namespace server

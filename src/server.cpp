@@ -36,6 +36,8 @@ private:
     uint32_t total_clients{0};
     std::atomic<bool> shutting_down{false};
     uint64_t client_timeout_ms{30000};
+    uint64_t rate_capacity{100};
+    uint64_t rate_refill_per_s{20};
 public:
     server_clients() = default;
     ~server_clients() override {
@@ -61,9 +63,15 @@ public:
         }
     };
     void setClientTimeoutMs(uint64_t ms) { this->client_timeout_ms = ms; }
+    void setClientRateLimits(uint64_t capacity, uint64_t refill_per_s)
+    {
+        this->rate_capacity = capacity;
+        this->rate_refill_per_s = refill_per_s;
+    }
     void clientConnected(std::shared_ptr<flight_safety_system::server::fss_client> client)
     {
         client->setTimeoutMs(this->client_timeout_ms);
+        client->setRateLimits(this->rate_capacity, this->rate_refill_per_s);
         std::lock_guard<std::mutex> guard(this->lock);
         this->total_clients++;
         this->clients.push_back(std::move(client));
@@ -203,6 +211,12 @@ main(int argc, char *argv[]) -> int
     constexpr int msec_per_sec = 1000;
     uint64_t client_timeout_sec = config.isMember("client_timeout") ? config["client_timeout"].asUInt64() : default_client_timeout_sec;
     clients->setClientTimeoutMs(client_timeout_sec * msec_per_sec);
+
+    constexpr uint64_t default_rate_capacity = 100;
+    constexpr uint64_t default_rate_refill_per_s = 20;
+    uint64_t rate_capacity = config.isMember("message_rate_capacity") ? config["message_rate_capacity"].asUInt64() : default_rate_capacity;
+    uint64_t rate_refill = config.isMember("message_rate_refill") ? config["message_rate_refill"].asUInt64() : default_rate_refill_per_s;
+    clients->setClientRateLimits(rate_capacity, rate_refill);
 
     std::shared_ptr<flight_safety_system::transport::fss_listen> listen;
     FSS_LOG_INFO("server", "Starting fss server in TLS mode");
