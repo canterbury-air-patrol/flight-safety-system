@@ -28,12 +28,12 @@ all_test_SOURCES = main.cpp messages.cpp connection.cpp client.cpp \
 all_test_CFLAGS = $(ECPG_CFLAGS)
 all_test_LDADD = ../src/libfss-transport.la ../src/libfss-client-ssl.la ../src/libfss.la $(JSONCPP_LIBS) $(ECPG_LIBS)
 
-all_test_SOURCES += connection-ssl.cpp certs certs-alt certs/expired
+all_test_SOURCES += connection-ssl.cpp certs certs-alt certs/expired certs/client.crl.pem certs/empty.crl.pem
 all_test_LDADD += ../src/libfss-transport-ssl.la $(GNUTLS_LIBS) $(CATCH2_LIBS)
 
 EXTRA_DIST = test_helpers.hpp mock_database.hpp
 
-BUILT_SOURCES += certs certs-alt certs/expired
+BUILT_SOURCES += certs certs-alt certs/expired certs/client.crl.pem certs/empty.crl.pem
 
 certs:
 	mkdir certs
@@ -52,4 +52,21 @@ certs/expired: certs
 	 certtool --generate-certificate --load-privkey client.private.pem \
 	   --load-ca-certificate ca.public.pem --load-ca-privkey ca.private.pem \
 	   --template client.tmpl --outfile client.public.pem)
+
+certs/client.crl.pem: certs
+	printf 'crl_next_update = 3650\ncrl_number = 1\n' > certs/crl.tmpl
+	certtool --generate-crl \
+	  --load-ca-privkey certs/ca.private.pem \
+	  --load-ca-certificate certs/ca.public.pem \
+	  --load-certificate certs/client.public.pem \
+	  --template certs/crl.tmpl \
+	  --outfile certs/client.crl.pem
+
+certs/empty.crl.pem: certs
+	printf 'crl_next_update = 3650\ncrl_number = 1\n' > certs/crl.tmpl
+	certtool --generate-crl \
+	  --load-ca-privkey certs/ca.private.pem \
+	  --load-ca-certificate certs/ca.public.pem \
+	  --template certs/crl.tmpl \
+	  --outfile certs/empty.crl.pem
 endif

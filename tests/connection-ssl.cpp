@@ -23,6 +23,8 @@ constexpr const char * SERVER_PRIVATE_FILE = "certs/localhost.private.pem";
 constexpr const char * SERVER_PUBLIC_FILE = "certs/localhost.public.pem";
 constexpr const char * CLIENT_PRIVATE_FILE = "certs/client.private.pem";
 constexpr const char * CLIENT_PUBLIC_FILE = "certs/client.public.pem";
+constexpr const char * CLIENT_CRL_FILE = "certs/client.crl.pem";
+constexpr const char * EMPTY_CRL_FILE = "certs/empty.crl.pem";
 
 
 TEST_CASE("SSL - Connection Create (failure)") {
@@ -123,6 +125,65 @@ TEST_CASE("SSL - Listen - Callback")
     REQUIRE(!cb->connected());
 
     client_conn = nullptr;
+}
+
+TEST_CASE("ssl: isPeerCertRevoked detects revoked cert via CRL")
+{
+    const uint16_t port = fss_test::pick_port();
+    REQUIRE(port != 0);
+    std::shared_ptr<flight_safety_system::transport::fss_connection> server_conn;
+
+    auto listen = std::make_shared<flight_safety_system::transport_ssl::fss_listen>(
+        port,
+        [&server_conn](std::shared_ptr<flight_safety_system::transport::fss_connection> c) -> bool {
+            server_conn = std::move(c);
+            return true;
+        },
+        CA_PUBLIC_FILE, SERVER_PRIVATE_FILE, SERVER_PUBLIC_FILE);
+    REQUIRE(listen != nullptr);
+
+    auto client = std::make_shared<flight_safety_system::transport_ssl::fss_connection_client>(
+        CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE);
+    REQUIRE(client->connectTo("localhost", port));
+
+    REQUIRE(fss_test::wait_for([&] { return server_conn != nullptr; }));
+
+    REQUIRE(server_conn->isPeerCertRevoked(CLIENT_CRL_FILE));
+    REQUIRE_FALSE(server_conn->isPeerCertRevoked(EMPTY_CRL_FILE));
+    REQUIRE_FALSE(server_conn->isPeerCertRevoked(""));
+
+    server_conn = nullptr;
+}
+
+TEST_CASE("ssl: disconnect after CRL revocation terminates client session")
+{
+    const uint16_t port = fss_test::pick_port();
+    REQUIRE(port != 0);
+    std::shared_ptr<flight_safety_system::transport::fss_connection> server_conn;
+
+    auto listen = std::make_shared<flight_safety_system::transport_ssl::fss_listen>(
+        port,
+        [&server_conn](std::shared_ptr<flight_safety_system::transport::fss_connection> c) -> bool {
+            server_conn = std::move(c);
+            return true;
+        },
+        CA_PUBLIC_FILE, SERVER_PRIVATE_FILE, SERVER_PUBLIC_FILE);
+    REQUIRE(listen != nullptr);
+
+    auto client = flight_safety_system::transport_ssl::fss_connection_client::create(
+        CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE, "localhost", port);
+    REQUIRE(client != nullptr);
+    REQUIRE(fss_test::wait_for([&] { return server_conn != nullptr; }));
+
+    REQUIRE(server_conn->isPeerCertRevoked(CLIENT_CRL_FILE));
+    server_conn->disconnect();
+
+    REQUIRE(fss_test::wait_for([&] {
+        auto msg = client->getMsg();
+        return msg != nullptr && msg->getType() == flight_safety_system::transport::message_type_closed;
+    }));
+
+    server_conn = nullptr;
 }
 
 TEST_CASE("SSL - Negotiated cipher suite is AEAD (TLS 1.2+)")

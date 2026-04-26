@@ -140,13 +140,37 @@ public:
             client->sendCommand();
         }
     };
+    void disconnectRevokedClients(const std::string &crl_file)
+    {
+        std::vector<std::shared_ptr<flight_safety_system::server::fss_client>> snapshot;
+        {
+            std::lock_guard<std::mutex> guard(this->lock);
+            std::copy(this->clients.begin(), this->clients.end(), std::back_inserter(snapshot));
+        }
+        for (const auto &client : snapshot)
+        {
+            auto conn = client->getConnection();
+            if (conn && conn->isPeerCertRevoked(crl_file))
+            {
+                FSS_LOG_WARN("server", "Disconnecting client with revoked certificate after CRL reload");
+                client->disconnect();
+                this->clientDisconnected(client.get());
+            }
+        }
+    };
 };
 
 volatile sig_atomic_t running = 1;
+volatile sig_atomic_t reload_crl = 0;
 
 void sigIntHandler(int signum __attribute__((unused)))
 {
     running = 0;
+}
+
+void sigHupHandler(int signum __attribute__((unused)))
+{
+    reload_crl = 1;
 }
 
 auto
@@ -157,6 +181,11 @@ main(int argc, char *argv[]) -> int
     sigemptyset(&sa_int.sa_mask);
     sa_int.sa_flags = 0;
     sigaction(SIGINT, &sa_int, nullptr);
+    struct sigaction sa_hup = {};
+    sa_hup.sa_handler = sigHupHandler;
+    sigemptyset(&sa_hup.sa_mask);
+    sa_hup.sa_flags = 0;
+    sigaction(SIGHUP, &sa_hup, nullptr);
     struct sigaction sa_pipe = {};
     sa_pipe.sa_handler = SIG_IGN;
     sigemptyset(&sa_pipe.sa_mask);
@@ -233,15 +262,16 @@ main(int argc, char *argv[]) -> int
     {
         FSS_LOG_INFO("server", "CRL file configured: " << crl_file);
     }
-    listen = std::make_shared<flight_safety_system::transport_ssl::fss_listen>(config["port"].asInt(),
+    flight_safety_system::transport::fss_connect_cb connect_cb =
         [dbc, writer, &clients](std::shared_ptr<flight_safety_system::transport::fss_connection> conn) -> bool {
 #ifdef DEBUG
             std::cout << "New client connected" << std::endl;
 #endif
             clients->clientConnected(std::make_shared<flight_safety_system::server::fss_client>(std::move(conn), dbc.get(), writer, clients.get()));
             return true;
-        },
-        config["ssl"]["ca_public_key"].asString(), config["ssl"]["server_private_key"].asString(), config["ssl"]["server_public_key"].asString(), crl_file);
+        };
+    listen = std::make_shared<flight_safety_system::transport_ssl::fss_listen>(config["port"].asInt(),
+        connect_cb, ca_public_key, server_private_key, server_public_key, crl_file);
 
     /* Split tick: sendCommand runs every command_poll_ms so safety-critical
      * commands (TERM, DISARM) reach aircraft in <=100ms instead of <=1s.
@@ -257,6 +287,18 @@ main(int argc, char *argv[]) -> int
     uint64_t tick_counter = 0;
     while (running == 1)
     {
+        if (reload_crl == 1)
+        {
+            reload_crl = 0;
+            FSS_LOG_INFO("server", "SIGHUP received — reloading CRL, rebuilding listener");
+            listen.reset();
+            listen = std::make_shared<flight_safety_system::transport_ssl::fss_listen>(
+                config["port"].asInt(), connect_cb, ca_public_key, server_private_key, server_public_key, crl_file);
+            if (!crl_file.empty())
+            {
+                clients->disconnectRevokedClients(crl_file);
+            }
+        }
         usleep(command_poll_ms * usec_per_msec);
         clients->sendCommand();
         if ((tick_counter % ticks_per_sec) == 0)
