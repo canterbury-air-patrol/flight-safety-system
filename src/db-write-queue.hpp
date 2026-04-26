@@ -34,6 +34,7 @@ private:
     std::deque<db_write_task> q{};
     bool stopping{false};
     std::atomic<uint64_t> dropped{0};
+    std::atomic<uint64_t> write_failures{0};
     std::thread worker{};
 
     void run();
@@ -49,6 +50,7 @@ public:
     void enqueue(db_write_task task);
     void stop();
     auto dropped_count() const -> uint64_t;
+    auto write_failure_count() const -> uint64_t;
     auto pending_count() const -> std::size_t;
 };
 
