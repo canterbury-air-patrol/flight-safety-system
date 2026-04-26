@@ -21,7 +21,7 @@ libfss_transport_la_LDFLAGS = -version-info 0:0:0
 
 libfss_la_SOURCES = fss-main.cpp fss.hpp
 
-include_HEADERS+= fss-transport.hpp
+include_HEADERS+= fss-transport.hpp secure-string.hpp
 pkgconfig_DATA+= fss-transport.pc
 libfss_transport_la_SOURCES = transport.cpp transport-helpers.cpp transport-messages.cpp transport.hpp fss-endian.hpp
 libfss_transport_la_LIBADD = $(pthread_LIBS)

@@ -14,13 +14,13 @@ namespace fss = flight_safety_system;
 constexpr int sec_to_msec = 1000;
 constexpr uint64_t rtt_retry_interval = 10 * sec_to_msec;
 
-fss::server::smm_settings::smm_settings(std::string t_address, std::string t_username, std::string t_password) : address(std::move(t_address)), username(std::move(t_username)), password(std::move(t_password))
+fss::server::smm_settings::smm_settings(std::string t_address, fss::secure_string t_username, fss::secure_string t_password) : address(std::move(t_address)), username(std::move(t_username)), password(std::move(t_password))
 {
 }
 
 auto fss::server::smm_settings::getAddress() -> std::string { return this->address; }
-auto fss::server::smm_settings::getUsername() -> std::string { return this->username; }
-auto fss::server::smm_settings::getPassword() -> std::string { return this->password; }
+auto fss::server::smm_settings::getUsername() -> const fss::secure_string & { return this->username; }
+auto fss::server::smm_settings::getPassword() -> const fss::secure_string & { return this->password; }
 
 fss::server::fss_server_details::fss_server_details(std::string t_address, uint16_t t_port) : address(std::move(t_address)), port(t_port)
 {

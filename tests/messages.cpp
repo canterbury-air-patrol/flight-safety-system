@@ -383,7 +383,7 @@ TEST_CASE("SMM Settings Message Check") {
     auto msg_id = static_cast<uint64_t>(random());
 
     /* Create a test asset command */
-    auto msg = std::make_shared<flight_safety_system::transport::fss_message_smm_settings>("https://localhost/", "asset", "password1");
+    auto msg = std::make_shared<flight_safety_system::transport::fss_message_smm_settings>("https://localhost/", flight_safety_system::secure_string(std::string_view("asset")), flight_safety_system::secure_string(std::string_view("password1")));
     /* Check the type */
     REQUIRE(msg->getType() == flight_safety_system::transport::message_type_smm_settings);
     /* Check the parameters */

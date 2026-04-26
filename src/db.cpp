@@ -7,6 +7,7 @@ extern "C" {
 
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <vector>
 
 flight_safety_system::server::db_connection::db_connection(const std::string &host, const std::string &user, const std::string &pass, const std::string &db) : db_lock()
@@ -86,7 +87,7 @@ flight_safety_system::server::db_connection::getSmmSettings(uint64_t asset_id) -
         struct smm_settings_s *settings = db_asset_smm_settings_get(asset_id);
         if (settings)
         {
-            res = std::make_shared<smm_settings>(std::string(settings->address), std::string(settings->username), std::string(settings->password));
+            res = std::make_shared<smm_settings>(std::string(settings->address), flight_safety_system::secure_string(std::string_view(settings->username)), flight_safety_system::secure_string(std::string_view(settings->password)));
             free (settings->address);
             free (settings->username);
             free (settings->password);

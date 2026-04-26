@@ -198,7 +198,7 @@ TEST_CASE("decode type consistency: command")
 
 TEST_CASE("decode type consistency: smm_settings")
 {
-    auto orig = std::make_shared<fss_message_smm_settings>("http://example.com", "user", "pass");
+    auto orig = std::make_shared<fss_message_smm_settings>("http://example.com", flight_safety_system::secure_string(std::string_view("user")), flight_safety_system::secure_string(std::string_view("pass")));
     orig->setId(10);
     auto decoded = fss_message::decode(orig->getPacked());
     REQUIRE(decoded != nullptr);
