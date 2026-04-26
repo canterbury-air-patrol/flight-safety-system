@@ -65,6 +65,7 @@ public:
     ~fss_connection_server() override;
     static auto create(int t_fd, std::string t_ca, std::string t_private_key, std::string t_public_key, std::string t_crl) -> std::shared_ptr<fss_connection_server>;
     auto getClientNames() -> std::list<std::string> override;
+    auto isPeerCertRevoked(const std::string &t_crl_file) const -> bool override;
 };
 
 class fss_listen : public flight_safety_system::transport::fss_listen {

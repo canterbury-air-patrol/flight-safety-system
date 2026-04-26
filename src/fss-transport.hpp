@@ -165,6 +165,7 @@ public:
     virtual void processMessages();
     virtual void disconnect();
     virtual auto getClientNames() -> std::list<std::string>;
+    virtual auto isPeerCertRevoked(const std::string &) const -> bool { return false; }
 };
 
 class fss_listen : public fss_connection {
