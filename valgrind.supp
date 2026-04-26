@@ -1,0 +1,16 @@
+# Suppress false positive: glibc allocates the TLS Dynamic Thread Vector (DTV)
+# for each new thread via _dl_allocate_tls.  The pointer is stored in the
+# thread's %fs register, not in a regular heap slot, so Valgrind cannot find it
+# and reports it as "possibly lost".  This is harmless — glibc frees the DTV
+# in _dl_deallocate_tls when the thread exits.
+{
+   glibc_pthread_tls_dtv_false_positive
+   Memcheck:Leak
+   match-leak-kinds: possible
+   fun:calloc
+   fun:calloc
+   fun:allocate_dtv
+   fun:_dl_allocate_tls
+   fun:allocate_stack
+   fun:pthread_create*
+}
