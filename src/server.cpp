@@ -3,6 +3,7 @@
 #include "fss-log.hpp"
 #include "fss.hpp"
 #include "fss-server.hpp"
+#include "server-clients.hpp"
 
 #include <algorithm>
 #include <iostream>
@@ -28,137 +29,6 @@ auto build_server_list_msg(IDatabase *dbc) -> std::shared_ptr<transport::fss_mes
 } // namespace server
 } // namespace flight_safety_system
 
-class server_clients : public flight_safety_system::server::fss_client_handler {
-private:
-    std::mutex lock{};
-    std::list<std::shared_ptr<flight_safety_system::server::fss_client>> clients{};
-    std::queue<std::shared_ptr<flight_safety_system::server::fss_client>> disconnected{};
-    uint32_t total_clients{0};
-    std::atomic<bool> shutting_down{false};
-    uint64_t client_timeout_ms{30000};
-    uint64_t rate_capacity{100};
-    uint64_t rate_refill_per_s{20};
-public:
-    server_clients() = default;
-    ~server_clients() override {
-        this->shutting_down = true;
-        std::lock_guard<std::mutex> guard(this->lock);
-        for (const auto &c: this->clients)
-        {
-            c->disconnect();
-        }
-    }
-    server_clients(server_clients&) = delete;
-    server_clients(server_clients&&) = delete;
-    auto operator=(server_clients&) -> server_clients& = delete;
-    auto operator=(server_clients&&) -> server_clients& = delete;
-    void cleanupRemovableClients()
-    {
-        std::lock_guard<std::mutex> guard(this->lock);
-        while(!this->disconnected.empty())
-        {
-            auto client = this->disconnected.front();
-            this->disconnected.pop();
-            total_clients--;
-        }
-    };
-    void setClientTimeoutMs(uint64_t ms) { this->client_timeout_ms = ms; }
-    void setClientRateLimits(uint64_t capacity, uint64_t refill_per_s)
-    {
-        this->rate_capacity = capacity;
-        this->rate_refill_per_s = refill_per_s;
-    }
-    void clientConnected(std::shared_ptr<flight_safety_system::server::fss_client> client)
-    {
-        client->setTimeoutMs(this->client_timeout_ms);
-        client->setRateLimits(this->rate_capacity, this->rate_refill_per_s);
-        std::lock_guard<std::mutex> guard(this->lock);
-        this->total_clients++;
-        this->clients.push_back(std::move(client));
-    };
-    void clientDisconnected(flight_safety_system::server::fss_client *client) override
-    {
-        std::lock_guard<std::mutex> guard(this->lock);
-        if (this->shutting_down) return;
-        auto it = std::find_if(this->clients.begin(), this->clients.end(), [client](const auto &c) -> auto {
-            return c.get() == client;
-        });
-        if (it != this->clients.end())
-        {
-            this->disconnected.push(*it);
-            this->clients.erase(it);
-        }
-    };
-    void broadcastMsg(const std::shared_ptr<flight_safety_system::transport::fss_message> &msg, flight_safety_system::server::fss_client *except = nullptr) override
-    {
-        std::lock_guard<std::mutex> guard(this->lock);
-        for (const auto &client : this->clients)
-        {
-            if (client->isAircraft() && client.get() != except)
-            {
-                client->sendMsg(msg);
-            }
-        }
-    }
-    void checkTimeouts()
-    {
-        std::vector<std::shared_ptr<flight_safety_system::server::fss_client>> snapshot;
-        {
-            std::lock_guard<std::mutex> guard(this->lock);
-            std::copy(this->clients.begin(), this->clients.end(), std::back_inserter(snapshot));
-        }
-        for (const auto &client : snapshot)
-        {
-            if (client->isTimedOut())
-            {
-                FSS_LOG_WARN("server", "Client timed out, disconnecting");
-                this->clientDisconnected(client.get());
-            }
-        }
-    };
-    void sendSMMSettings()
-    {
-        std::lock_guard<std::mutex> guard(this->lock);
-        for(const auto &client: this->clients)
-        {
-            client->sendSMMSettings();
-        }
-    };
-    void sendRTTRequest(const std::shared_ptr<flight_safety_system::transport::fss_message_rtt_request> &rtt_req)
-    {
-        std::lock_guard<std::mutex> guard(this->lock);
-        for(const auto &client: this->clients)
-        {
-            client->sendRTTRequest(rtt_req);
-        }
-    };
-    void sendCommand()
-    {
-        std::lock_guard<std::mutex> guard(this->lock);
-        for(const auto &client: this->clients)
-        {
-            client->sendCommand();
-        }
-    };
-    void disconnectRevokedClients(const std::string &crl_file)
-    {
-        std::vector<std::shared_ptr<flight_safety_system::server::fss_client>> snapshot;
-        {
-            std::lock_guard<std::mutex> guard(this->lock);
-            std::copy(this->clients.begin(), this->clients.end(), std::back_inserter(snapshot));
-        }
-        for (const auto &client : snapshot)
-        {
-            auto conn = client->getConnection();
-            if (conn && conn->isPeerCertRevoked(crl_file))
-            {
-                FSS_LOG_WARN("server", "Disconnecting client with revoked certificate after CRL reload");
-                client->disconnect();
-                this->clientDisconnected(client.get());
-            }
-        }
-    };
-};
 
 volatile sig_atomic_t running = 1;
 volatile sig_atomic_t reload_crl = 0;

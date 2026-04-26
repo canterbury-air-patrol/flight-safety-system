@@ -21,6 +21,7 @@ all_test_SOURCES = main.cpp messages.cpp connection.cpp client.cpp \
 	async_db_write_test.cpp \
 	timeout_test.cpp \
 	db_connection_test.cpp \
+	crl_revocation_test.cpp \
 	../src/client_session.cpp \
 	../src/db-write-queue.cpp \
 	../src/db.cpp \
