@@ -29,12 +29,12 @@ all_test_SOURCES = main.cpp messages.cpp connection.cpp client.cpp \
 all_test_CFLAGS = $(ECPG_CFLAGS)
 all_test_LDADD = ../src/libfss-transport.la ../src/libfss-client-ssl.la ../src/libfss.la $(JSONCPP_LIBS) $(ECPG_LIBS)
 
-all_test_SOURCES += connection-ssl.cpp certs certs-alt certs/expired certs/client.crl.pem certs/empty.crl.pem
+all_test_SOURCES += connection-ssl.cpp certs certs-alt certs/expired certs/ghost certs/client.crl.pem certs/empty.crl.pem
 all_test_LDADD += ../src/libfss-transport-ssl.la $(GNUTLS_LIBS) $(CATCH2_LIBS)
 
 EXTRA_DIST = test_helpers.hpp mock_database.hpp
 
-BUILT_SOURCES += certs certs-alt certs/expired certs/client.crl.pem certs/empty.crl.pem
+BUILT_SOURCES += certs certs-alt certs/expired certs/ghost certs/client.crl.pem certs/empty.crl.pem
 
 certs:
 	mkdir certs
@@ -50,6 +50,16 @@ certs/expired: certs
 	(cd certs/expired; \
 	 certtool --generate-privkey > client.private.pem; \
 	 printf '\norganization = Flight Safety System\ncn = expired-client\ntls_www_client\nencryption_key\nsigning_key\ndns_name = expired-client\nexpiration_days = -1\n' > client.tmpl; \
+	 certtool --generate-certificate --load-privkey client.private.pem \
+	   --load-ca-certificate ca.public.pem --load-ca-privkey ca.private.pem \
+	   --template client.tmpl --outfile client.public.pem)
+
+certs/ghost: certs
+	mkdir -p certs/ghost
+	cp certs/ca.public.pem certs/ca.private.pem certs/ghost/
+	(cd certs/ghost; \
+	 certtool --generate-privkey > client.private.pem; \
+	 printf '\norganization = Flight Safety System\ncn = ghost-asset\ntls_www_client\nencryption_key\nsigning_key\ndns_name = ghost-asset\nexpiration_days = 3650\n' > client.tmpl; \
 	 certtool --generate-certificate --load-privkey client.private.pem \
 	   --load-ca-certificate ca.public.pem --load-ca-privkey ca.private.pem \
 	   --template client.tmpl --outfile client.public.pem)
@@ -70,4 +80,28 @@ certs/empty.crl.pem: certs
 	  --load-ca-certificate certs/ca.public.pem \
 	  --template certs/crl.tmpl \
 	  --outfile certs/empty.crl.pem
+
+if ENABLE_TSAN
+# Separate binary built with -fsanitize=thread. NOT added to TESTS — it runs
+# only via `make check-tsan` so regular `make check` is unaffected. Shares no
+# objects with all_test because TSan instrumentation must reach into the
+# transport-layer sources (compiled in directly here, not linked via the .la
+# archive which is built without TSan flags).
+check_PROGRAMS += concurrency_tsan_test
+concurrency_tsan_test_SOURCES = main.cpp \
+	concurrency_connection_test.cpp \
+	../src/transport.cpp \
+	../src/transport-helpers.cpp \
+	../src/transport-messages.cpp
+concurrency_tsan_test_CXXFLAGS = $(AM_CXXFLAGS) $(TSAN_CXXFLAGS)
+concurrency_tsan_test_LDFLAGS = $(TSAN_LDFLAGS)
+concurrency_tsan_test_LDADD = $(CATCH2_LIBS) $(pthread_LIBS)
+
+EXTRA_DIST += tsan.supp
+
+.PHONY: check-tsan
+check-tsan:
+	$(MAKE) $(AM_MAKEFLAGS) concurrency_tsan_test
+	TSAN_OPTIONS="suppressions=$(srcdir)/tsan.supp halt_on_error=1" ./concurrency_tsan_test
+endif
 endif

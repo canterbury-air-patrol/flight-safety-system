@@ -28,11 +28,30 @@ AC_ARG_ENABLE([server],AS_HELP_STRING([--enable-server], [Build the server (fss-
 AC_ARG_ENABLE([tests],AS_HELP_STRING([--enable-tests], [Build the tests (Requires catch2)]))
 AC_ARG_ENABLE([coverage],AS_HELP_STRING([--enable-coverage], [Build with coverage support (gcov)]))
 AC_ARG_ENABLE([fake-client],AS_HELP_STRING([--enable-fake-client], [Build the example client (fss-fake-client)]))
+AC_ARG_ENABLE([tsan],AS_HELP_STRING([--enable-tsan], [Build the ThreadSanitizer concurrency test binary (requires --enable-tests; mutually exclusive with --enable-coverage)]))
 
 AM_CONDITIONAL([SERVER], [test "x$enable_server" == "xyes"])
 AM_CONDITIONAL([ENABLE_TESTS], [test "x$enable_tests" == "xyes"])
 AM_CONDITIONAL([COVERAGE], [test "x$enable_coverage" == "xyes"])
 AM_CONDITIONAL([FAKE_CLIENT], [test "x$enable_fake_client" == "xyes"])
+AM_CONDITIONAL([ENABLE_TSAN], [test "x$enable_tsan" == "xyes"])
+
+AS_IF([test "x$enable_tsan" == "xyes" -a "x$enable_coverage" == "xyes"], [
+    AC_MSG_ERROR([--enable-tsan and --enable-coverage are mutually exclusive: TSan and gcov instrumentation cannot coexist in the same binary])
+])
+AS_IF([test "x$enable_tsan" == "xyes" -a "x$enable_tests" != "xyes"], [
+    AC_MSG_ERROR([--enable-tsan requires --enable-tests])
+])
+
+AS_IF([test "x$enable_tsan" == "xyes"], [
+    TSAN_CXXFLAGS="-fsanitize=thread -O1 -g -fno-omit-frame-pointer"
+    TSAN_LDFLAGS="-fsanitize=thread"
+], [
+    TSAN_CXXFLAGS=""
+    TSAN_LDFLAGS=""
+])
+AC_SUBST([TSAN_CXXFLAGS])
+AC_SUBST([TSAN_LDFLAGS])
 
 AS_IF([test "x$enable_coverage" == "xyes"], [
     CODE_COVERAGE_CFLAGS="--coverage"
