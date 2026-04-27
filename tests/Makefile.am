@@ -18,6 +18,7 @@ all_test_SOURCES = main.cpp messages.cpp connection.cpp client.cpp \
 	connection_negative_test.cpp \
 	ssl_failure_test.cpp \
 	server_session_test.cpp \
+	timeout_test.cpp \
 	../src/client_session.cpp
 all_test_LDADD = ../src/libfss-transport.la ../src/libfss-client-ssl.la ../src/libfss.la $(JSONCPP_LIBS)
 

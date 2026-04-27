@@ -1,6 +1,8 @@
 #include <fss-transport-ssl.hpp>
 #include <fss.hpp>
 
+#include <atomic>
+#include <cstdint>
 #include <list>
 #include <memory>
 
@@ -65,6 +67,9 @@ private:
     static constexpr uint64_t retry_delay_cap = 30000;
     uint64_t retry_delay{retry_delay_start};
     std::shared_ptr<flight_safety_system::IClock> clock{std::make_shared<flight_safety_system::WallClock>()};
+    std::atomic<bool> liveness_active{false};
+    std::atomic<uint64_t> last_message_received_time{0};
+    uint64_t server_timeout_ms{30000};
 protected:
     virtual auto reconnect_to() -> bool;
 public:
@@ -81,6 +86,8 @@ public:
     virtual auto getClient() -> fss_client *;
     virtual void sendIdentify();
     void setClock(std::shared_ptr<flight_safety_system::IClock> t_clock);
+    void setServerTimeoutMs(uint64_t ms) { this->server_timeout_ms = ms; }
+    auto isServerTimedOut() -> bool;
 };
 
 

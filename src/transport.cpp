@@ -178,6 +178,8 @@ flight_safety_system::transport::fss_connection::connectTo(const std::string &ad
         return false;
     }
 
+    set_tcp_keepalive(current_fd);
+
     this->recv_thread = std::thread(recv_msg_thread, this);
 
     return true;
@@ -400,6 +402,7 @@ flight_safety_system::transport::fss_listen::processMessages()
         inet_ntop_stor(&sa, addr_str, INET6_ADDRSTRLEN, &client_port);
         std::cout << "New client from " << addr_str << ":" << client_port << " as " << newfd << std::endl;
 #endif
+        set_tcp_keepalive(newfd);
         if (this->cb != nullptr)
         {
             auto conn = this->newConnection(newfd);

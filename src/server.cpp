@@ -35,6 +35,7 @@ private:
     std::queue<std::shared_ptr<flight_safety_system::server::fss_client>> disconnected{};
     uint32_t total_clients{0};
     std::atomic<bool> shutting_down{false};
+    uint64_t client_timeout_ms{30000};
 public:
     server_clients() = default;
     ~server_clients() override {
@@ -59,8 +60,10 @@ public:
             total_clients--;
         }
     };
+    void setClientTimeoutMs(uint64_t ms) { this->client_timeout_ms = ms; }
     void clientConnected(std::shared_ptr<flight_safety_system::server::fss_client> client)
     {
+        client->setTimeoutMs(this->client_timeout_ms);
         std::lock_guard<std::mutex> guard(this->lock);
         this->total_clients++;
         this->clients.push_back(std::move(client));
@@ -89,6 +92,22 @@ public:
             }
         }
     }
+    void checkTimeouts()
+    {
+        std::vector<std::shared_ptr<flight_safety_system::server::fss_client>> snapshot;
+        {
+            std::lock_guard<std::mutex> guard(this->lock);
+            std::copy(this->clients.begin(), this->clients.end(), std::back_inserter(snapshot));
+        }
+        for (const auto &client : snapshot)
+        {
+            if (client->isTimedOut())
+            {
+                FSS_LOG_WARN("server", "Client timed out, disconnecting");
+                this->clientDisconnected(client.get());
+            }
+        }
+    };
     void sendSMMSettings()
     {
         std::lock_guard<std::mutex> guard(this->lock);
@@ -153,6 +172,10 @@ main(int argc, char *argv[]) -> int
     auto dbc = std::make_shared<flight_safety_system::server::db_connection>(config["postgres"]["host"].asString(), config["postgres"]["user"].asString(), config["postgres"]["pass"].asString(), config["postgres"]["db"].asString());
 
     auto clients = std::make_shared<server_clients>();
+    constexpr int default_client_timeout_sec = 30;
+    constexpr int msec_per_sec = 1000;
+    uint64_t client_timeout_sec = config.isMember("client_timeout") ? config["client_timeout"].asUInt64() : default_client_timeout_sec;
+    clients->setClientTimeoutMs(client_timeout_sec * msec_per_sec);
 
     std::shared_ptr<flight_safety_system::transport::fss_listen> listen;
     FSS_LOG_INFO("server", "Starting fss server in TLS mode");
@@ -180,6 +203,7 @@ main(int argc, char *argv[]) -> int
     {
         sleep (1);
         clients->cleanupRemovableClients();
+        clients->checkTimeouts();
         {
             auto rtt_req = std::make_shared<flight_safety_system::transport::fss_message_rtt_request>();
             clients->sendRTTRequest(rtt_req);

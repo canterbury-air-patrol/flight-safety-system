@@ -13,7 +13,6 @@ namespace fss = flight_safety_system;
 
 constexpr int sec_to_msec = 1000;
 constexpr uint64_t rtt_retry_interval = 10 * sec_to_msec;
-constexpr uint64_t rtt_timeout = 30 * sec_to_msec;
 
 fss::server::smm_settings::smm_settings(std::string t_address, std::string t_username, std::string t_password) : address(std::move(t_address)), username(std::move(t_username)), password(std::move(t_password))
 {
@@ -127,6 +126,21 @@ fss::server::fss_client::setClock(std::shared_ptr<fss::IClock> t_clock)
 }
 
 void
+fss::server::fss_client::setTimeoutMs(uint64_t ms)
+{
+    std::lock_guard<std::mutex> guard(this->client_lock);
+    this->client_timeout_ms = ms;
+}
+
+auto
+fss::server::fss_client::isTimedOut() -> bool
+{
+    std::lock_guard<std::mutex> guard(this->client_lock);
+    if (!this->liveness_active) { return false; }
+    return (this->clock->now_ms() - this->last_rtt_response_time) > this->client_timeout_ms;
+}
+
+void
 fss::server::fss_client::sendRTTRequest(const std::shared_ptr<fss::transport::fss_message_rtt_request> &rtt_req)
 {
     bool timed_out = false;
@@ -135,7 +149,7 @@ fss::server::fss_client::sendRTTRequest(const std::shared_ptr<fss::transport::fs
         uint64_t now = this->clock->now_ms();
         if (!this->outstanding_rtt_requests.empty())
         {
-            if (now - this->outstanding_rtt_requests.front()->getTimeStamp() > rtt_timeout)
+            if (now - this->outstanding_rtt_requests.front()->getTimeStamp() > this->client_timeout_ms)
             {
                 timed_out = true;
             }
@@ -234,6 +248,8 @@ fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss_mess
                 {
                     std::lock_guard<std::mutex> guard(this->client_lock);
                     this->name = std::move(client_name);
+                    this->liveness_active = true;
+                    this->last_rtt_response_time = this->clock->now_ms();
                 }
                 this->aircraft = true;
                 this->identified = true;
@@ -288,6 +304,7 @@ fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss_mess
                     if (rtt_req != nullptr)
                     {
                         this->outstanding_rtt_requests.remove(rtt_req);
+                        this->last_rtt_response_time = this->clock->now_ms();
                     }
                 }
                 if (rtt_req != nullptr && asset_id != 0)
