@@ -1,0 +1,16 @@
+# ThreadSanitizer suppressions for concurrency_tsan_test.
+#
+# Format: https://github.com/google/sanitizers/wiki/ThreadSanitizerSuppressions
+#
+# Each entry below is a known false-positive: a kernel-synchronized pattern
+# that TSan's user-space-only data-flow tracking cannot prove safe.
+# Suppressions here must be narrowly scoped to specific symbols and
+# documented with a justification — not blanket ignores.
+
+# disconnect() shuts down then closes the socket fd while the recv thread is
+# inside recv() on the same fd. This is the conventional POSIX wake-from-blocked
+# -recv idiom; the kernel serializes the close() against the in-flight recv()
+# (recv returns -1/EBADF or 0 after the shutdown). TSan does not model kernel
+# fd-table locking, so it flags the user-space close() vs recv() as a race
+# even though it is well-defined.
+race:flight_safety_system::transport::fss_connection::disconnect

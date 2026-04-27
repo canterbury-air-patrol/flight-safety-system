@@ -15,9 +15,12 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <list>
 #include <memory>
+#include <string>
 #include <thread>
 
 #include "fss-transport.hpp"
@@ -43,6 +46,9 @@ constexpr const char *ALT_CLIENT_PUBLIC_FILE  = "certs-alt/client.public.pem";
 
 constexpr const char *EXPIRED_CLIENT_PRIVATE_FILE = "certs/expired/client.private.pem";
 constexpr const char *EXPIRED_CLIENT_PUBLIC_FILE  = "certs/expired/client.public.pem";
+
+constexpr const char *GHOST_CLIENT_PRIVATE_FILE = "certs/ghost/client.private.pem";
+constexpr const char *GHOST_CLIENT_PUBLIC_FILE  = "certs/ghost/client.public.pem";
 
 std::shared_ptr<flight_safety_system::transport::fss_connection> accepted;
 
@@ -104,6 +110,42 @@ TEST_CASE("ssl: server rejects client presenting an expired certificate",
          * handshake. */
         REQUIRE(accepted->getMsg() == nullptr);
     }
+    accepted = nullptr;
+}
+
+TEST_CASE("ssl: server surfaces wrong-CN-but-CA-signed cert via getClientNames",
+          "[ssl_wrong_cn]")
+{
+    /* A cert validly signed by the trusted CA but whose CN is not on any
+     * asset list must complete the TLS handshake — that's what the trust
+     * chain proves — and the server-side accepted connection must surface
+     * the cert's CN to the application layer so the identity stage can
+     * reject by asset lookup.  The downstream rejection itself is unit-
+     * tested in tests/server_session_test.cpp ("session: rejects identify
+     * when claimed name does not match cert CN" and "session: rejects
+     * identify when asset unknown to database").
+     *
+     * Without this integration test, getClientNames() could regress
+     * silently and leave the asset-name check working only against the
+     * synthetic FakeConnection used in unit tests. */
+    accepted = nullptr;
+    constexpr uint16_t port = 20514;
+    auto listen = std::make_shared<flight_safety_system::transport_ssl::fss_listen>(
+        port, accept_cb, CA_PUBLIC_FILE, SERVER_PRIVATE_FILE, SERVER_PUBLIC_FILE);
+    REQUIRE(listen != nullptr);
+
+    auto client = std::make_shared<flight_safety_system::transport_ssl::fss_connection_client>(
+        CA_PUBLIC_FILE, GHOST_CLIENT_PRIVATE_FILE, GHOST_CLIENT_PUBLIC_FILE);
+    REQUIRE(client->connectTo("localhost", port));
+
+    REQUIRE(fss_test::wait_for([]() { return accepted != nullptr; }));
+
+    std::list<std::string> names = accepted->getClientNames();
+    REQUIRE_FALSE(names.empty());
+    bool found = std::any_of(names.begin(), names.end(),
+        [](const std::string &n) { return n == "ghost-asset"; });
+    REQUIRE(found);
+
     accepted = nullptr;
 }
 

@@ -14,6 +14,10 @@ int db_connect(const char *host, const char *user, const char *pass, const char 
     {
         return 0;
     }
+    /* Without a connect timeout libpq blocks for the OS TCP retransmit timeout
+     * (~127 s) when the host is unreachable. setenv is safe here: db_connect is
+     * called once at startup before any threads exist. */
+    setenv("PGCONNECT_TIMEOUT", "10", 1);
     EXEC SQL BEGIN DECLARE SECTION;
     const char *db_target = target;
     const char *db_user = user;
