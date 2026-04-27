@@ -9,6 +9,7 @@ using flight_safety_system::fss_htobe32;
 using flight_safety_system::fss_be32toh;
 using flight_safety_system::fss_htobe64;
 using flight_safety_system::fss_be64toh;
+using flight_safety_system::transport::FSS_COORD_SCALE;
 
 void
 packString(const std::shared_ptr<flight_safety_system::transport::buf_len> &bl, const std::string &val)
@@ -381,14 +382,13 @@ flight_safety_system::transport::fss_message_position_report::fss_message_positi
     this->unpackData(bl);
 }
 
-constexpr float flt_to_int = 0.000001;
 void
 flight_safety_system::transport::fss_message_position_report::packData(std::shared_ptr<buf_len> bl)
 {
     uint64_t ts = fss_htobe64(this->getTimeStamp());
     /* Convert the lat/long to fixed decimal for transport */
-    int32_t lat = fss_htobe32((int32_t) (this->getLatitude() / flt_to_int));
-    int32_t lng = fss_htobe32((int32_t) (this->getLongitude() / flt_to_int));
+    int32_t lat = fss_htobe32((int32_t) (this->getLatitude() / FSS_COORD_SCALE));
+    int32_t lng = fss_htobe32((int32_t) (this->getLongitude() / FSS_COORD_SCALE));
     uint32_t alt = fss_htobe32(this->getAltitude());
     uint32_t icao_id = fss_htobe32(this->getICAOAddress());
     uint16_t head = fss_htobe16(this->getHeading());
@@ -435,7 +435,7 @@ flight_safety_system::transport::fss_message_position_report::unpackData(const s
         memcpy(&tmp, data + offset, sizeof(int32_t));
         lat = fss_be32toh(tmp);
         offset += sizeof(int32_t);
-        this->latitude = ((double)lat) * flt_to_int;
+        this->latitude = ((double)lat) * FSS_COORD_SCALE;
     }
     if (length - offset >= sizeof(int32_t))
     {
@@ -443,7 +443,7 @@ flight_safety_system::transport::fss_message_position_report::unpackData(const s
         memcpy(&tmp, data + offset, sizeof(int32_t));
         lng = fss_be32toh(tmp);
         offset += sizeof(int32_t);
-        this->longitude = ((double)lng) * flt_to_int;
+        this->longitude = ((double)lng) * FSS_COORD_SCALE;
     }
     if (length - offset >= sizeof(uint32_t))
     {
@@ -595,7 +595,7 @@ flight_safety_system::transport::fss_message_system_status::packData(std::shared
 {
     uint8_t bat_percent_n = this->getBatRemaining();
     uint32_t mah_used_n = fss_htobe32(this->getBatMAHUsed());
-    uint32_t voltage_n = fss_htobe32((int32_t) (this->getBatVoltage() / flt_to_int));
+    uint32_t voltage_n = fss_htobe32((int32_t) (this->getBatVoltage() / FSS_COORD_SCALE));
 
     bl->addData((char *)&bat_percent_n, sizeof(uint8_t));
     bl->addData((char *)&mah_used_n, sizeof(uint32_t));
@@ -625,7 +625,7 @@ flight_safety_system::transport::fss_message_system_status::unpackData(const std
         memcpy(&tmp, data + offset, sizeof(int32_t));
         uint32_t voltage_n = fss_be32toh(tmp);
         offset += sizeof(int32_t);
-        this->voltage = ((double)voltage_n) * flt_to_int;
+        this->voltage = ((double)voltage_n) * FSS_COORD_SCALE;
     }
 }
 
@@ -725,8 +725,8 @@ flight_safety_system::transport::fss_message_asset_command::packData(std::shared
 {
     uint64_t ts = fss_htobe64(this->getTimeStamp());
     /* Convert the lat/long to fixed decimal for transport */
-    int32_t lat = fss_htobe32((int32_t) (this->getLatitude() / flt_to_int));
-    int32_t lng = fss_htobe32((int32_t) (this->getLongitude() / flt_to_int));
+    int32_t lat = fss_htobe32((int32_t) (this->getLatitude() / FSS_COORD_SCALE));
+    int32_t lng = fss_htobe32((int32_t) (this->getLongitude() / FSS_COORD_SCALE));
     uint32_t alt = fss_htobe32(this->getAltitude());
     auto cmd = (uint8_t) this->getCommand();
     bl->addData((char *)&ts, sizeof(uint64_t));
@@ -765,8 +765,8 @@ flight_safety_system::transport::fss_message_asset_command::unpackData(const std
         offset += sizeof(uint32_t);
         this->command = static_cast<fss_asset_command>(static_cast<uint8_t>(data[offset]));
     }
-    this->latitude = lat * flt_to_int;
-    this->longitude = lng * flt_to_int;
+    this->latitude = lat * FSS_COORD_SCALE;
+    this->longitude = lng * FSS_COORD_SCALE;
 }
 
 auto

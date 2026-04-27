@@ -13,6 +13,8 @@
 namespace flight_safety_system {
 
 namespace transport {
+
+static constexpr double FSS_COORD_SCALE = 0.0000001;
 class fss_connection;
 class fss_listen;
 class fss_message;

@@ -41,18 +41,18 @@ cstyleCast:src/transport-helpers.cpp:65
 knownConditionTrueFalse:src/transport-helpers.cpp:17
 
 # transport-messages.cpp — wire-protocol packing; C-style casts are intentional
-functionStatic:src/transport-messages.cpp:172
-functionStatic:src/transport-messages.cpp:226
+functionStatic:src/transport-messages.cpp:173
+functionStatic:src/transport-messages.cpp:227
 cstyleCast:src/transport-messages.cpp:411
 cstyleCast:src/transport-messages.cpp:412
 cstyleCast:src/transport-messages.cpp:600
 cstyleCast:src/transport-messages.cpp:736
-dangerousTypeCast:src/transport-messages.cpp:18
-cstyleCast:src/transport-messages.cpp:18
-dangerousTypeCast:src/transport-messages.cpp:25
-cstyleCast:src/transport-messages.cpp:25
-dangerousTypeCast:src/transport-messages.cpp:339
-cstyleCast:src/transport-messages.cpp:339
+dangerousTypeCast:src/transport-messages.cpp:19
+cstyleCast:src/transport-messages.cpp:19
+dangerousTypeCast:src/transport-messages.cpp:26
+cstyleCast:src/transport-messages.cpp:26
+dangerousTypeCast:src/transport-messages.cpp:340
+cstyleCast:src/transport-messages.cpp:340
 dangerousTypeCast:src/transport-messages.cpp:400
 cstyleCast:src/transport-messages.cpp:400
 dangerousTypeCast:src/transport-messages.cpp:401
