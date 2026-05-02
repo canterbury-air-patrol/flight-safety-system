@@ -74,5 +74,8 @@ CREATE TABLE config_serverconfig (
     id           BIGSERIAL PRIMARY KEY,
     address      VARCHAR(255) NOT NULL,
     client_port  INTEGER NOT NULL,
-    active       BOOLEAN NOT NULL DEFAULT TRUE
+    active       BOOLEAN NOT NULL DEFAULT TRUE,
+    name         VARCHAR(25)  NOT NULL DEFAULT '',
+    config_port  INTEGER      NOT NULL DEFAULT 8090,
+    https        BOOLEAN      NOT NULL DEFAULT FALSE
 );
