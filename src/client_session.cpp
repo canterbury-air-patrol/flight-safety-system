@@ -239,10 +239,33 @@ fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss_mess
             uint16_t negotiated = std::min(peer_version, fss::transport::FSS_PROTOCOL_VERSION);
             this->getConnection()->setNegotiatedVersion(negotiated);
             this->version_received = true;
+            if (negotiated >= 2)
+            {
+                this->expected_seq.store(msg->getId() + 1);
+            }
             auto resp = std::make_shared<fss::transport::fss_message_version>();
             this->getConnection()->sendMsg(resp);
         }
         return;
+    }
+    if (this->getConnection()->getNegotiatedVersion() >= 2)
+    {
+        uint64_t wanted = this->expected_seq.load();
+        if (wanted != 0)
+        {
+            if (msg->getSeq() != wanted)
+            {
+                FSS_LOG_WARN("server", "Out-of-order or replayed message seq=" << msg->getSeq() << " expected=" << wanted);
+                if (msg->getType() == fss::transport::message_type_identity
+                    || msg->getType() == fss::transport::message_type_identity_non_aircraft)
+                {
+                    this->client_handler->clientDisconnected(this);
+                    return;
+                }
+                return;
+            }
+            this->expected_seq.fetch_add(1);
+        }
     }
     if (!this->identified)
     {
@@ -393,6 +416,17 @@ fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss_mess
                 break;
             case fss::transport::message_type_position_report:
             {
+                constexpr uint64_t staleness_limit_ms = 30000;
+                uint64_t report_ts = msg->getTimeStamp();
+                if (report_ts > 0)
+                {
+                    uint64_t now = this->clock->now_ms();
+                    if (now > report_ts + staleness_limit_ms)
+                    {
+                        FSS_LOG_WARN("server", "Stale position report (age=" << (now - report_ts) << "ms), discarding");
+                        return;
+                    }
+                }
                 if (this->aircraft && asset_id != 0)
                 {
                     this->writer->enqueue(position_write{asset_id, msg->getLatitude(), msg->getLongitude(), msg->getAltitude()});

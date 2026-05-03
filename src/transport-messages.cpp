@@ -198,6 +198,11 @@ flight_safety_system::transport::fss_message::getId() -> uint64_t
     return this->id;
 }
 auto
+flight_safety_system::transport::fss_message::getSeq() -> uint64_t
+{
+    return this->id;
+}
+auto
 flight_safety_system::transport::fss_message::getType() -> fss_message_type
 {
     return this->type;

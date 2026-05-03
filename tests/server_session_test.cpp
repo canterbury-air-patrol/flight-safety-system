@@ -489,3 +489,153 @@ TEST_CASE("session: legacy client (no version handshake) is accepted")
     }
     REQUIRE(saw_server_list);
 }
+
+/* Helper: build a minimal position report with a given timestamp. */
+namespace {
+auto make_position_msg(uint64_t ts) -> std::shared_ptr<fss::transport::fss_message_position_report>
+{
+    return std::make_shared<fss::transport::fss_message_position_report>(
+        0.0, 0.0, 0U, 0U, 0U, int16_t{0}, 0U, std::string{},
+        0U, uint8_t{0}, 0U, uint8_t{0}, uint8_t{0}, ts);
+}
+
+/* Drive a version + identity exchange over a v2 connection.
+ * Returns the next seq the client should use for data messages. */
+auto establish_v2_session(
+    std::shared_ptr<fss::server::fss_client> &session,
+    uint64_t &next_id) -> void
+{
+    auto version = std::make_shared<fss::transport::fss_message_version>(
+        fss::transport::FSS_PROTOCOL_VERSION,
+        fss::transport::FSS_PROTOCOL_MIN_VERSION, 0U);
+    version->setId(next_id++);
+    session->processMessage(version);
+
+    auto identity = std::make_shared<fss::transport::fss_message_identity>("craft");
+    identity->setId(next_id++);
+    session->processMessage(identity);
+}
+} // namespace
+
+TEST_CASE("session: v2 replayed data message is dropped")
+{
+    /* m7.1 phase 2: a position report whose seq matches a message the server
+     * already processed (replay) must be discarded. */
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 1;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+
+    uint64_t next_id = 1;
+    establish_v2_session(session, next_id);
+    REQUIRE(handler.disconnects == 0);
+
+    /* First position report — accepted. */
+    auto pos = make_position_msg(fss::fss_current_timestamp());
+    pos->setId(next_id);
+    session->processMessage(pos);
+    REQUIRE(handler.broadcasts.size() == 1);
+
+    /* Replay the same message (same seq). */
+    auto replay = make_position_msg(fss::fss_current_timestamp());
+    replay->setId(next_id);  // duplicate seq — replay
+    session->processMessage(replay);
+    REQUIRE(handler.broadcasts.size() == 1);  // not forwarded
+    REQUIRE(handler.disconnects == 0);        // connection stays up
+}
+
+TEST_CASE("session: v2 replayed identity disconnects")
+{
+    /* m7.1 phase 2: a replayed (or out-of-order) identity message must
+     * cause a disconnect rather than silently failing validation. */
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 1;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+
+    /* Send version(seq=1) → server sets expected_seq=2. */
+    auto version = std::make_shared<fss::transport::fss_message_version>(
+        fss::transport::FSS_PROTOCOL_VERSION,
+        fss::transport::FSS_PROTOCOL_MIN_VERSION, 0U);
+    version->setId(1);
+    session->processMessage(version);
+    REQUIRE(conn->getNegotiatedVersion() == fss::transport::FSS_PROTOCOL_VERSION);
+
+    /* Send identity with wrong seq (e.g. 5 instead of 2). */
+    auto identity = std::make_shared<fss::transport::fss_message_identity>("craft");
+    identity->setId(5);  // out-of-order
+    session->processMessage(identity);
+
+    REQUIRE(handler.disconnects > 0);
+}
+
+TEST_CASE("session: v1 client skips seq checking")
+{
+    /* m7.1 phase 2: seq checking only applies to negotiated version >= 2.
+     * A v1 client must still be fully accepted regardless of its message IDs. */
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 1;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+
+    auto version = std::make_shared<fss::transport::fss_message_version>(1U, 1U, 0U);
+    version->setId(1);
+    session->processMessage(version);
+    REQUIRE(conn->getNegotiatedVersion() == 1U);
+
+    /* Identify with an arbitrary, non-sequential id — must not trigger disconnect. */
+    auto identity = std::make_shared<fss::transport::fss_message_identity>("craft");
+    identity->setId(99);
+    session->processMessage(identity);
+
+    REQUIRE(handler.disconnects == 0);
+}
+
+TEST_CASE("session: stale position report is discarded")
+{
+    /* m7.1 phase 3: position reports with a timestamp older than 30 s must
+     * be discarded. The test uses a controllable clock so no real time passes. */
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 1;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+
+    auto clock = std::make_shared<FakeClock>();
+    clock->t = 100000;  // arbitrary "now" in ms
+
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    session->setClock(clock);
+
+    /* Identify (legacy path — no version message, no seq checking). */
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+    REQUIRE(handler.disconnects == 0);
+
+    /* Position with a timestamp 60 s in the past — stale. */
+    constexpr uint64_t sixty_seconds_ms = 60000;
+    auto stale = make_position_msg(clock->t - sixty_seconds_ms);
+    session->processMessage(stale);
+    REQUIRE(handler.broadcasts.empty());
+
+    /* Position with a current timestamp — fresh. */
+    auto fresh = make_position_msg(clock->t);
+    session->processMessage(fresh);
+    REQUIRE(handler.broadcasts.size() == 1);
+}

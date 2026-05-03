@@ -126,6 +126,7 @@ private:
     std::atomic<bool> identified{false};
     std::atomic<bool> aircraft{false};
     std::atomic<bool> version_received{false};
+    std::atomic<uint64_t> expected_seq{0};
     std::string name{};
     std::mutex client_lock{};
     std::list<std::shared_ptr<fss_client_rtt>> outstanding_rtt_requests{};
