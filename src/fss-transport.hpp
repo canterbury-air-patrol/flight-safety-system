@@ -25,7 +25,7 @@ static constexpr double FSS_COORD_SCALE = 0.0000001;
  * - FSS_PROTOCOL_MIN_VERSION: the lowest version this build still accepts.
  *   If the peer's max < our min (or vice-versa), we disconnect. */
 static constexpr uint16_t FSS_PROTOCOL_VERSION_LEGACY = 0;
-static constexpr uint16_t FSS_PROTOCOL_VERSION = 1;
+static constexpr uint16_t FSS_PROTOCOL_VERSION = 2;
 static constexpr uint16_t FSS_PROTOCOL_MIN_VERSION = 1;
 
 class fss_connection;
@@ -204,6 +204,7 @@ public:
     virtual ~fss_message();
     void setId(uint64_t t_id);
     auto getId() -> uint64_t;
+    auto getSeq() -> uint64_t;
     auto getType() -> fss_message_type;
     virtual auto getLatitude() -> double;
     virtual auto getLongitude() -> double;
