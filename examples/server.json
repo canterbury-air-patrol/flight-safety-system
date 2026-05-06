@@ -1,5 +1,6 @@
 {
     "port": 20202,
+    "db_queue_depth": 10000,
     "postgres": {
        "host": "localhost",
        "user": "scott",

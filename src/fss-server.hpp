@@ -2,6 +2,7 @@
 
 #include "fss.hpp"
 #include "fss-transport.hpp"
+#include "db-write-queue.hpp"
 
 #include <atomic>
 #include <memory>
@@ -65,7 +66,7 @@ public:
     auto operator=(IDatabase &&) -> IDatabase & = delete;
     virtual ~IDatabase() = default;
     virtual auto getAssetId(const std::string &name) -> uint64_t = 0;
-    virtual void recordPosition(uint64_t asset_id, double latitude, double longitude, uint16_t altitude) = 0;
+    virtual void recordPosition(uint64_t asset_id, double latitude, double longitude, uint32_t altitude) = 0;
     virtual void recordRtt(uint64_t asset_id, uint64_t rtt_ms) = 0;
     virtual void recordStatus(uint64_t asset_id, uint8_t bat_percent, uint32_t bat_mah_used, double bat_voltage) = 0;
     virtual void recordSearchStatus(uint64_t asset_id, uint64_t search_id, uint64_t completed, uint64_t total) = 0;
@@ -85,7 +86,7 @@ public:
     auto operator=(db_connection&&) -> db_connection& = delete;
     ~db_connection() override;
     auto getAssetId(const std::string &name) -> uint64_t override;
-    void recordPosition(uint64_t asset_id, double latitude, double longitude, uint16_t altitude) override;
+    void recordPosition(uint64_t asset_id, double latitude, double longitude, uint32_t altitude) override;
     void recordRtt(uint64_t asset_id, uint64_t rtt_ms) override;
     void recordStatus(uint64_t asset_id, uint8_t bat_percent, uint32_t bat_mah_used, double bat_voltage) override;
     void recordSearchStatus(uint64_t asset_id, uint64_t search_id, uint64_t completed, uint64_t total) override;
@@ -127,10 +128,11 @@ private:
     uint64_t last_rtt_response_time{0};
     uint64_t client_timeout_ms{30000};
     IDatabase *dbc;
+    std::shared_ptr<db_write_queue> writer;
     fss_client_handler *client_handler;
     std::shared_ptr<IClock> clock{std::make_shared<WallClock>()};
 public:
-    fss_client(std::shared_ptr<transport::fss_connection> conn, IDatabase *t_dbc, fss_client_handler *t_handler);
+    fss_client(std::shared_ptr<transport::fss_connection> conn, IDatabase *t_dbc, std::shared_ptr<db_write_queue> t_writer, fss_client_handler *t_handler);
     fss_client(fss_client&) = delete;
     fss_client(fss_client&&) = delete;
     auto operator=(fss_client&) -> fss_client& = delete;

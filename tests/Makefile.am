@@ -18,8 +18,10 @@ all_test_SOURCES = main.cpp messages.cpp connection.cpp client.cpp \
 	connection_negative_test.cpp \
 	ssl_failure_test.cpp \
 	server_session_test.cpp \
+	async_db_write_test.cpp \
 	timeout_test.cpp \
-	../src/client_session.cpp
+	../src/client_session.cpp \
+	../src/db-write-queue.cpp
 all_test_LDADD = ../src/libfss-transport.la ../src/libfss-client-ssl.la ../src/libfss.la $(JSONCPP_LIBS)
 
 all_test_SOURCES += connection-ssl.cpp certs certs-alt certs/expired
