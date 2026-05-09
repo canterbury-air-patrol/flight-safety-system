@@ -342,11 +342,24 @@ auto flight_safety_system::transport_ssl::fss_connection_server::isPeerCertRevok
     std::vector<gnutls_datum_t> cert_list;
     if (!this->session->get_peers_certificate(cert_list) || cert_list.empty()) { return false; }
 
-    gnutls_x509_crt_t cert = nullptr;
-    gnutls_x509_crt_init(&cert);
-    if (gnutls_x509_crt_import(cert, &cert_list[0], GNUTLS_X509_FMT_DER) < 0)
+    struct Guard {
+        gnutls_x509_crt_t cert = nullptr;
+        gnutls_x509_crl_t crl = nullptr;
+        ~Guard()
+        {
+            if (crl != nullptr) { gnutls_x509_crl_deinit(crl); }
+            if (cert != nullptr) { gnutls_x509_crt_deinit(cert); }
+        }
+    } guard;
+
+    int ret = gnutls_x509_crt_init(&guard.cert);
+    if (ret < 0)
     {
-        gnutls_x509_crt_deinit(cert);
+        FSS_LOG_ERROR("ssl", "Failed to initialise x509 certificate object: " << gnutls_strerror(ret));
+        return false;
+    }
+    if (gnutls_x509_crt_import(guard.cert, &cert_list[0], GNUTLS_X509_FMT_DER) < 0)
+    {
         return false;
     }
 
@@ -354,25 +367,25 @@ auto flight_safety_system::transport_ssl::fss_connection_server::isPeerCertRevok
     if (gnutls_load_file(t_crl_file.c_str(), &crl_data) < 0)
     {
         FSS_LOG_ERROR("ssl", "Failed to load CRL file: " << t_crl_file);
-        gnutls_x509_crt_deinit(cert);
         return false;
     }
 
-    gnutls_x509_crl_t crl = nullptr;
-    gnutls_x509_crl_init(&crl);
-    int rc = gnutls_x509_crl_import(crl, &crl_data, GNUTLS_X509_FMT_PEM);
+    ret = gnutls_x509_crl_init(&guard.crl);
+    if (ret < 0)
+    {
+        FSS_LOG_ERROR("ssl", "Failed to initialise x509 CRL object: " << gnutls_strerror(ret));
+        gnutls_free(crl_data.data);
+        return false;
+    }
+    int rc = gnutls_x509_crl_import(guard.crl, &crl_data, GNUTLS_X509_FMT_PEM);
     gnutls_free(crl_data.data);
     if (rc < 0)
     {
         FSS_LOG_ERROR("ssl", "Failed to parse CRL file: " << t_crl_file << ": " << gnutls_strerror(rc));
-        gnutls_x509_crl_deinit(crl);
-        gnutls_x509_crt_deinit(cert);
         return false;
     }
 
-    int revoked = gnutls_x509_crt_check_revocation(cert, &crl, 1);
-    gnutls_x509_crl_deinit(crl);
-    gnutls_x509_crt_deinit(cert);
+    int revoked = gnutls_x509_crt_check_revocation(guard.cert, &guard.crl, 1);
     return revoked > 0;
 }
 
