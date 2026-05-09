@@ -10,7 +10,6 @@ Checks: >-
   cppcoreguidelines-pro-type-*,
   -readability-magic-numbers,
   -modernize-use-scoped-lock,
-  -modernize-use-override,
   -modernize-pass-by-value,
   -modernize-avoid-c-style-cast,
   -modernize-avoid-c-arrays,
