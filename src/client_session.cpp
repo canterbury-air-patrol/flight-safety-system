@@ -460,13 +460,11 @@ fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss_mess
     }
 }
 
-namespace flight_safety_system {
-namespace server {
+namespace flight_safety_system::server {
 /* Exposed so server.cpp can broadcast the server list without duplicating
  * the helper. Not in the public header — only the server binary uses it. */
 auto build_server_list_msg(IDatabase *dbc) -> std::shared_ptr<transport::fss_message_server_list>
 {
     return getServersListMsg(dbc);
 }
-} // namespace server
-} // namespace flight_safety_system
+} // namespace flight_safety_system::server

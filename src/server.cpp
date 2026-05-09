@@ -21,13 +21,11 @@
 
 #include <unistd.h>
 
-namespace flight_safety_system {
-namespace server {
+namespace flight_safety_system::server {
 /* Defined in client_session.cpp. Exposed here so the periodic broadcast
  * of the active server list can reuse the helper. */
 auto build_server_list_msg(IDatabase *dbc) -> std::shared_ptr<transport::fss_message_server_list>;
-} // namespace server
-} // namespace flight_safety_system
+} // namespace flight_safety_system::server
 
 
 volatile sig_atomic_t running = 1;
