@@ -254,7 +254,7 @@ flight_safety_system::transport_ssl::fss_connection_server::setupSSL() -> bool
                                                  0, 0, name_buf, &name_len);
         if (rc == GNUTLS_E_SUCCESS && name_len > 0)
         {
-            this->possible_names.push_back(std::string(name_buf, name_len));
+            this->possible_names.emplace_back(name_buf, name_len);
         }
         gnutls_x509_crt_deinit(cert_data);
     }
