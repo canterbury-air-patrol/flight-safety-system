@@ -13,7 +13,6 @@ Checks: >-
   -modernize-pass-by-value,
   -modernize-avoid-c-arrays,
   -bugprone-easily-swappable-parameters,
-  -bugprone-multi-level-implicit-pointer-conversion,
   -cppcoreguidelines-pro-type-reinterpret-cast,
   -clang-analyzer-optin.cplusplus.VirtualCall
 
