@@ -21,6 +21,49 @@
 
 #include "transport.hpp"
 
+namespace
+{
+
+auto safe_close_fd(int fd, const char* context) -> int
+{
+    for (;;)
+    {
+        if (close(fd) == 0)
+        {
+            return 0;
+        }
+        if (errno == EINTR)
+        {
+            continue;
+        }
+        FSS_PERROR(context, "close failed on fd " + std::to_string(fd));
+        return -1;
+    }
+}
+
+auto safe_shutdown_fd(int fd, const char* context) -> int
+{
+    for (;;)
+    {
+        if (shutdown(fd, SHUT_RDWR) == 0)
+        {
+            return 0;
+        }
+        if (errno == ENOTCONN)
+        {
+            return 0;
+        }
+        if (errno == EINTR)
+        {
+            continue;
+        }
+        FSS_PERROR(context, "shutdown failed on fd " + std::to_string(fd));
+        return -1;
+    }
+}
+
+} // anonymous namespace
+
 #ifdef DEBUG
 /* Run inet_ntop on a sockaddr_storage object */
 const char *
@@ -71,8 +114,8 @@ flight_safety_system::transport::fss_connection::disconnect()
     int orig_fd = this->fd.exchange(-1);
     if (orig_fd != -1)
     {
-        shutdown(orig_fd, SHUT_RDWR);
-        close(orig_fd);
+        safe_shutdown_fd(orig_fd, "transport/disconnect");
+        safe_close_fd(orig_fd, "transport/disconnect");
     }
     if (this->recv_thread.joinable())
     {
@@ -202,13 +245,15 @@ flight_safety_system::transport::fss_connection::connectTo(const std::string &ad
     int current_fd = this->fd.load();
     // Limit the total number of SYN's that are sent
     int synRetries = 2;
-    setsockopt(current_fd, IPPROTO_TCP, TCP_SYNCNT, &synRetries, sizeof(synRetries));
+    if (setsockopt(current_fd, IPPROTO_TCP, TCP_SYNCNT, &synRetries, sizeof(synRetries)) < 0)
+    {
+        FSS_PERROR("transport", "setsockopt TCP_SYNCNT failed, using kernel default");
+    }
 
     if (connect(current_fd, reinterpret_cast<struct sockaddr *>(&remote), remote.ss_family == AF_INET ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6)) < 0)
     {
         FSS_PERROR("transport", "Failed to connect to " + address);
-        close(current_fd);
-        this->fd.store(-1);
+        safe_close_fd(this->fd.exchange(-1), "transport/connect");
         return false;
     }
 
@@ -445,7 +490,7 @@ flight_safety_system::transport::fss_listen::processMessages()
         else
         {
             /* Thanks for your call, unfortunately we don't know how to deal with it */
-            close(newfd);
+            safe_close_fd(newfd, "transport/accept");
         }
     }
 }
@@ -470,21 +515,24 @@ flight_safety_system::transport::fss_listen::startListening() -> bool
         }
     }
     int reuse = 1;
-    setsockopt(this->getFd(), SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+    if (setsockopt(this->getFd(), SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) < 0)
+    {
+        FSS_PERROR("transport", "setsockopt SO_REUSEADDR failed on port " + std::to_string(this->port));
+    }
     struct sockaddr_in6 bind_addr = {};
     bind_addr.sin6_family = AF_INET6;
     bind_addr.sin6_port = htons(this->port);
     if (bind(this->getFd(), reinterpret_cast<struct sockaddr *>(&bind_addr), sizeof(bind_addr)) < 0)
     {
         FSS_PERROR("transport", "Failed to bind socket");
-        close(this->getFd());
+        safe_close_fd(this->getFd(), "transport/listen");
         this->setFd(-1);
         return false;
     }
     if(listen(this->getFd(), this->max_pending_connections) < 0)
     {
         FSS_PERROR("transport", "Failed to listen on socket");
-        close(this->getFd());
+        safe_close_fd(this->getFd(), "transport/listen");
         this->setFd(-1);
         return false;
     }
