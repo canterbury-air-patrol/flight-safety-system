@@ -2,6 +2,7 @@
 #include <cstring>
 
 #include "transport.hpp"
+#include "fss-log.hpp"
 
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -48,9 +49,8 @@ convert_str_to_sa(const std::string &addr, uint16_t port, struct sockaddr_storag
         {
             memcpy (sa, ai->ai_addr, ai->ai_addrlen);
             family = ai->ai_family;
+            freeaddrinfo(ai);
         }
-        
-        freeaddrinfo(ai);
     }
 
     switch (family)
@@ -74,11 +74,23 @@ void
 set_tcp_keepalive(int fd)
 {
     int val = 1;
-    setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &val, sizeof(val));
+    if (setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &val, sizeof(val)) < 0)
+    {
+        FSS_PERROR("transport", "setsockopt SO_KEEPALIVE failed");
+    }
     val = 15;
-    setsockopt(fd, IPPROTO_TCP, TCP_KEEPIDLE, &val, sizeof(val));
+    if (setsockopt(fd, IPPROTO_TCP, TCP_KEEPIDLE, &val, sizeof(val)) < 0)
+    {
+        FSS_PERROR("transport", "setsockopt TCP_KEEPIDLE failed");
+    }
     val = 5;
-    setsockopt(fd, IPPROTO_TCP, TCP_KEEPINTVL, &val, sizeof(val));
+    if (setsockopt(fd, IPPROTO_TCP, TCP_KEEPINTVL, &val, sizeof(val)) < 0)
+    {
+        FSS_PERROR("transport", "setsockopt TCP_KEEPINTVL failed");
+    }
     val = 3;
-    setsockopt(fd, IPPROTO_TCP, TCP_KEEPCNT, &val, sizeof(val));
+    if (setsockopt(fd, IPPROTO_TCP, TCP_KEEPCNT, &val, sizeof(val)) < 0)
+    {
+        FSS_PERROR("transport", "setsockopt TCP_KEEPCNT failed");
+    }
 }
