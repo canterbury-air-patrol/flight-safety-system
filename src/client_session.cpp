@@ -11,7 +11,7 @@
 
 namespace fss = flight_safety_system;
 
-constexpr int sec_to_msec = 1000;
+constexpr uint64_t sec_to_msec = 1000;
 constexpr uint64_t rtt_retry_interval = 10 * sec_to_msec;
 
 fss::server::smm_settings::smm_settings(std::string t_address, fss::secure_string t_username, fss::secure_string t_password) : address(std::move(t_address)), username(std::move(t_username)), password(std::move(t_password))

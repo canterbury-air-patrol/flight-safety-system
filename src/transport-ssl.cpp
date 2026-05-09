@@ -158,7 +158,7 @@ flight_safety_system::transport_ssl::fss_connection::setupSession() -> bool
     }
     this->session->set_credentials(*this->credentials);
 
-    this->session->set_transport_ptr(reinterpret_cast<gnutls_transport_ptr_t>(static_cast<intptr_t>(this->getFd())));
+    gnutls_transport_set_int(this->session->ptr(), this->getFd());
     return true;
 }
 
