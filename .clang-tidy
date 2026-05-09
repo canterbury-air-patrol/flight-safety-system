@@ -14,7 +14,6 @@ Checks: >-
   -modernize-pass-by-value,
   -modernize-avoid-c-style-cast,
   -modernize-avoid-c-arrays,
-  -modernize-use-emplace,
   -bugprone-implicit-widening-of-multiplication-result,
   -bugprone-easily-swappable-parameters,
   -bugprone-multi-level-implicit-pointer-conversion,
