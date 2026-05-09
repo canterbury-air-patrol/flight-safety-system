@@ -17,7 +17,6 @@ Checks: >-
   -bugprone-multi-level-implicit-pointer-conversion,
   -cppcoreguidelines-pro-type-reinterpret-cast,
   -performance-no-int-to-ptr,
-  -clang-analyzer-deadcode.DeadStores,
   -clang-analyzer-optin.cplusplus.VirtualCall
 
 # Headers under src/ are part of the project; include findings from them.

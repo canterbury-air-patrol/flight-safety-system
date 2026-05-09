@@ -113,8 +113,6 @@ cstyleCast:src/transport-messages.cpp:357
 dangerousTypeCast:src/transport-messages.cpp:357
 cstyleCast:src/transport-messages.cpp:421
 dangerousTypeCast:src/transport-messages.cpp:421
-dangerousTypeCast:src/transport-messages.cpp:423
-dangerousTypeCast:src/transport-messages.cpp:424
 cstyleCast:src/transport-messages.cpp:425
 dangerousTypeCast:src/transport-messages.cpp:425
 cstyleCast:src/transport-messages.cpp:427
