@@ -5,6 +5,8 @@ extern "C" {
 #include "server-db.h"
 }
 
+#include <cassert>
+#include <limits>
 #include <mutex>
 #include <string>
 #include <string_view>
@@ -58,7 +60,8 @@ void
 flight_safety_system::server::db_connection::recordPosition(uint64_t asset_id, double latitude, double longitude, uint32_t altitude)
 {
     std::lock_guard<std::mutex> guard(this->db_lock);
-    db_position_create_entry(asset_id, latitude, longitude, altitude);
+    assert(altitude <= static_cast<uint32_t>(std::numeric_limits<int>::max()));
+    db_position_create_entry(asset_id, latitude, longitude, static_cast<int>(altitude));
 }
 
 auto

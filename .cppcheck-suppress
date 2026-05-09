@@ -43,10 +43,6 @@ knownConditionTrueFalse:src/transport-helpers.cpp:18
 # transport-messages.cpp — wire-protocol packing; C-style casts are intentional
 functionStatic:src/transport-messages.cpp:185
 functionStatic:src/transport-messages.cpp:239
-cstyleCast:src/transport-messages.cpp:423
-cstyleCast:src/transport-messages.cpp:424
-cstyleCast:src/transport-messages.cpp:612
-cstyleCast:src/transport-messages.cpp:748
 dangerousTypeCast:src/transport-messages.cpp:18
 cstyleCast:src/transport-messages.cpp:18
 dangerousTypeCast:src/transport-messages.cpp:25
@@ -77,6 +73,10 @@ dangerousTypeCast:src/transport-messages.cpp:420
 cstyleCast:src/transport-messages.cpp:420
 dangerousTypeCast:src/transport-messages.cpp:422
 cstyleCast:src/transport-messages.cpp:422
+dangerousTypeCast:src/transport-messages.cpp:423
+cstyleCast:src/transport-messages.cpp:423
+dangerousTypeCast:src/transport-messages.cpp:424
+cstyleCast:src/transport-messages.cpp:424
 dangerousTypeCast:src/transport-messages.cpp:613
 cstyleCast:src/transport-messages.cpp:613
 dangerousTypeCast:src/transport-messages.cpp:614
@@ -152,6 +152,30 @@ unreadVariable:src/transport-messages.cpp:439
 unreadVariable:src/transport-messages.cpp:526
 unreadVariable:src/transport-messages.cpp:644
 functionStatic:src/transport-messages.cpp:244
+# Updated line numbers after code-review refactor (split chained casts, fix lat/lng scope)
+cstyleCast:src/transport-messages.cpp:431
+cstyleCast:src/transport-messages.cpp:432
+dangerousTypeCast:src/transport-messages.cpp:426
+dangerousTypeCast:src/transport-messages.cpp:428
+dangerousTypeCast:src/transport-messages.cpp:430
+dangerousTypeCast:src/transport-messages.cpp:620
+dangerousTypeCast:src/transport-messages.cpp:682
+dangerousTypeCast:src/transport-messages.cpp:753
+dangerousTypeCast:src/transport-messages.cpp:754
+dangerousTypeCast:src/transport-messages.cpp:755
+cstyleCast:src/transport-messages.cpp:756
+dangerousTypeCast:src/transport-messages.cpp:874
+dangerousTypeCast:src/transport-messages.cpp:934
+unreadVariable:src/transport-messages.cpp:527
+unreadVariable:src/transport-messages.cpp:645
+cstyleCast:src/transport-messages.cpp:426
+cstyleCast:src/transport-messages.cpp:430
+cstyleCast:src/transport-messages.cpp:620
+cstyleCast:src/transport-messages.cpp:682
+cstyleCast:src/transport-messages.cpp:754
+cstyleCast:src/transport-messages.cpp:755
+cstyleCast:src/transport-messages.cpp:874
+cstyleCast:src/transport-messages.cpp:934
 
 # transport-ssl.cpp — Guard destructor null checks are false positives;
 # cppcheck can't see that gnutls_x509_crl_init/crt_init mutate the pointer via &

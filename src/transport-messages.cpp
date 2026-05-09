@@ -404,13 +404,16 @@ flight_safety_system::transport::fss_message_position_report::packData(std::shar
 {
     uint64_t ts = fss_htobe64(this->getTimeStamp());
     /* Convert the lat/long to fixed decimal for transport */
-    int32_t lat = fss_htobe32((int32_t) (this->getLatitude() / FSS_COORD_SCALE));
-    int32_t lng = fss_htobe32((int32_t) (this->getLongitude() / FSS_COORD_SCALE));
+    const auto lat_host = static_cast<int32_t>(this->getLatitude() / FSS_COORD_SCALE);
+    const auto lng_host = static_cast<int32_t>(this->getLongitude() / FSS_COORD_SCALE);
+    const auto lat = static_cast<int32_t>(fss_htobe32(static_cast<uint32_t>(lat_host)));
+    const auto lng = static_cast<int32_t>(fss_htobe32(static_cast<uint32_t>(lng_host)));
     uint32_t alt = fss_htobe32(this->getAltitude());
     uint32_t icao_id = fss_htobe32(this->getICAOAddress());
     uint16_t head = fss_htobe16(this->getHeading());
     uint16_t hor_vel = fss_htobe16(this->getHorzVel());
-    int16_t ver_vel = fss_htobe16(this->getVertVel());
+    const auto vv_host = static_cast<int16_t>(this->getVertVel());
+    const auto ver_vel = static_cast<int16_t>(fss_htobe16(static_cast<uint16_t>(vv_host)));
     uint16_t squawk_code = fss_htobe16(this->getSquawk());
     uint16_t enc_flags = fss_htobe16(this->getFlags());
 
@@ -435,8 +438,6 @@ flight_safety_system::transport::fss_message_position_report::unpackData(const s
     size_t offset = this->headerLength();
     const char *data = bl->getData();
     size_t length = bl->getLength();
-    int32_t lat = 0;
-    int32_t lng = 0;
     this->altitude = 0;
     this->timestamp = 0;
     if (length - offset >= sizeof(uint64_t))
@@ -450,7 +451,7 @@ flight_safety_system::transport::fss_message_position_report::unpackData(const s
     {
         int32_t tmp;
         memcpy(&tmp, data + offset, sizeof(int32_t));
-        lat = fss_be32toh(tmp);
+        const auto lat = static_cast<int32_t>(fss_be32toh(static_cast<uint32_t>(tmp)));
         offset += sizeof(int32_t);
         this->latitude = ((double)lat) * FSS_COORD_SCALE;
     }
@@ -458,7 +459,7 @@ flight_safety_system::transport::fss_message_position_report::unpackData(const s
     {
         int32_t tmp;
         memcpy(&tmp, data + offset, sizeof(int32_t));
-        lng = fss_be32toh(tmp);
+        const auto lng = static_cast<int32_t>(fss_be32toh(static_cast<uint32_t>(tmp)));
         offset += sizeof(int32_t);
         this->longitude = ((double)lng) * FSS_COORD_SCALE;
     }
@@ -494,7 +495,7 @@ flight_safety_system::transport::fss_message_position_report::unpackData(const s
     {
         int16_t tmp;
         memcpy(&tmp, data + offset, sizeof(int16_t));
-        this->vertical_velocity = fss_be16toh(tmp);
+        this->vertical_velocity = static_cast<int16_t>(fss_be16toh(static_cast<uint16_t>(tmp)));
         offset += sizeof(int16_t);
     }
     if (length - offset >= sizeof(uint16_t))
@@ -742,8 +743,10 @@ flight_safety_system::transport::fss_message_asset_command::packData(std::shared
 {
     uint64_t ts = fss_htobe64(this->getTimeStamp());
     /* Convert the lat/long to fixed decimal for transport */
-    int32_t lat = fss_htobe32((int32_t) (this->getLatitude() / FSS_COORD_SCALE));
-    int32_t lng = fss_htobe32((int32_t) (this->getLongitude() / FSS_COORD_SCALE));
+    const auto lat_host = static_cast<int32_t>(this->getLatitude() / FSS_COORD_SCALE);
+    const auto lng_host = static_cast<int32_t>(this->getLongitude() / FSS_COORD_SCALE);
+    const auto lat = static_cast<int32_t>(fss_htobe32(static_cast<uint32_t>(lat_host)));
+    const auto lng = static_cast<int32_t>(fss_htobe32(static_cast<uint32_t>(lng_host)));
     uint32_t alt = fss_htobe32(this->getAltitude());
     auto cmd = (uint8_t) this->getCommand();
     bl->addData((char *)&ts, sizeof(uint64_t));
@@ -771,10 +774,10 @@ flight_safety_system::transport::fss_message_asset_command::unpackData(const std
         offset += sizeof(uint64_t);
         int32_t tmp32;
         memcpy(&tmp32, data + offset, sizeof(int32_t));
-        lat = fss_be32toh(tmp32);
+        lat = static_cast<int32_t>(fss_be32toh(static_cast<uint32_t>(tmp32)));
         offset += sizeof(int32_t);
         memcpy(&tmp32, data + offset, sizeof(int32_t));
-        lng = fss_be32toh(tmp32);
+        lng = static_cast<int32_t>(fss_be32toh(static_cast<uint32_t>(tmp32)));
         offset += sizeof(int32_t);
         uint32_t tmpu32;
         memcpy(&tmpu32, data + offset, sizeof(uint32_t));
