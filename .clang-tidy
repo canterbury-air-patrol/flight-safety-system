@@ -12,11 +12,9 @@ Checks: >-
   -modernize-use-scoped-lock,
   -modernize-pass-by-value,
   -modernize-avoid-c-arrays,
-  -bugprone-implicit-widening-of-multiplication-result,
   -bugprone-easily-swappable-parameters,
   -bugprone-multi-level-implicit-pointer-conversion,
   -cppcoreguidelines-pro-type-reinterpret-cast,
-  -performance-no-int-to-ptr,
   -clang-analyzer-optin.cplusplus.VirtualCall
 
 # Headers under src/ are part of the project; include findings from them.
