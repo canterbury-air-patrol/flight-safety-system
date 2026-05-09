@@ -524,7 +524,6 @@ flight_safety_system::transport::fss_message_position_report::unpackData(const s
     if (offset <= length && length - offset >= sizeof(uint8_t))
     {
         this->emitter_type = static_cast<uint8_t>(data[offset]);
-        offset += sizeof(uint8_t);
     }
 }
 
@@ -642,7 +641,6 @@ flight_safety_system::transport::fss_message_system_status::unpackData(const std
         int32_t tmp;
         memcpy(&tmp, data + offset, sizeof(int32_t));
         uint32_t voltage_n = fss_be32toh(tmp);
-        offset += sizeof(int32_t);
         this->voltage = static_cast<double>(voltage_n) * FSS_COORD_SCALE;
     }
 }
