@@ -5,8 +5,7 @@
 #include <exception>
 #include <utility>
 
-namespace flight_safety_system {
-namespace server {
+namespace flight_safety_system::server {
 
 db_write_queue::db_write_queue(std::size_t t_max_depth, db_write_sink t_sink)
     : max_depth(std::max<std::size_t>(1, t_max_depth)), sink(std::move(t_sink))
@@ -121,5 +120,4 @@ db_write_queue::run()
     }
 }
 
-} // namespace server
-} // namespace flight_safety_system
+} // namespace flight_safety_system::server
