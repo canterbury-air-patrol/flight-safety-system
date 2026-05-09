@@ -15,14 +15,14 @@ static void
 packStringRaw(const std::shared_ptr<flight_safety_system::transport::buf_len> &bl, const char *data, size_t str_len)
 {
     uint16_t len = fss_htobe16(str_len);
-    bl->addData((char *)&len, sizeof(uint16_t));
+    bl->addData(reinterpret_cast<const char *>(&len), sizeof(uint16_t));
     bl->addData(data, str_len);
     /* align to 8-byte boundary */
     uint64_t empty = 0;
     size_t pack_remainder = bl->getLength() % sizeof(uint64_t);
     if (pack_remainder != 0)
     {
-        bl->addData((char *)&empty, sizeof(uint64_t) - pack_remainder);
+        bl->addData(reinterpret_cast<const char *>(&empty), sizeof(uint64_t) - pack_remainder);
     }
 }
 
@@ -354,7 +354,7 @@ void
 flight_safety_system::transport::fss_message_rtt_response::packData(std::shared_ptr<buf_len> bl)
 {
     uint64_t data = fss_htobe64(this->request_id);
-    bl->addData((char *)&data, sizeof(uint64_t));
+    bl->addData(reinterpret_cast<const char *>(&data), sizeof(uint64_t));
 }
 
 void
@@ -417,19 +417,19 @@ flight_safety_system::transport::fss_message_position_report::packData(std::shar
     uint16_t squawk_code = fss_htobe16(this->getSquawk());
     uint16_t enc_flags = fss_htobe16(this->getFlags());
 
-    bl->addData((char *)&ts, sizeof(uint64_t));
-    bl->addData((char *)&lat, sizeof(int32_t));
-    bl->addData((char *)&lng, sizeof(int32_t));
-    bl->addData((char *)&alt, sizeof(uint32_t));
-    bl->addData((char *)&icao_id, sizeof(uint32_t));
-    bl->addData((char *)&head, sizeof(uint16_t));
-    bl->addData((char *)&hor_vel, sizeof(uint16_t));
-    bl->addData((char *)&ver_vel, sizeof(int16_t));
-    bl->addData((char *)&squawk_code, sizeof(uint16_t));
+    bl->addData(reinterpret_cast<const char *>(&ts), sizeof(uint64_t));
+    bl->addData(reinterpret_cast<const char *>(&lat), sizeof(int32_t));
+    bl->addData(reinterpret_cast<const char *>(&lng), sizeof(int32_t));
+    bl->addData(reinterpret_cast<const char *>(&alt), sizeof(uint32_t));
+    bl->addData(reinterpret_cast<const char *>(&icao_id), sizeof(uint32_t));
+    bl->addData(reinterpret_cast<const char *>(&head), sizeof(uint16_t));
+    bl->addData(reinterpret_cast<const char *>(&hor_vel), sizeof(uint16_t));
+    bl->addData(reinterpret_cast<const char *>(&ver_vel), sizeof(int16_t));
+    bl->addData(reinterpret_cast<const char *>(&squawk_code), sizeof(uint16_t));
     packString(bl, this->getCallSign());
-    bl->addData((char *)&enc_flags, sizeof(uint16_t));
-    bl->addData((char *)&this->altitude_type, sizeof(uint8_t));
-    bl->addData((char *)&this->emitter_type, sizeof(uint8_t));
+    bl->addData(reinterpret_cast<const char *>(&enc_flags), sizeof(uint16_t));
+    bl->addData(reinterpret_cast<const char *>(&this->altitude_type), sizeof(uint8_t));
+    bl->addData(reinterpret_cast<const char *>(&this->emitter_type), sizeof(uint8_t));
 }
 
 void
@@ -453,7 +453,7 @@ flight_safety_system::transport::fss_message_position_report::unpackData(const s
         memcpy(&tmp, data + offset, sizeof(int32_t));
         const auto lat = static_cast<int32_t>(fss_be32toh(static_cast<uint32_t>(tmp)));
         offset += sizeof(int32_t);
-        this->latitude = ((double)lat) * FSS_COORD_SCALE;
+        this->latitude = static_cast<double>(lat) * FSS_COORD_SCALE;
     }
     if (length - offset >= sizeof(int32_t))
     {
@@ -461,7 +461,7 @@ flight_safety_system::transport::fss_message_position_report::unpackData(const s
         memcpy(&tmp, data + offset, sizeof(int32_t));
         const auto lng = static_cast<int32_t>(fss_be32toh(static_cast<uint32_t>(tmp)));
         offset += sizeof(int32_t);
-        this->longitude = ((double)lng) * FSS_COORD_SCALE;
+        this->longitude = static_cast<double>(lng) * FSS_COORD_SCALE;
     }
     if (length - offset >= sizeof(uint32_t))
     {
@@ -613,11 +613,11 @@ flight_safety_system::transport::fss_message_system_status::packData(std::shared
 {
     uint8_t bat_percent_n = this->getBatRemaining();
     uint32_t mah_used_n = fss_htobe32(this->getBatMAHUsed());
-    uint32_t voltage_n = fss_htobe32((int32_t) (this->getBatVoltage() / FSS_COORD_SCALE));
+    uint32_t voltage_n = fss_htobe32(static_cast<uint32_t>(static_cast<int32_t>(this->getBatVoltage() / FSS_COORD_SCALE)));
 
-    bl->addData((char *)&bat_percent_n, sizeof(uint8_t));
-    bl->addData((char *)&mah_used_n, sizeof(uint32_t));
-    bl->addData((char *)&voltage_n, sizeof(uint32_t));
+    bl->addData(reinterpret_cast<const char *>(&bat_percent_n), sizeof(uint8_t));
+    bl->addData(reinterpret_cast<const char *>(&mah_used_n), sizeof(uint32_t));
+    bl->addData(reinterpret_cast<const char *>(&voltage_n), sizeof(uint32_t));
 }
 
 void
@@ -643,7 +643,7 @@ flight_safety_system::transport::fss_message_system_status::unpackData(const std
         memcpy(&tmp, data + offset, sizeof(int32_t));
         uint32_t voltage_n = fss_be32toh(tmp);
         offset += sizeof(int32_t);
-        this->voltage = ((double)voltage_n) * FSS_COORD_SCALE;
+        this->voltage = static_cast<double>(voltage_n) * FSS_COORD_SCALE;
     }
 }
 
@@ -677,9 +677,9 @@ flight_safety_system::transport::fss_message_search_status::packData(std::shared
     uint64_t search_id_n = fss_htobe64(this->getSearchId());
     uint64_t point_completed_n = fss_htobe64(this->getSearchCompleted());
     uint64_t points_total_n = fss_htobe64(this->getSearchTotal());
-    bl->addData((char *)&search_id_n, sizeof(uint64_t));
-    bl->addData((char *)&point_completed_n, sizeof(uint64_t));
-    bl->addData((char *)&points_total_n, sizeof(uint64_t));
+    bl->addData(reinterpret_cast<const char *>(&search_id_n), sizeof(uint64_t));
+    bl->addData(reinterpret_cast<const char *>(&point_completed_n), sizeof(uint64_t));
+    bl->addData(reinterpret_cast<const char *>(&points_total_n), sizeof(uint64_t));
 }
 
 void
@@ -748,12 +748,12 @@ flight_safety_system::transport::fss_message_asset_command::packData(std::shared
     const auto lat = static_cast<int32_t>(fss_htobe32(static_cast<uint32_t>(lat_host)));
     const auto lng = static_cast<int32_t>(fss_htobe32(static_cast<uint32_t>(lng_host)));
     uint32_t alt = fss_htobe32(this->getAltitude());
-    auto cmd = (uint8_t) this->getCommand();
-    bl->addData((char *)&ts, sizeof(uint64_t));
-    bl->addData((char *)&lat, sizeof(int32_t));
-    bl->addData((char *)&lng, sizeof(int32_t));
-    bl->addData((char *)&alt, sizeof(uint32_t));
-    bl->addData((char *)&cmd, sizeof(uint8_t));
+    auto cmd = static_cast<uint8_t>(this->getCommand());
+    bl->addData(reinterpret_cast<const char *>(&ts), sizeof(uint64_t));
+    bl->addData(reinterpret_cast<const char *>(&lat), sizeof(int32_t));
+    bl->addData(reinterpret_cast<const char *>(&lng), sizeof(int32_t));
+    bl->addData(reinterpret_cast<const char *>(&alt), sizeof(uint32_t));
+    bl->addData(reinterpret_cast<const char *>(&cmd), sizeof(uint8_t));
 }
 
 void
@@ -871,7 +871,7 @@ void
 packServer(const std::shared_ptr<flight_safety_system::transport::buf_len> &bl, const std::pair<std::string, uint16_t> &server)
 {
     uint16_t port = fss_htobe16(server.second);
-    bl->addData((char *)&port, sizeof(port));
+    bl->addData(reinterpret_cast<const char *>(&port), sizeof(port));
     packString(bl, server.first);
 }
 
@@ -931,7 +931,7 @@ void
 flight_safety_system::transport::fss_message_identity_non_aircraft::packData(std::shared_ptr<buf_len> bl)
 {
     uint64_t caps = fss_htobe64(this->capabilities);
-    bl->addData((char *)&caps, sizeof(uint64_t));
+    bl->addData(reinterpret_cast<const char *>(&caps), sizeof(uint64_t));
 }
 
 void
@@ -960,13 +960,13 @@ flight_safety_system::transport::fss_message_identity_non_aircraft::fss_message_
 void
 flight_safety_system::transport::fss_message_identity_non_aircraft::addCapability(uint8_t cap_id)
 {
-    this->capabilities |= ((uint64_t)(1) << cap_id);
+    this->capabilities |= (static_cast<uint64_t>(1) << cap_id);
 }
 
 auto
 flight_safety_system::transport::fss_message_identity_non_aircraft::getCapability(uint8_t cap_id) -> bool
 {
-    return !!(this->capabilities & ((uint64_t)(1) << cap_id));
+    return !!(this->capabilities & (static_cast<uint64_t>(1) << cap_id));
 }
 
 void
