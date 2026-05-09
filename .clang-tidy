@@ -16,7 +16,6 @@ Checks: >-
   -bugprone-implicit-widening-of-multiplication-result,
   -bugprone-easily-swappable-parameters,
   -bugprone-multi-level-implicit-pointer-conversion,
-  -bugprone-narrowing-conversions,
   -bugprone-switch-missing-default-case,
   -cppcoreguidelines-pro-type-reinterpret-cast,
   -cppcoreguidelines-pro-type-cstyle-cast,

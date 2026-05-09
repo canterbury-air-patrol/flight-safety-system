@@ -394,7 +394,7 @@ flight_safety_system::transport::fss_connection::recvMsg() -> std::shared_ptr<fl
     auto total_length = static_cast<ssize_t>(data_length);
     if (data_length % sizeof(uint64_t) != 0)
     {
-        total_length = data_length + sizeof(uint64_t) - (data_length % sizeof(uint64_t));
+        total_length += static_cast<ssize_t>(sizeof(uint64_t)) - (total_length % static_cast<ssize_t>(sizeof(uint64_t)));
     }
     if (total_length < static_cast<ssize_t>(sizeof(uint16_t)))
     {
