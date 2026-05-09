@@ -875,7 +875,7 @@ packServer(const std::shared_ptr<flight_safety_system::transport::buf_len> &bl, 
 void
 flight_safety_system::transport::fss_message_server_list::packData(std::shared_ptr<buf_len> bl)
 {
-    for(auto server : this->servers)
+    for(const auto& server : this->servers)
     {
         packServer(bl, server);
     }

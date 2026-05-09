@@ -326,7 +326,7 @@ flight_safety_system::transport_ssl::fss_listen::newConnection(int t_newfd) -> s
     return flight_safety_system::transport_ssl::fss_connection_server::create(t_newfd, this->ca_file, this->private_key_file, this->public_key_file, this->crl_file);
 }
 
-flight_safety_system::transport_ssl::fss_listen::fss_listen(uint16_t t_port, flight_safety_system::transport::fss_connect_cb t_cb, std::string t_ca, std::string t_private_key, std::string t_public_key, std::string t_crl) : flight_safety_system::transport::fss_listen(t_port, t_cb), ca_file(std::move(t_ca)), private_key_file(std::move(t_private_key)), public_key_file(std::move(t_public_key)), crl_file(std::move(t_crl))
+flight_safety_system::transport_ssl::fss_listen::fss_listen(uint16_t t_port, flight_safety_system::transport::fss_connect_cb t_cb, std::string t_ca, std::string t_private_key, std::string t_public_key, std::string t_crl) : flight_safety_system::transport::fss_listen(t_port, std::move(t_cb)), ca_file(std::move(t_ca)), private_key_file(std::move(t_private_key)), public_key_file(std::move(t_public_key)), crl_file(std::move(t_crl))
 {
 }
 
