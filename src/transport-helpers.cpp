@@ -64,7 +64,8 @@ convert_str_to_sa(const std::string &addr, uint16_t port, struct sockaddr_storag
         {
             auto sa_in = reinterpret_cast<struct sockaddr_in6 *>(sa);
             sa_in->sin6_port = htons(port);
-        }
+        } break;
+        default: break;
     }
     
     return family != AF_UNSPEC;

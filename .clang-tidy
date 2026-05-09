@@ -15,7 +15,6 @@ Checks: >-
   -bugprone-implicit-widening-of-multiplication-result,
   -bugprone-easily-swappable-parameters,
   -bugprone-multi-level-implicit-pointer-conversion,
-  -bugprone-switch-missing-default-case,
   -cppcoreguidelines-pro-type-reinterpret-cast,
   -performance-no-int-to-ptr,
   -clang-analyzer-deadcode.DeadStores,
