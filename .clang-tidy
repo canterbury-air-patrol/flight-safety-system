@@ -20,8 +20,6 @@ Checks: >-
   -bugprone-switch-missing-default-case,
   -cppcoreguidelines-pro-type-reinterpret-cast,
   -cppcoreguidelines-pro-type-cstyle-cast,
-  -performance-unnecessary-value-param,
-  -performance-for-range-copy,
   -performance-no-int-to-ptr,
   -clang-analyzer-deadcode.DeadStores,
   -clang-analyzer-optin.cplusplus.VirtualCall

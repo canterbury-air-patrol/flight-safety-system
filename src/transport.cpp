@@ -442,7 +442,7 @@ flight_safety_system::transport::fss_connection::getClientNames() -> std::list<s
     return ret;
 }
 
-flight_safety_system::transport::fss_listen::fss_listen(uint16_t t_port, fss_connect_cb t_cb) : fss_connection(), port(t_port), cb(t_cb)
+flight_safety_system::transport::fss_listen::fss_listen(uint16_t t_port, fss_connect_cb t_cb) : fss_connection(), port(t_port), cb(std::move(t_cb))
 {
     this->startListening();
 }
