@@ -195,7 +195,7 @@ private:
     uint64_t id;
     fss_message_type type;
 protected:
-    auto headerLength() -> size_t;
+    static auto headerLength() -> size_t;
     virtual void packData(std::shared_ptr<buf_len> bl) = 0;
 public:
     explicit fss_message(fss_message_type t_type);
@@ -215,7 +215,7 @@ public:
     virtual auto getTimeStamp() -> uint64_t;
     virtual auto getPacked() -> std::shared_ptr<buf_len>;
     void createHeader(const std::shared_ptr<buf_len> &bl);
-    void updateSize(const std::shared_ptr<buf_len> &bl);
+    static void updateSize(const std::shared_ptr<buf_len> &bl);
     static auto decode(const std::shared_ptr<buf_len> &bl) -> std::shared_ptr<fss_message>;
 };
 

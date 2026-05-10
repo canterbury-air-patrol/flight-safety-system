@@ -14,8 +14,7 @@ auto
 convert_str_to_sa(const std::string &addr, uint16_t port, struct sockaddr_storage *sa) -> bool
 {
     int family = AF_UNSPEC;
-    /* Try converting an IP(v4) address first */
-    if (family == AF_UNSPEC)
+    /* Try converting an IPv4 address first, then IPv6, then DNS lookup */
     {
         struct in_addr ia = {};
         if (inet_pton(AF_INET, addr.c_str(), &ia) == 1)
@@ -27,7 +26,6 @@ convert_str_to_sa(const std::string &addr, uint16_t port, struct sockaddr_storag
             sa_in->sin_addr = ia;
         }
     }
-    /* Try converting an IPv6 address */
     if (family == AF_UNSPEC)
     {
         struct in6_addr ia = {};
@@ -40,7 +38,6 @@ convert_str_to_sa(const std::string &addr, uint16_t port, struct sockaddr_storag
             sa_in->sin6_addr = ia;
         }
     }
-    /* Use host name lookup (probably DNS) to resolve the name */
     if (family == AF_UNSPEC)
     {
         struct addrinfo *ai = nullptr;

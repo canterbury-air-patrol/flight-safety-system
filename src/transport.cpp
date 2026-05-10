@@ -73,14 +73,16 @@ inet_ntop_stor(struct sockaddr_storage *src, char *dst, size_t dstlen, uint16_t 
     {
         case AF_INET:
         {
-            *port = ntohs(((struct sockaddr_in *)src)->sin_port);
-            return inet_ntop (AF_INET, &((struct sockaddr_in *)src)->sin_addr, dst, dstlen);
-        } break;
+            auto *sa_in = as_sockaddr_in(src);
+            *port = ntohs(sa_in->sin_port);
+            return inet_ntop(AF_INET, &sa_in->sin_addr, dst, dstlen);
+        }
         case AF_INET6:
         {
-            *port = ntohs(((struct sockaddr_in6 *)src)->sin6_port);
-            return inet_ntop (AF_INET6, &((struct sockaddr_in6 *)src)->sin6_addr, dst, dstlen);
-        } break;
+            auto *sa_in6 = as_sockaddr_in6(src);
+            *port = ntohs(sa_in6->sin6_port);
+            return inet_ntop(AF_INET6, &sa_in6->sin6_addr, dst, dstlen);
+        }
     }
     return nullptr;
 }
@@ -285,7 +287,7 @@ flight_safety_system::transport::fss_connection::sendMsg(const std::shared_ptr<f
 static void
 print_bl(std::shared_ptr<flight_safety_system::transport::buf_len> bl)
 {
-    unsigned char *data = (unsigned char *)bl->getData();
+    const auto *data = static_cast<const unsigned char *>(static_cast<const void *>(bl->getData()));
     size_t len = bl->getLength();
     for(size_t o = 0; o < len; o++)
     {
