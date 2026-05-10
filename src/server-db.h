@@ -35,3 +35,6 @@ struct fss_server_s {
 
 struct fss_server_s **
 db_active_fss_servers_get(void);
+
+void
+db_free_fss_servers(struct fss_server_s **servers);

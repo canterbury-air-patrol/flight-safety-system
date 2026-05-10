@@ -294,3 +294,8 @@ void db_disconnect(void)
 {
     EXEC SQL DISCONNECT ALL;
 }
+
+void db_free_fss_servers(struct fss_server_s **servers)
+{
+    free(servers);
+}

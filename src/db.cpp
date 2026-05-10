@@ -117,7 +117,7 @@ flight_safety_system::server::db_connection::getActiveServers() -> std::vector<f
             free (servers[i]->address);
             free (servers[i]);
         }
-        free(reinterpret_cast<void *>(servers));
+        db_free_fss_servers(servers);
     }
     return res;
 }

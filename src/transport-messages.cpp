@@ -15,14 +15,14 @@ static void
 packStringRaw(const std::shared_ptr<flight_safety_system::transport::buf_len> &bl, const char *data, size_t str_len)
 {
     uint16_t len = fss_htobe16(str_len);
-    bl->addData(reinterpret_cast<const char *>(&len), sizeof(uint16_t));
+    bl->addData(&len, sizeof(uint16_t));
     bl->addData(data, str_len);
     /* align to 8-byte boundary */
     uint64_t empty = 0;
     size_t pack_remainder = bl->getLength() % sizeof(uint64_t);
     if (pack_remainder != 0)
     {
-        bl->addData(reinterpret_cast<const char *>(&empty), sizeof(uint64_t) - pack_remainder);
+        bl->addData(&empty, sizeof(uint64_t) - pack_remainder);
     }
 }
 
@@ -73,6 +73,10 @@ flight_safety_system::transport::buf_len::buf_len(const char *_data, uint16_t le
 {
 }
 
+flight_safety_system::transport::buf_len::buf_len(const void *_data, uint16_t len) : data(static_cast<const char *>(_data), len)
+{
+}
+
 flight_safety_system::transport::buf_len::~buf_len() = default;
 
 auto
@@ -92,9 +96,16 @@ flight_safety_system::transport::buf_len::isValid() -> bool
 }
 
 auto
-flight_safety_system::transport::buf_len::addData(const char *new_data, uint16_t len) -> bool
+flight_safety_system::transport::buf_len::addData(const char *new_data, size_t len) -> bool
 {
     this->data.append(new_data, len);
+    return true;
+}
+
+auto
+flight_safety_system::transport::buf_len::addData(const void *new_data, size_t len) -> bool
+{
+    this->data.append(static_cast<const char *>(new_data), len);
     return true;
 }
 
@@ -102,6 +113,12 @@ void
 flight_safety_system::transport::buf_len::writeAt(size_t offset, const char *src, size_t len)
 {
     this->data.replace(offset, len, src, len);
+}
+
+void
+flight_safety_system::transport::buf_len::writeAt(size_t offset, const void *src, size_t len)
+{
+    this->data.replace(offset, len, static_cast<const char *>(src), len);
 }
 
 auto
@@ -235,9 +252,9 @@ flight_safety_system::transport::fss_message::createHeader(const std::shared_ptr
     uint16_t placeholder = 0;
     uint16_t type_n = fss_htobe16(this->getType());
     uint64_t id_n = fss_htobe64(this->getId());
-    bl->addData(reinterpret_cast<const char *>(&placeholder), sizeof(uint16_t));
-    bl->addData(reinterpret_cast<const char *>(&type_n), sizeof(uint16_t));
-    bl->addData(reinterpret_cast<const char *>(&id_n), sizeof(uint64_t));
+    bl->addData(&placeholder, sizeof(uint16_t));
+    bl->addData(&type_n, sizeof(uint16_t));
+    bl->addData(&id_n, sizeof(uint64_t));
 }
 
 void
@@ -250,10 +267,10 @@ flight_safety_system::transport::fss_message::updateSize(const std::shared_ptr<b
         if (length % sizeof(uint64_t) != 0)
         {
             uint64_t blank = 0;
-            bl->addData(reinterpret_cast<const char *>(&blank), sizeof(uint64_t) - (length % sizeof(uint64_t)));
+            bl->addData(&blank, sizeof(uint64_t) - (length % sizeof(uint64_t)));
         }
         uint16_t length_n = fss_htobe16(length);
-        bl->writeAt(0, reinterpret_cast<const char *>(&length_n), sizeof(uint16_t));
+        bl->writeAt(0, &length_n, sizeof(uint16_t));
     }
 }
 
@@ -354,7 +371,7 @@ void
 flight_safety_system::transport::fss_message_rtt_response::packData(std::shared_ptr<buf_len> bl)
 {
     uint64_t data = fss_htobe64(this->request_id);
-    bl->addData(reinterpret_cast<const char *>(&data), sizeof(uint64_t));
+    bl->addData(&data, sizeof(uint64_t));
 }
 
 void
@@ -417,19 +434,19 @@ flight_safety_system::transport::fss_message_position_report::packData(std::shar
     uint16_t squawk_code = fss_htobe16(this->getSquawk());
     uint16_t enc_flags = fss_htobe16(this->getFlags());
 
-    bl->addData(reinterpret_cast<const char *>(&ts), sizeof(uint64_t));
-    bl->addData(reinterpret_cast<const char *>(&lat), sizeof(int32_t));
-    bl->addData(reinterpret_cast<const char *>(&lng), sizeof(int32_t));
-    bl->addData(reinterpret_cast<const char *>(&alt), sizeof(uint32_t));
-    bl->addData(reinterpret_cast<const char *>(&icao_id), sizeof(uint32_t));
-    bl->addData(reinterpret_cast<const char *>(&head), sizeof(uint16_t));
-    bl->addData(reinterpret_cast<const char *>(&hor_vel), sizeof(uint16_t));
-    bl->addData(reinterpret_cast<const char *>(&ver_vel), sizeof(int16_t));
-    bl->addData(reinterpret_cast<const char *>(&squawk_code), sizeof(uint16_t));
+    bl->addData(&ts, sizeof(uint64_t));
+    bl->addData(&lat, sizeof(int32_t));
+    bl->addData(&lng, sizeof(int32_t));
+    bl->addData(&alt, sizeof(uint32_t));
+    bl->addData(&icao_id, sizeof(uint32_t));
+    bl->addData(&head, sizeof(uint16_t));
+    bl->addData(&hor_vel, sizeof(uint16_t));
+    bl->addData(&ver_vel, sizeof(int16_t));
+    bl->addData(&squawk_code, sizeof(uint16_t));
     packString(bl, this->getCallSign());
-    bl->addData(reinterpret_cast<const char *>(&enc_flags), sizeof(uint16_t));
-    bl->addData(reinterpret_cast<const char *>(&this->altitude_type), sizeof(uint8_t));
-    bl->addData(reinterpret_cast<const char *>(&this->emitter_type), sizeof(uint8_t));
+    bl->addData(&enc_flags, sizeof(uint16_t));
+    bl->addData(&this->altitude_type, sizeof(uint8_t));
+    bl->addData(&this->emitter_type, sizeof(uint8_t));
 }
 
 void
@@ -614,9 +631,9 @@ flight_safety_system::transport::fss_message_system_status::packData(std::shared
     uint32_t mah_used_n = fss_htobe32(this->getBatMAHUsed());
     uint32_t voltage_n = fss_htobe32(static_cast<uint32_t>(static_cast<int32_t>(this->getBatVoltage() / FSS_COORD_SCALE)));
 
-    bl->addData(reinterpret_cast<const char *>(&bat_percent_n), sizeof(uint8_t));
-    bl->addData(reinterpret_cast<const char *>(&mah_used_n), sizeof(uint32_t));
-    bl->addData(reinterpret_cast<const char *>(&voltage_n), sizeof(uint32_t));
+    bl->addData(&bat_percent_n, sizeof(uint8_t));
+    bl->addData(&mah_used_n, sizeof(uint32_t));
+    bl->addData(&voltage_n, sizeof(uint32_t));
 }
 
 void
@@ -675,9 +692,9 @@ flight_safety_system::transport::fss_message_search_status::packData(std::shared
     uint64_t search_id_n = fss_htobe64(this->getSearchId());
     uint64_t point_completed_n = fss_htobe64(this->getSearchCompleted());
     uint64_t points_total_n = fss_htobe64(this->getSearchTotal());
-    bl->addData(reinterpret_cast<const char *>(&search_id_n), sizeof(uint64_t));
-    bl->addData(reinterpret_cast<const char *>(&point_completed_n), sizeof(uint64_t));
-    bl->addData(reinterpret_cast<const char *>(&points_total_n), sizeof(uint64_t));
+    bl->addData(&search_id_n, sizeof(uint64_t));
+    bl->addData(&point_completed_n, sizeof(uint64_t));
+    bl->addData(&points_total_n, sizeof(uint64_t));
 }
 
 void
@@ -747,11 +764,11 @@ flight_safety_system::transport::fss_message_asset_command::packData(std::shared
     const auto lng = static_cast<int32_t>(fss_htobe32(static_cast<uint32_t>(lng_host)));
     uint32_t alt = fss_htobe32(this->getAltitude());
     auto cmd = static_cast<uint8_t>(this->getCommand());
-    bl->addData(reinterpret_cast<const char *>(&ts), sizeof(uint64_t));
-    bl->addData(reinterpret_cast<const char *>(&lat), sizeof(int32_t));
-    bl->addData(reinterpret_cast<const char *>(&lng), sizeof(int32_t));
-    bl->addData(reinterpret_cast<const char *>(&alt), sizeof(uint32_t));
-    bl->addData(reinterpret_cast<const char *>(&cmd), sizeof(uint8_t));
+    bl->addData(&ts, sizeof(uint64_t));
+    bl->addData(&lat, sizeof(int32_t));
+    bl->addData(&lng, sizeof(int32_t));
+    bl->addData(&alt, sizeof(uint32_t));
+    bl->addData(&cmd, sizeof(uint8_t));
 }
 
 void
@@ -869,7 +886,7 @@ void
 packServer(const std::shared_ptr<flight_safety_system::transport::buf_len> &bl, const std::pair<std::string, uint16_t> &server)
 {
     uint16_t port = fss_htobe16(server.second);
-    bl->addData(reinterpret_cast<const char *>(&port), sizeof(port));
+    bl->addData(&port, sizeof(port));
     packString(bl, server.first);
 }
 
@@ -929,7 +946,7 @@ void
 flight_safety_system::transport::fss_message_identity_non_aircraft::packData(std::shared_ptr<buf_len> bl)
 {
     uint64_t caps = fss_htobe64(this->capabilities);
-    bl->addData(reinterpret_cast<const char *>(&caps), sizeof(uint64_t));
+    bl->addData(&caps, sizeof(uint64_t));
 }
 
 void
@@ -999,9 +1016,9 @@ flight_safety_system::transport::fss_message_version::packData(std::shared_ptr<b
     uint16_t version_n = fss_htobe16(this->protocol_version);
     uint16_t min_version_n = fss_htobe16(this->min_supported_version);
     uint32_t flags_n = fss_htobe32(this->feature_flags);
-    bl->addData(reinterpret_cast<const char *>(&version_n), sizeof(uint16_t));
-    bl->addData(reinterpret_cast<const char *>(&min_version_n), sizeof(uint16_t));
-    bl->addData(reinterpret_cast<const char *>(&flags_n), sizeof(uint32_t));
+    bl->addData(&version_n, sizeof(uint16_t));
+    bl->addData(&min_version_n, sizeof(uint16_t));
+    bl->addData(&flags_n, sizeof(uint32_t));
 }
 
 void

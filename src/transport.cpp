@@ -250,7 +250,7 @@ flight_safety_system::transport::fss_connection::connectTo(const std::string &ad
         FSS_PERROR("transport", "setsockopt TCP_SYNCNT failed, using kernel default");
     }
 
-    if (connect(current_fd, reinterpret_cast<struct sockaddr *>(&remote), remote.ss_family == AF_INET ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6)) < 0)
+    if (connect(current_fd, as_sockaddr(&remote), remote.ss_family == AF_INET ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6)) < 0)
     {
         FSS_PERROR("transport", "Failed to connect to " + address);
         safe_close_fd(this->fd.exchange(-1), "transport/connect");
@@ -421,7 +421,7 @@ flight_safety_system::transport::fss_connection::recvMsg() -> std::shared_ptr<fl
     }
     if (received == total_length)
     {
-        auto bl = std::make_shared<buf_len>(reinterpret_cast<const char *>(data.data()), data_length);
+        auto bl = std::make_shared<buf_len>(data.data(), data_length);
 #ifdef DEBUG
         printf("Message reads: \n");
         print_bl(bl);
@@ -465,7 +465,7 @@ flight_safety_system::transport::fss_listen::processMessages()
     {
         struct sockaddr_storage sa = {};
         socklen_t sa_len = sizeof(sockaddr_storage);
-        int newfd = accept(this->getFd(), reinterpret_cast<struct sockaddr *>(&sa), &sa_len);
+        int newfd = accept(this->getFd(), as_sockaddr(&sa), &sa_len);
         if (newfd < 0)
         {
             if (errno == EBADF)
@@ -522,7 +522,7 @@ flight_safety_system::transport::fss_listen::startListening() -> bool
     struct sockaddr_in6 bind_addr = {};
     bind_addr.sin6_family = AF_INET6;
     bind_addr.sin6_port = htons(this->port);
-    if (bind(this->getFd(), reinterpret_cast<struct sockaddr *>(&bind_addr), sizeof(bind_addr)) < 0)
+    if (bind(this->getFd(), as_sockaddr(&bind_addr), sizeof(bind_addr)) < 0)
     {
         FSS_PERROR("transport", "Failed to bind socket");
         safe_close_fd(this->getFd(), "transport/listen");

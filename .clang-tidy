@@ -10,7 +10,6 @@ Checks: >-
   cppcoreguidelines-pro-type-*,
   -readability-magic-numbers,
   -bugprone-easily-swappable-parameters,
-  -cppcoreguidelines-pro-type-reinterpret-cast,
   -clang-analyzer-optin.cplusplus.VirtualCall
 
 # Headers under src/ are part of the project; include findings from them.

@@ -94,12 +94,15 @@ public:
     buf_len(buf_len &&bl) noexcept;
     buf_len();
     buf_len(const char *_data, uint16_t len);
+    buf_len(const void *_data, uint16_t len);
     auto operator=(buf_len &&) -> buf_len& = delete;
     virtual ~buf_len();
     auto operator=(const buf_len &other) -> buf_len &;
     auto isValid() -> bool;
-    auto addData(const char *new_data, uint16_t len) -> bool;
+    auto addData(const char *new_data, size_t len) -> bool;
+    auto addData(const void *new_data, size_t len) -> bool;
     void writeAt(size_t offset, const char *src, size_t len);
+    void writeAt(size_t offset, const void *src, size_t len);
     auto getData() -> const char *;
     auto getLength() -> size_t;
 };
