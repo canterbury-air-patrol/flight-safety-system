@@ -8,8 +8,7 @@ Checks: >-
   performance-*,
   modernize-*,
   cppcoreguidelines-pro-type-*,
-  -readability-magic-numbers,
-  -bugprone-easily-swappable-parameters
+  -readability-magic-numbers
 
 # Headers under src/ are part of the project; include findings from them.
 HeaderFilterRegex: "src/.*"

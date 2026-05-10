@@ -88,7 +88,7 @@ inet_ntop_stor(struct sockaddr_storage *src, char *dst, size_t dstlen, uint16_t 
 
 flight_safety_system::transport::fss_connection::fss_connection() = default;
 
-flight_safety_system::transport::fss_connection::fss_connection(int t_fd, size_t t_max_queue_size)
+flight_safety_system::transport::fss_connection::fss_connection(int t_fd, size_t t_max_queue_size) // NOLINT(bugprone-easily-swappable-parameters)
     : fd(t_fd), max_queue_size(t_max_queue_size)
 {
 }

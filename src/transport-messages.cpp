@@ -398,10 +398,10 @@ flight_safety_system::transport::fss_message_rtt_response::getRequestId() -> uin
     return this->request_id;
 }
 
-flight_safety_system::transport::fss_message_position_report::fss_message_position_report(double t_latitude, double t_longitude, uint32_t t_altitude,
+flight_safety_system::transport::fss_message_position_report::fss_message_position_report(double t_latitude, double t_longitude, uint32_t t_altitude, // NOLINT(bugprone-easily-swappable-parameters)
                                                                                           uint16_t t_heading, uint16_t t_hor_vel, int16_t t_ver_vel,
                                                                                           uint32_t t_icao_address, std::string t_callsign,
-                                                                                          uint16_t t_squawk, uint8_t t_tslc, uint16_t t_flags, uint8_t t_alt_type,
+                                                                                          uint16_t t_squawk, uint8_t t_tslc, uint16_t t_flags, uint8_t t_alt_type, // NOLINT(bugprone-easily-swappable-parameters)
                                                                                           uint8_t t_emitter_type, uint64_t t_timestamp) :
     fss_message(message_type_position_report), latitude(t_latitude), longitude(t_longitude),
     altitude(t_altitude), heading(t_heading), horizontal_velocity(t_hor_vel), vertical_velocity(t_ver_vel),
@@ -615,7 +615,7 @@ flight_safety_system::transport::fss_message_position_report::getEmitterType() -
     return this->emitter_type;
 }
 
-flight_safety_system::transport::fss_message_system_status::fss_message_system_status(uint8_t bat_remaining_percent, uint32_t bat_mah_used, double bat_voltage) : fss_message(message_type_system_status), bat_percent(bat_remaining_percent), mah_used(bat_mah_used), voltage(bat_voltage)
+flight_safety_system::transport::fss_message_system_status::fss_message_system_status(uint8_t bat_remaining_percent, uint32_t bat_mah_used, double bat_voltage) : fss_message(message_type_system_status), bat_percent(bat_remaining_percent), mah_used(bat_mah_used), voltage(bat_voltage) // NOLINT(bugprone-easily-swappable-parameters)
 {
 }
 
@@ -677,7 +677,7 @@ auto flight_safety_system::transport::fss_message_system_status::getBatVoltage()
     return this->voltage;
 }
 
-flight_safety_system::transport::fss_message_search_status::fss_message_search_status(uint64_t t_search_id, uint64_t last_point_completed, uint64_t total_search_points) : fss_message(message_type_search_status), search_id(t_search_id), point_completed(last_point_completed), points_total(total_search_points)
+flight_safety_system::transport::fss_message_search_status::fss_message_search_status(uint64_t t_search_id, uint64_t last_point_completed, uint64_t total_search_points) : fss_message(message_type_search_status), search_id(t_search_id), point_completed(last_point_completed), points_total(total_search_points) // NOLINT(bugprone-easily-swappable-parameters)
 {
 }
 
@@ -740,11 +740,11 @@ flight_safety_system::transport::fss_message_asset_command::fss_message_asset_co
 {
 }
 
-flight_safety_system::transport::fss_message_asset_command::fss_message_asset_command(fss_asset_command t_command, uint64_t t_timestamp, double t_latitude, double t_longitude) : fss_message(message_type_command), command(t_command), latitude(t_latitude), longitude(t_longitude), altitude(0), timestamp(t_timestamp)
+flight_safety_system::transport::fss_message_asset_command::fss_message_asset_command(fss_asset_command t_command, uint64_t t_timestamp, double t_latitude, double t_longitude) : fss_message(message_type_command), command(t_command), latitude(t_latitude), longitude(t_longitude), altitude(0), timestamp(t_timestamp) // NOLINT(bugprone-easily-swappable-parameters)
 {
 }
 
-flight_safety_system::transport::fss_message_asset_command::fss_message_asset_command(fss_asset_command t_command, uint64_t t_timestamp, uint32_t t_altitude) : fss_message(message_type_command), command(t_command), latitude(NAN), longitude(NAN), altitude(t_altitude), timestamp(t_timestamp)
+flight_safety_system::transport::fss_message_asset_command::fss_message_asset_command(fss_asset_command t_command, uint64_t t_timestamp, uint32_t t_altitude) : fss_message(message_type_command), command(t_command), latitude(NAN), longitude(NAN), altitude(t_altitude), timestamp(t_timestamp) // NOLINT(bugprone-easily-swappable-parameters)
 {
 }
 
@@ -1001,7 +1001,7 @@ flight_safety_system::transport::fss_message_version::fss_message_version() : fs
 {
 }
 
-flight_safety_system::transport::fss_message_version::fss_message_version(uint16_t t_version, uint16_t t_min_version, uint32_t t_flags) : fss_message(message_type_version), protocol_version(t_version), min_supported_version(t_min_version), feature_flags(t_flags)
+flight_safety_system::transport::fss_message_version::fss_message_version(uint16_t t_version, uint16_t t_min_version, uint32_t t_flags) : fss_message(message_type_version), protocol_version(t_version), min_supported_version(t_min_version), feature_flags(t_flags) // NOLINT(bugprone-easily-swappable-parameters)
 {
 }
 
