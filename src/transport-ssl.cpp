@@ -98,7 +98,7 @@ flight_safety_system::transport_ssl::fss_connection_client::connectTo(const std:
     int synRetries = 2;
     setsockopt(this->getFd(), IPPROTO_TCP, TCP_SYNCNT, &synRetries, sizeof(synRetries));
 
-    if (connect(this->getFd(), reinterpret_cast<struct sockaddr *>(&remote), remote.ss_family == AF_INET ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6)) < 0)
+    if (connect(this->getFd(), as_sockaddr(&remote), remote.ss_family == AF_INET ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6)) < 0)
     {
         FSS_PERROR("ssl", "Failed to connect to " + address);
         close(this->getFd());
