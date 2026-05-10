@@ -29,7 +29,7 @@ fss::server::fss_server_details::fss_server_details(std::string t_address, uint1
 auto fss::server::fss_server_details::getAddress() -> std::string { return this->address; }
 auto fss::server::fss_server_details::getPort() -> uint16_t { return this->port; }
 
-fss::server::asset_command::asset_command(uint64_t t_dbid, uint64_t t_timestamp, const std::string &t_cmd, double t_latitude, double t_longitude, uint16_t t_altitude) : dbid(t_dbid), timestamp(t_timestamp), latitude(t_latitude), longitude(t_longitude), altitude(t_altitude)
+fss::server::asset_command::asset_command(uint64_t t_dbid, uint64_t t_timestamp, const std::string &t_cmd, double t_latitude, double t_longitude, uint16_t t_altitude) : dbid(t_dbid), timestamp(t_timestamp), latitude(t_latitude), longitude(t_longitude), altitude(t_altitude) // NOLINT(bugprone-easily-swappable-parameters)
 {
     if (t_cmd == "RTL") {
         this->command = transport::asset_command_rtl;
@@ -57,7 +57,7 @@ auto fss::server::asset_command::getLatitude() -> double { return this->latitude
 auto fss::server::asset_command::getLongitude() -> double { return this->longitude; }
 auto fss::server::asset_command::getAltitude() -> uint16_t { return this->altitude; }
 
-fss::server::fss_client_rtt::fss_client_rtt(uint64_t t_timestamp, uint64_t t_reqid) : timestamp(t_timestamp), reqid(t_reqid)
+fss::server::fss_client_rtt::fss_client_rtt(uint64_t t_timestamp, uint64_t t_reqid) : timestamp(t_timestamp), reqid(t_reqid) // NOLINT(bugprone-easily-swappable-parameters)
 {
 }
 

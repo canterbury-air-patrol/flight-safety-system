@@ -114,7 +114,7 @@ flight_safety_system::transport_ssl::fss_connection_client::connectTo(const std:
 }
 
 auto
-flight_safety_system::transport_ssl::fss_connection_client::create(std::string t_ca, std::string t_private_key, std::string t_public_key, const std::string &address, uint16_t port) -> std::shared_ptr<fss_connection_client>
+flight_safety_system::transport_ssl::fss_connection_client::create(std::string t_ca, std::string t_private_key, std::string t_public_key, const std::string &address, uint16_t port) -> std::shared_ptr<fss_connection_client> // NOLINT(bugprone-easily-swappable-parameters)
 {
     auto conn = std::make_shared<fss_connection_client>(std::move(t_ca), std::move(t_private_key), std::move(t_public_key));
     if (!conn->connectTo(address, port))
