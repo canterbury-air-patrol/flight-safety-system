@@ -22,6 +22,9 @@ all_test_SOURCES = main.cpp messages.cpp connection.cpp client.cpp \
 	timeout_test.cpp \
 	db_connection_test.cpp \
 	crl_revocation_test.cpp \
+	secure_string_test.cpp \
+	rate_limiter_test.cpp \
+	server_clients_test.cpp \
 	../src/client_session.cpp \
 	../src/db-write-queue.cpp \
 	../src/db.cpp \
