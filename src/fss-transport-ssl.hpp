@@ -28,8 +28,6 @@ public:
     fss_connection(int t_fd, std::string t_ca, std::string t_private_key, std::string t_public_key, std::string t_crl = {});
     fss_connection(fss_connection&) = delete;
     fss_connection(fss_connection&&) = delete;
-    auto operator=(fss_connection&) -> fss_connection& = delete;
-    auto operator=(fss_connection&&) -> fss_connection& = delete;
     ~fss_connection() override;
     auto getSessionDesc() -> std::string;
 };

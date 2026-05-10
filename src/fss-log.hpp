@@ -15,10 +15,10 @@ namespace flight_safety_system {
 namespace log {
 
 enum class level : int {
-    ERROR = 0,
-    WARN  = 1,
-    INFO  = 2,
-    DEBUG = 3,
+    Error = 0,
+    Warn  = 1,
+    Info  = 2,
+    Debug = 3,
 };
 
 namespace detail {
@@ -26,14 +26,14 @@ namespace detail {
 inline std::atomic<level> & current_level()
 {
     static std::atomic<level> lvl{[]() -> level {
-        level l = level::INFO;
+        level l = level::Info;
         const char *env = std::getenv("FSS_LOG_LEVEL");
         if (env == nullptr) { return l; }
         std::string s{env};
-        if (s == "error" || s == "ERROR")      { l = level::ERROR; }
-        else if (s == "warn"  || s == "WARN")  { l = level::WARN;  }
-        else if (s == "info"  || s == "INFO")  { l = level::INFO;  }
-        else if (s == "debug" || s == "DEBUG") { l = level::DEBUG; }
+        if (s == "error" || s == "ERROR")      { l = level::Error; }
+        else if (s == "warn"  || s == "WARN")  { l = level::Warn;  }
+        else if (s == "info"  || s == "INFO")  { l = level::Info;  }
+        else if (s == "debug" || s == "DEBUG") { l = level::Debug; }
         return l;
     }()};
     return lvl;
@@ -49,10 +49,10 @@ inline const char * level_str(level lvl)
 {
     switch (lvl)
     {
-        case level::ERROR: return "ERROR";
-        case level::WARN:  return "WARN ";
-        case level::INFO:  return "INFO ";
-        case level::DEBUG: return "DEBUG";
+        case level::Error: return "ERROR";
+        case level::Warn:  return "WARN ";
+        case level::Info:  return "INFO ";
+        case level::Debug: return "DEBUG";
     }
     return "?????";
 }
@@ -61,10 +61,10 @@ inline const char * level_str(level lvl)
 
 inline void set_level(const std::string &lvl_str)
 {
-    if (lvl_str == "error" || lvl_str == "ERROR")      { detail::current_level() = level::ERROR; }
-    else if (lvl_str == "warn"  || lvl_str == "WARN")  { detail::current_level() = level::WARN;  }
-    else if (lvl_str == "info"  || lvl_str == "INFO")  { detail::current_level() = level::INFO;  }
-    else if (lvl_str == "debug" || lvl_str == "DEBUG") { detail::current_level() = level::DEBUG; }
+    if (lvl_str == "error" || lvl_str == "ERROR")      { detail::current_level() = level::Error; }
+    else if (lvl_str == "warn"  || lvl_str == "WARN")  { detail::current_level() = level::Warn;  }
+    else if (lvl_str == "info"  || lvl_str == "INFO")  { detail::current_level() = level::Info;  }
+    else if (lvl_str == "debug" || lvl_str == "DEBUG") { detail::current_level() = level::Debug; }
 }
 
 inline void write(level lvl, const char *component, const std::string &msg)
@@ -96,10 +96,10 @@ inline void write(level lvl, const char *component, const std::string &msg)
         } \
     } while (false)
 
-#define FSS_LOG_ERROR(comp, ...) FSS_LOG(flight_safety_system::log::level::ERROR, (comp), __VA_ARGS__)
-#define FSS_LOG_WARN(comp, ...)  FSS_LOG(flight_safety_system::log::level::WARN,  (comp), __VA_ARGS__)
-#define FSS_LOG_INFO(comp, ...)  FSS_LOG(flight_safety_system::log::level::INFO,  (comp), __VA_ARGS__)
-#define FSS_LOG_DEBUG(comp, ...) FSS_LOG(flight_safety_system::log::level::DEBUG, (comp), __VA_ARGS__)
+#define FSS_LOG_ERROR(comp, ...) FSS_LOG(flight_safety_system::log::level::Error, (comp), __VA_ARGS__)
+#define FSS_LOG_WARN(comp, ...)  FSS_LOG(flight_safety_system::log::level::Warn,  (comp), __VA_ARGS__)
+#define FSS_LOG_INFO(comp, ...)  FSS_LOG(flight_safety_system::log::level::Info,  (comp), __VA_ARGS__)
+#define FSS_LOG_DEBUG(comp, ...) FSS_LOG(flight_safety_system::log::level::Debug, (comp), __VA_ARGS__)
 
 /* perror() replacement: appends ": strerror(errno)" to msg (msg must be a string expression) */
 #define FSS_PERROR(comp, msg) \

@@ -153,7 +153,7 @@ jobs:
         cppcheck \
           --enable=warning,performance,portability,style \
           --error-exitcode=1 \
-          --suppressions-list=.cppcheck-suppress \
+          --suppress=knownConditionTrueFalse:src/transport-ssl.cpp \
           src/*.cpp
 
     - name: clang-tidy
