@@ -9,8 +9,7 @@ Checks: >-
   modernize-*,
   cppcoreguidelines-pro-type-*,
   -readability-magic-numbers,
-  -bugprone-easily-swappable-parameters,
-  -clang-analyzer-optin.cplusplus.VirtualCall
+  -bugprone-easily-swappable-parameters
 
 # Headers under src/ are part of the project; include findings from them.
 HeaderFilterRegex: "src/.*"

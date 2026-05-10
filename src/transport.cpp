@@ -136,7 +136,7 @@ flight_safety_system::transport::fss_connection::disconnect()
 
 flight_safety_system::transport::fss_connection::~fss_connection()
 {
-    this->disconnect();
+    fss_connection::disconnect();
     while(!this->messages.empty())
     {
         auto msg = this->messages.front();
