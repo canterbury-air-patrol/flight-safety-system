@@ -177,5 +177,5 @@ cstyleCast:src/transport-messages.cpp:934
 
 # transport-ssl.cpp — Guard destructor null checks are false positives;
 # cppcheck can't see that gnutls_x509_crl_init/crt_init mutate the pointer via &
-knownConditionTrueFalse:src/transport-ssl.cpp:350
 knownConditionTrueFalse:src/transport-ssl.cpp:351
+knownConditionTrueFalse:src/transport-ssl.cpp:352

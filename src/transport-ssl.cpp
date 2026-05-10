@@ -3,6 +3,7 @@
 #include "fss-log.hpp"
 #include "transport.hpp"
 
+#include <array>
 #include <cstdint>
 #include <gnutls/gnutls.h>
 #include <gnutls/gnutlsxx.h>
@@ -247,14 +248,14 @@ flight_safety_system::transport_ssl::fss_connection_server::setupSSL() -> bool
             return false;
         }
 
-        const size_t dn_max_len = 512;
-        char name_buf[dn_max_len];
+        constexpr size_t dn_max_len = 512;
+        std::array<char, dn_max_len> name_buf{};
         size_t name_len = dn_max_len;
         rc = gnutls_x509_crt_get_dn_by_oid(cert_data, GNUTLS_OID_X520_COMMON_NAME,
-                                                 0, 0, name_buf, &name_len);
+                                                 0, 0, name_buf.data(), &name_len);
         if (rc == GNUTLS_E_SUCCESS && name_len > 0)
         {
-            this->possible_names.emplace_back(name_buf, name_len);
+            this->possible_names.emplace_back(name_buf.data(), name_len);
         }
         gnutls_x509_crt_deinit(cert_data);
     }
