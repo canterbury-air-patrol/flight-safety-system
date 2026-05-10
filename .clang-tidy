@@ -9,7 +9,6 @@ Checks: >-
   modernize-*,
   cppcoreguidelines-pro-type-*,
   -readability-magic-numbers,
-  -modernize-use-scoped-lock,
   -modernize-pass-by-value,
   -modernize-avoid-c-arrays,
   -bugprone-easily-swappable-parameters,

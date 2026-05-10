@@ -80,14 +80,14 @@ fss::server::fss_client::isAircraft() -> bool
 auto
 fss::server::fss_client::getName() -> std::string
 {
-    std::lock_guard<std::mutex> guard(this->client_lock);
+    std::scoped_lock guard(this->client_lock);
     return this->name;
 }
 
 void
 fss::server::fss_client::sendCommand()
 {
-    std::lock_guard<std::mutex> guard(this->client_lock);
+    std::scoped_lock guard(this->client_lock);
     uint64_t ts = fss_current_timestamp();
     uint64_t asset_id = this->dbc->getAssetId(this->name);
     if (asset_id == 0) { return; }
@@ -129,7 +129,7 @@ fss::server::fss_client::setClock(std::shared_ptr<fss::IClock> t_clock)
 void
 fss::server::fss_client::setTimeoutMs(uint64_t ms)
 {
-    std::lock_guard<std::mutex> guard(this->client_lock);
+    std::scoped_lock guard(this->client_lock);
     this->client_timeout_ms = ms;
 }
 
@@ -142,7 +142,7 @@ fss::server::fss_client::setRateLimits(uint64_t capacity, uint64_t refill_per_s)
 auto
 fss::server::fss_client::isTimedOut() -> bool
 {
-    std::lock_guard<std::mutex> guard(this->client_lock);
+    std::scoped_lock guard(this->client_lock);
     if (!this->liveness_active) { return false; }
     return (this->clock->now_ms() - this->last_rtt_response_time) > this->client_timeout_ms;
 }
@@ -152,7 +152,7 @@ fss::server::fss_client::sendRTTRequest(const std::shared_ptr<fss::transport::fs
 {
     bool timed_out = false;
     {
-        std::lock_guard<std::mutex> guard(this->client_lock);
+        std::scoped_lock guard(this->client_lock);
         uint64_t now = this->clock->now_ms();
         if (!this->outstanding_rtt_requests.empty())
         {
@@ -182,7 +182,7 @@ fss::server::fss_client::sendSMMSettings()
 {
     std::string client_name;
     {
-        std::lock_guard<std::mutex> guard(this->client_lock);
+        std::scoped_lock guard(this->client_lock);
         client_name = this->name;
     }
     uint64_t asset_id = this->dbc->getAssetId(client_name);
@@ -306,7 +306,7 @@ fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss_mess
                     return;
                 }
                 {
-                    std::lock_guard<std::mutex> guard(this->client_lock);
+                    std::scoped_lock guard(this->client_lock);
                     this->name = std::move(client_name);
                     this->liveness_active = true;
                     this->last_rtt_response_time = this->clock->now_ms();
@@ -333,7 +333,7 @@ fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss_mess
                 return;
             }
             {
-                std::lock_guard<std::mutex> guard(this->client_lock);
+                std::scoped_lock guard(this->client_lock);
                 this->name = possible_names.front();
             }
             this->aircraft = false;
@@ -391,7 +391,7 @@ fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss_mess
                 auto rtt_resp_msg = std::dynamic_pointer_cast<fss::transport::fss_message_rtt_response>(msg);
                 if (rtt_resp_msg != nullptr)
                 {
-                    std::lock_guard<std::mutex> guard(this->client_lock);
+                    std::scoped_lock guard(this->client_lock);
                     for(const auto &req : this->outstanding_rtt_requests)
                     {
                         if(req->getRequestId() == rtt_resp_msg->getRequestId())

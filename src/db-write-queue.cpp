@@ -24,7 +24,7 @@ db_write_queue::enqueue(db_write_task task)
     bool did_drop = false;
     uint64_t total_dropped = 0;
     {
-        std::lock_guard<std::mutex> guard(this->mtx);
+        std::scoped_lock guard(this->mtx);
         if (this->stopping) { return; }
         if (this->q.size() >= this->max_depth)
         {
@@ -52,7 +52,7 @@ void
 db_write_queue::stop()
 {
     {
-        std::lock_guard<std::mutex> guard(this->mtx);
+        std::scoped_lock guard(this->mtx);
         if (this->stopping) { return; }
         this->stopping = true;
     }
@@ -78,7 +78,7 @@ db_write_queue::write_failure_count() const -> uint64_t
 auto
 db_write_queue::pending_count() const -> std::size_t
 {
-    std::lock_guard<std::mutex> guard(this->mtx);
+    std::scoped_lock guard(this->mtx);
     return this->q.size();
 }
 
