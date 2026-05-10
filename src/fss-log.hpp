@@ -69,7 +69,7 @@ inline void set_level(const std::string &lvl_str)
 
 inline void write(level lvl, const char *component, const std::string &msg)
 {
-    std::lock_guard<std::mutex> guard(detail::log_mutex());
+    std::scoped_lock guard(detail::log_mutex());
     auto now = std::chrono::system_clock::now();
     std::time_t t = std::chrono::system_clock::to_time_t(now);
     char buf[21]{};

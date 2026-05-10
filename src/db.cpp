@@ -31,35 +31,35 @@ flight_safety_system::server::db_connection::~db_connection()
 auto
 flight_safety_system::server::db_connection::getAssetId(const std::string &name) -> uint64_t
 {
-    std::lock_guard<std::mutex> guard(this->db_lock);
+    std::scoped_lock guard(this->db_lock);
     return db_get_asset_id(name.c_str());
 }
 
 void
 flight_safety_system::server::db_connection::recordRtt(uint64_t asset_id, uint64_t rtt_ms)
 {
-    std::lock_guard<std::mutex> guard(this->db_lock);
+    std::scoped_lock guard(this->db_lock);
     db_rtt_create_entry(asset_id, rtt_ms);
 }
 
 void
 flight_safety_system::server::db_connection::recordStatus(uint64_t asset_id, uint8_t bat_percent, uint32_t bat_mah_used, double bat_voltage)
 {
-    std::lock_guard<std::mutex> guard(this->db_lock);
+    std::scoped_lock guard(this->db_lock);
     db_status_create_entry(asset_id, bat_percent, bat_mah_used, bat_voltage);
 }
 
 void
 flight_safety_system::server::db_connection::recordSearchStatus(uint64_t asset_id, uint64_t search_id, uint64_t completed, uint64_t total)
 {
-    std::lock_guard<std::mutex> guard(this->db_lock);
+    std::scoped_lock guard(this->db_lock);
     db_search_status_create_entry(asset_id, search_id, completed, total);
 }
 
 void
 flight_safety_system::server::db_connection::recordPosition(uint64_t asset_id, double latitude, double longitude, uint32_t altitude)
 {
-    std::lock_guard<std::mutex> guard(this->db_lock);
+    std::scoped_lock guard(this->db_lock);
     assert(altitude <= static_cast<uint32_t>(std::numeric_limits<int>::max()));
     db_position_create_entry(asset_id, latitude, longitude, static_cast<int>(altitude));
 }
@@ -69,7 +69,7 @@ flight_safety_system::server::db_connection::getCommand(uint64_t asset_id) -> st
 {
     std::shared_ptr<asset_command> res = nullptr;
     {
-        std::lock_guard<std::mutex> guard(this->db_lock);
+        std::scoped_lock guard(this->db_lock);
         struct asset_command_s *command = db_asset_command_get(asset_id);
         if (command)
         {
@@ -86,7 +86,7 @@ flight_safety_system::server::db_connection::getSmmSettings(uint64_t asset_id) -
 {
     std::shared_ptr<smm_settings> res = nullptr;
     {
-        std::lock_guard<std::mutex> guard(this->db_lock);
+        std::scoped_lock guard(this->db_lock);
         struct smm_settings_s *settings = db_asset_smm_settings_get(asset_id);
         if (settings)
         {
@@ -106,7 +106,7 @@ flight_safety_system::server::db_connection::getActiveServers() -> std::vector<f
     std::vector<fss_server_details> res;
     struct fss_server_s **servers = nullptr;
     {
-        std::lock_guard<std::mutex> guard(this->db_lock);
+        std::scoped_lock guard(this->db_lock);
         servers = db_active_fss_servers_get();
     }
     if (servers)

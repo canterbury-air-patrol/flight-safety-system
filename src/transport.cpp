@@ -166,7 +166,7 @@ flight_safety_system::transport::fss_connection::processMessages()
             FSS_LOG_INFO("transport", "Remote closed the connection");
             this->run.store(false);
             {
-                std::lock_guard<std::mutex> lock_holder(this->msg_lock);
+                std::scoped_lock lock_holder(this->msg_lock);
                 if (this->handler != nullptr)
                 {
                     this->handler->processMessage(msg);
@@ -179,7 +179,7 @@ flight_safety_system::transport::fss_connection::processMessages()
             break;
         }
         {
-            std::lock_guard<std::mutex> lock_holder(this->msg_lock);
+            std::scoped_lock lock_holder(this->msg_lock);
             if (this->handler != nullptr)
             {
                 this->handler->processMessage(msg);
@@ -204,7 +204,7 @@ flight_safety_system::transport::fss_connection::processMessages()
 auto
 flight_safety_system::transport::fss_connection::getMsg() -> std::shared_ptr<flight_safety_system::transport::fss_message>
 {
-    std::lock_guard<std::mutex> lock_holder(this->msg_lock);
+    std::scoped_lock lock_holder(this->msg_lock);
     if (this->handler == nullptr)
     {
         if (!this->messages.empty())
@@ -267,7 +267,7 @@ flight_safety_system::transport::fss_connection::connectTo(const std::string &ad
 auto
 flight_safety_system::transport::fss_connection::sendMsg(const std::shared_ptr<fss_message> &msg) -> bool
 {
-    std::lock_guard<std::mutex> lock_holder(this->send_lock);
+    std::scoped_lock lock_holder(this->send_lock);
     msg->setId(this->getMessageId());
     auto bl = msg->getPacked();
 #ifdef DEBUG
@@ -324,7 +324,7 @@ flight_safety_system::transport::fss_connection::sendMsg(const std::shared_ptr<b
 void
 flight_safety_system::transport::fss_connection::setHandler(fss_message_cb *cb)
 {
-    std::lock_guard<std::mutex> lock_holder(this->msg_lock);
+    std::scoped_lock lock_holder(this->msg_lock);
     this->handler = cb;
     if (this->handler != nullptr)
     {
