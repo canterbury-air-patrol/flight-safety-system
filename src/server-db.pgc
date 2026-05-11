@@ -1,6 +1,7 @@
 #include "server-db.h"
 
 #include <stdlib.h>
+#include <string.h>
 
 #define COMMAND_LEN 7
 #define SMM_LOGIN_LEN 51
@@ -214,13 +215,17 @@ db_asset_smm_settings_get(unsigned long long asset_id_arg)
             if (settings->address == NULL || settings->username == NULL || settings->password == NULL)
             {
                 free(settings->address);
+                if (settings->username != NULL) explicit_bzero(settings->username, strlen(settings->username));
                 free(settings->username);
+                if (settings->password != NULL) explicit_bzero(settings->password, strlen(settings->password));
                 free(settings->password);
                 free(settings);
                 settings = NULL;
             }
         }
     }
+    explicit_bzero(smm_login, sizeof(smm_login));
+    explicit_bzero(smm_password, sizeof(smm_password));
     return settings;
 }
 
