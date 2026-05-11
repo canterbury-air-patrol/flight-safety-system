@@ -3,6 +3,7 @@
 
 extern "C" {
 #include "server-db.h"
+#include <string.h>
 }
 
 #include <cassert>
@@ -91,10 +92,12 @@ flight_safety_system::server::db_connection::getSmmSettings(uint64_t asset_id) -
         if (settings)
         {
             res = std::make_shared<smm_settings>(std::string(settings->address), flight_safety_system::secure_string(std::string_view(settings->username)), flight_safety_system::secure_string(std::string_view(settings->password)));
-            free (settings->address);
-            free (settings->username);
-            free (settings->password);
-            free (settings);
+            free(settings->address);
+            explicit_bzero(settings->username, strlen(settings->username));
+            free(settings->username);
+            explicit_bzero(settings->password, strlen(settings->password));
+            free(settings->password);
+            free(settings);
         }
     }
     return res;
