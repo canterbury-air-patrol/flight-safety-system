@@ -28,6 +28,11 @@ static constexpr uint16_t FSS_PROTOCOL_VERSION_LEGACY = 0;
 static constexpr uint16_t FSS_PROTOCOL_VERSION = 2;
 static constexpr uint16_t FSS_PROTOCOL_MIN_VERSION = 1;
 
+/* Maximum payload length accepted from the wire. Anything larger is rejected
+ * before allocation to prevent memory exhaustion attacks. Sized well above the
+ * largest legitimate message (server_list with many entries) with headroom. */
+static constexpr uint16_t FSS_MAX_MESSAGE_BYTES = 8192;
+
 class fss_connection;
 class fss_listen;
 class fss_message;

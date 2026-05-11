@@ -16,6 +16,7 @@ all_test_SOURCES = main.cpp messages.cpp connection.cpp client.cpp \
 	queue_test.cpp \
 	reconnect_test.cpp \
 	connection_negative_test.cpp \
+	oversized_message_test.cpp \
 	ssl_failure_test.cpp \
 	server_session_test.cpp \
 	async_db_write_test.cpp \

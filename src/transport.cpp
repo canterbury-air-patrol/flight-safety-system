@@ -393,6 +393,12 @@ flight_safety_system::transport::fss_connection::recvMsg() -> std::shared_ptr<fl
     uint16_t data_length_n;
     memcpy(&data_length_n, header.data(), sizeof(uint16_t));
     uint16_t data_length = ntohs(data_length_n);
+    if (data_length > FSS_MAX_MESSAGE_BYTES)
+    {
+        FSS_LOG_ERROR("transport", "Message too large (" << data_length << " bytes), closing connection");
+        this->disconnect();
+        return std::make_shared<flight_safety_system::transport::fss_message_closed>();
+    }
     auto total_length = static_cast<ssize_t>(data_length);
     if (data_length % sizeof(uint64_t) != 0)
     {
