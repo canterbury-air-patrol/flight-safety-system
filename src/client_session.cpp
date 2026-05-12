@@ -85,13 +85,19 @@ fss::server::fss_client::getName() -> std::string
 }
 
 void
+fss::server::fss_client::setPendingCommand(std::shared_ptr<fss::server::asset_command> cmd)
+{
+    std::scoped_lock guard(this->client_lock);
+    this->pending_command = std::move(cmd);
+}
+
+void
 fss::server::fss_client::sendCommand()
 {
     std::scoped_lock guard(this->client_lock);
-    uint64_t asset_id = this->cached_asset_id.load();
-    if (asset_id == 0) { return; }
+    if (this->cached_asset_id.load() == 0) { return; }
     uint64_t ts = fss_current_timestamp();
-    auto ac = this->dbc->getCommand(asset_id);
+    auto ac = this->pending_command;
     constexpr int timeout_time = 10 * sec_to_msec;
     if (ac != nullptr && (ac->getDBId() != this->last_command_dbid || ts > (this->last_command_send_ts + timeout_time)))
     {
@@ -302,6 +308,7 @@ fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss_mess
                     return;
                 }
                 this->cached_asset_id.store(asset_id);
+                this->setPendingCommand(this->dbc->getCommand(asset_id));
                 {
                     std::scoped_lock guard(this->client_lock);
                     this->name = std::move(client_name);

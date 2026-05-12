@@ -128,6 +128,7 @@ private:
     std::atomic<bool> version_received{false};
     std::atomic<uint64_t> expected_seq{0};
     std::atomic<uint64_t> cached_asset_id{0};
+    std::shared_ptr<asset_command> pending_command{nullptr};
     std::string name{};
     std::mutex client_lock{};
     std::list<std::shared_ptr<fss_client_rtt>> outstanding_rtt_requests{};
@@ -157,6 +158,7 @@ public:
     void sendCommand();
     auto isAircraft() -> bool;
     auto getCachedAssetId() -> uint64_t { return this->cached_asset_id.load(); }
+    void setPendingCommand(std::shared_ptr<asset_command> cmd);
     void setClock(std::shared_ptr<IClock> t_clock);
     void setTimeoutMs(uint64_t ms);
     void setRateLimits(uint64_t capacity, uint64_t refill_per_s); // must be called before any messages are processed
