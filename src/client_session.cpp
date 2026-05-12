@@ -88,9 +88,9 @@ void
 fss::server::fss_client::sendCommand()
 {
     std::scoped_lock guard(this->client_lock);
-    uint64_t ts = fss_current_timestamp();
-    uint64_t asset_id = this->dbc->getAssetId(this->name);
+    uint64_t asset_id = this->cached_asset_id.load();
     if (asset_id == 0) { return; }
+    uint64_t ts = fss_current_timestamp();
     auto ac = this->dbc->getCommand(asset_id);
     constexpr int timeout_time = 10 * sec_to_msec;
     if (ac != nullptr && (ac->getDBId() != this->last_command_dbid || ts > (this->last_command_send_ts + timeout_time)))
@@ -180,12 +180,7 @@ fss::server::fss_client::sendRTTRequest(const std::shared_ptr<fss::transport::fs
 void
 fss::server::fss_client::sendSMMSettings()
 {
-    std::string client_name;
-    {
-        std::scoped_lock guard(this->client_lock);
-        client_name = this->name;
-    }
-    uint64_t asset_id = this->dbc->getAssetId(client_name);
+    uint64_t asset_id = this->cached_asset_id.load();
     if (asset_id == 0) { return; }
     auto smm = this->dbc->getSmmSettings(asset_id);
     if (smm != nullptr)
@@ -300,11 +295,13 @@ fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss_mess
                     this->client_handler->clientDisconnected(this);
                     return;
                 }
-                if (this->dbc->getAssetId(client_name) == 0)
+                uint64_t asset_id = this->dbc->getAssetId(client_name);
+                if (asset_id == 0)
                 {
                     this->client_handler->clientDisconnected(this);
                     return;
                 }
+                this->cached_asset_id.store(asset_id);
                 {
                     std::scoped_lock guard(this->client_lock);
                     this->name = std::move(client_name);
@@ -367,8 +364,7 @@ fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss_mess
             }
             return;
         }
-        std::string client_name = this->getName();
-        uint64_t asset_id = this->dbc->getAssetId(client_name);
+        uint64_t asset_id = this->cached_asset_id.load();
         switch (msg->getType())
         {
             case fss::transport::message_type_unknown:
@@ -408,7 +404,7 @@ fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss_mess
                 if (rtt_req != nullptr && asset_id != 0)
                 {
 #ifdef DEBUG
-                    std::cout << "RTT for " << client_name << " is " << (current_ts - rtt_req->getTimeStamp()) << std::endl;
+                    std::cout << "RTT for " << this->getName() << " is " << (current_ts - rtt_req->getTimeStamp()) << std::endl;
 #endif
                     this->writer->enqueue(rtt_write{asset_id, current_ts - rtt_req->getTimeStamp()});
                 }
