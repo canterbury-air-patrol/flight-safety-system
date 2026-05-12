@@ -220,9 +220,9 @@ fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss_mess
 #endif
     if (msg->getType() == fss::transport::message_type_closed)
     {
-        if (this->identified && !this->aircraft)
+        if (this->identified)
         {
-            FSS_LOG_INFO("server", "Non-aircraft client disconnected: " << this->getName());
+            FSS_LOG_INFO("server", (this->aircraft ? "Aircraft" : "Non-aircraft") << " client disconnected: " << this->getName());
         }
         this->client_handler->clientDisconnected(this);
         return;
@@ -321,6 +321,7 @@ fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss_mess
                 }
                 this->aircraft = true;
                 this->identified = true;
+                FSS_LOG_INFO("server", "Aircraft client identified: " << this->getName());
                 this->sendCommand();
                 this->sendSMMSettings();
                 this->getConnection()->sendMsg(getServersListMsg(this->dbc));
