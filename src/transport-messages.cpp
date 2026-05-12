@@ -65,6 +65,77 @@ unpackString(const char *data, size_t length, size_t &offset, StringType &result
     return true;
 }
 
+namespace {
+
+class BufferReader {
+    const char *m_data;
+    size_t      m_length;
+    size_t      m_offset;
+    bool        m_ok;
+    auto ensureAvailable(size_t n) -> bool {
+        if (!m_ok || m_length - m_offset < n) { m_ok = false; return false; }
+        return true;
+    }
+public:
+    BufferReader(const char *data, size_t length, size_t initial_offset)
+        : m_data(data), m_length(length), m_offset(initial_offset),
+          m_ok(initial_offset <= length) {}
+    [[nodiscard]] auto ok() const -> bool { return m_ok; }
+    auto readUint8(uint8_t &out) -> bool {
+        if (!ensureAvailable(sizeof(uint8_t))) return false;
+        out = static_cast<uint8_t>(m_data[m_offset]);
+        m_offset += sizeof(uint8_t);
+        return true;
+    }
+    auto readInt16(int16_t &out) -> bool {
+        if (!ensureAvailable(sizeof(int16_t))) return false;
+        int16_t tmp;
+        memcpy(&tmp, m_data + m_offset, sizeof(int16_t));
+        out = static_cast<int16_t>(fss_be16toh(static_cast<uint16_t>(tmp)));
+        m_offset += sizeof(int16_t);
+        return true;
+    }
+    auto readUint16(uint16_t &out) -> bool {
+        if (!ensureAvailable(sizeof(uint16_t))) return false;
+        uint16_t tmp;
+        memcpy(&tmp, m_data + m_offset, sizeof(uint16_t));
+        out = fss_be16toh(tmp);
+        m_offset += sizeof(uint16_t);
+        return true;
+    }
+    auto readInt32(int32_t &out) -> bool {
+        if (!ensureAvailable(sizeof(int32_t))) return false;
+        int32_t tmp;
+        memcpy(&tmp, m_data + m_offset, sizeof(int32_t));
+        out = static_cast<int32_t>(fss_be32toh(static_cast<uint32_t>(tmp)));
+        m_offset += sizeof(int32_t);
+        return true;
+    }
+    auto readUint32(uint32_t &out) -> bool {
+        if (!ensureAvailable(sizeof(uint32_t))) return false;
+        uint32_t tmp;
+        memcpy(&tmp, m_data + m_offset, sizeof(uint32_t));
+        out = fss_be32toh(tmp);
+        m_offset += sizeof(uint32_t);
+        return true;
+    }
+    auto readUint64(uint64_t &out) -> bool {
+        if (!ensureAvailable(sizeof(uint64_t))) return false;
+        uint64_t tmp;
+        memcpy(&tmp, m_data + m_offset, sizeof(uint64_t));
+        out = fss_be64toh(tmp);
+        m_offset += sizeof(uint64_t);
+        return true;
+    }
+    template<typename StringType>
+    auto readString(StringType &out) -> bool {
+        if (!m_ok || !unpackString(m_data, m_length, m_offset, out)) { m_ok = false; return false; }
+        return true;
+    }
+};
+
+} // namespace
+
 flight_safety_system::transport::buf_len::buf_len(const buf_len &bl) = default;
 flight_safety_system::transport::buf_len::buf_len(buf_len &&bl) noexcept = default;
 flight_safety_system::transport::buf_len::buf_len() = default;
@@ -377,16 +448,8 @@ flight_safety_system::transport::fss_message_rtt_response::packData(std::shared_
 void
 flight_safety_system::transport::fss_message_rtt_response::unpackData(const std::shared_ptr<buf_len> &bl)
 {
-    size_t offset = this->headerLength();
-    const char *data = bl->getData();
-    size_t length = bl->getLength();
-    if (length - offset >= sizeof(uint64_t))
-    {
-        uint64_t tmp;
-        memcpy(&tmp, data + offset, sizeof(uint64_t));
-        this->request_id = fss_be64toh(tmp);
-    }
-    else
+    BufferReader reader(bl->getData(), bl->getLength(), this->headerLength());
+    if (!reader.readUint64(this->request_id))
     {
         this->request_id = 0;
     }
@@ -452,96 +515,34 @@ flight_safety_system::transport::fss_message_position_report::packData(std::shar
 void
 flight_safety_system::transport::fss_message_position_report::unpackData(const std::shared_ptr<buf_len> &bl)
 {
-    size_t offset = this->headerLength();
-    const char *data = bl->getData();
-    size_t length = bl->getLength();
-    this->altitude = 0;
+    BufferReader reader(bl->getData(), bl->getLength(), this->headerLength());
     this->timestamp = 0;
-    if (length - offset >= sizeof(uint64_t))
-    {
-        uint64_t tmp;
-        memcpy(&tmp, data + offset, sizeof(uint64_t));
-        this->timestamp = fss_be64toh(tmp);
-        offset += sizeof(uint64_t);
-    }
-    if (length - offset >= sizeof(int32_t))
-    {
-        int32_t tmp;
-        memcpy(&tmp, data + offset, sizeof(int32_t));
-        const auto lat = static_cast<int32_t>(fss_be32toh(static_cast<uint32_t>(tmp)));
-        offset += sizeof(int32_t);
-        this->latitude = static_cast<double>(lat) * FSS_COORD_SCALE;
-    }
-    if (length - offset >= sizeof(int32_t))
-    {
-        int32_t tmp;
-        memcpy(&tmp, data + offset, sizeof(int32_t));
-        const auto lng = static_cast<int32_t>(fss_be32toh(static_cast<uint32_t>(tmp)));
-        offset += sizeof(int32_t);
-        this->longitude = static_cast<double>(lng) * FSS_COORD_SCALE;
-    }
-    if (length - offset >= sizeof(uint32_t))
-    {
-        uint32_t tmp;
-        memcpy(&tmp, data + offset, sizeof(uint32_t));
-        this->altitude = fss_be32toh(tmp);
-        offset += sizeof(uint32_t);
-    }
-    if (length - offset >= sizeof(uint32_t))
-    {
-        uint32_t tmp;
-        memcpy(&tmp, data + offset, sizeof(uint32_t));
-        this->icao_address = fss_be32toh(tmp);
-        offset += sizeof(uint32_t);
-    }
-    if (length - offset >= sizeof(uint16_t))
-    {
-        uint16_t tmp;
-        memcpy(&tmp, data + offset, sizeof(uint16_t));
-        this->heading = fss_be16toh(tmp);
-        offset += sizeof(uint16_t);
-    }
-    if (length - offset >= sizeof(uint16_t))
-    {
-        uint16_t tmp;
-        memcpy(&tmp, data + offset, sizeof(uint16_t));
-        this->horizontal_velocity = fss_be16toh(tmp);
-        offset += sizeof(uint16_t);
-    }
-    if (length - offset >= sizeof(int16_t))
-    {
-        int16_t tmp;
-        memcpy(&tmp, data + offset, sizeof(int16_t));
-        this->vertical_velocity = static_cast<int16_t>(fss_be16toh(static_cast<uint16_t>(tmp)));
-        offset += sizeof(int16_t);
-    }
-    if (length - offset >= sizeof(uint16_t))
-    {
-        uint16_t tmp;
-        memcpy(&tmp, data + offset, sizeof(uint16_t));
-        this->squawk = fss_be16toh(tmp);
-        offset += sizeof(uint16_t);
-    }
-    if (!unpackString(data, length, offset, this->callsign))
-    {
-        return;
-    }
-    if (offset <= length && length - offset >= sizeof(uint16_t))
-    {
-        uint16_t tmp;
-        memcpy(&tmp, data + offset, sizeof(uint16_t));
-        this->flags = fss_be16toh(tmp);
-        offset += sizeof(uint16_t);
-    }
-    if (offset <= length && length - offset >= sizeof(uint8_t))
-    {
-        this->altitude_type = static_cast<uint8_t>(data[offset]);
-        offset += sizeof(uint8_t);
-    }
-    if (offset <= length && length - offset >= sizeof(uint8_t))
-    {
-        this->emitter_type = static_cast<uint8_t>(data[offset]);
-    }
+    this->altitude = 0;
+    this->icao_address = 0;
+    this->heading = 0;
+    this->horizontal_velocity = 0;
+    this->vertical_velocity = 0;
+    this->squawk = 0;
+    this->flags = 0;
+    this->altitude_type = 0;
+    this->emitter_type = 0;
+    int32_t lat = 0;
+    int32_t lng = 0;
+    reader.readUint64(this->timestamp);
+    reader.readInt32(lat);
+    reader.readInt32(lng);
+    reader.readUint32(this->altitude);
+    reader.readUint32(this->icao_address);
+    reader.readUint16(this->heading);
+    reader.readUint16(this->horizontal_velocity);
+    reader.readInt16(this->vertical_velocity);
+    reader.readUint16(this->squawk);
+    reader.readString(this->callsign);
+    reader.readUint16(this->flags);
+    reader.readUint8(this->altitude_type);
+    reader.readUint8(this->emitter_type);
+    this->latitude = static_cast<double>(lat) * FSS_COORD_SCALE;
+    this->longitude = static_cast<double>(lng) * FSS_COORD_SCALE;
 }
 
 auto
@@ -639,25 +640,15 @@ flight_safety_system::transport::fss_message_system_status::packData(std::shared
 void
 flight_safety_system::transport::fss_message_system_status::unpackData(const std::shared_ptr<buf_len> &bl)
 {
-    size_t offset = this->headerLength();
-    const char *data = bl->getData();
-    size_t length = bl->getLength();
+    BufferReader reader(bl->getData(), bl->getLength(), this->headerLength());
     this->bat_percent = 0;
     this->mah_used = 0;
-    if (length - offset >= (sizeof(uint8_t) + sizeof(uint32_t)))
+    this->voltage = 0.0;
+    reader.readUint8(this->bat_percent);
+    reader.readUint32(this->mah_used);
+    uint32_t voltage_n = 0;
+    if (reader.readUint32(voltage_n))
     {
-        this->bat_percent = static_cast<uint8_t>(data[offset]);
-        offset += sizeof(uint8_t);
-        uint32_t tmp;
-        memcpy(&tmp, data + offset, sizeof(uint32_t));
-        this->mah_used = fss_be32toh(tmp);
-        offset += sizeof(uint32_t);
-    }
-    if (length - offset >= sizeof(int32_t))
-    {
-        int32_t tmp;
-        memcpy(&tmp, data + offset, sizeof(int32_t));
-        uint32_t voltage_n = fss_be32toh(tmp);
         this->voltage = static_cast<double>(voltage_n) * FSS_COORD_SCALE;
     }
 }
@@ -700,24 +691,13 @@ flight_safety_system::transport::fss_message_search_status::packData(std::shared
 void
 flight_safety_system::transport::fss_message_search_status::unpackData(const std::shared_ptr<buf_len> &bl)
 {
-    size_t offset = this->headerLength();
-    const char *data = bl->getData();
-    size_t length = bl->getLength();
+    BufferReader reader(bl->getData(), bl->getLength(), this->headerLength());
     this->search_id = 0;
     this->point_completed = 0;
     this->points_total = 0;
-    if (length - offset >= (sizeof(uint64_t) + sizeof(uint64_t) + sizeof(uint64_t)))
-    {
-        uint64_t tmp;
-        memcpy(&tmp, data + offset, sizeof(uint64_t));
-        this->search_id = fss_be64toh(tmp);
-        offset += sizeof(uint64_t);
-        memcpy(&tmp, data + offset, sizeof(uint64_t));
-        this->point_completed = fss_be64toh(tmp);
-        offset += sizeof(uint64_t);
-        memcpy(&tmp, data + offset, sizeof(uint64_t));
-        this->points_total = fss_be64toh(tmp);
-    }
+    reader.readUint64(this->search_id);
+    reader.readUint64(this->point_completed);
+    reader.readUint64(this->points_total);
 }
 
 auto
@@ -774,31 +754,19 @@ flight_safety_system::transport::fss_message_asset_command::packData(std::shared
 void
 flight_safety_system::transport::fss_message_asset_command::unpackData(const std::shared_ptr<buf_len> &bl)
 {
-    size_t offset = this->headerLength();
-    const char *data = bl->getData();
-    size_t length = bl->getLength();
+    BufferReader reader(bl->getData(), bl->getLength(), this->headerLength());
     int32_t lat = 0;
     int32_t lng = 0;
     this->altitude = 0;
     this->timestamp = 0;
-    if (length - offset >= (sizeof(uint64_t) + sizeof(int32_t) + sizeof(int32_t) + sizeof(uint32_t) + sizeof(uint8_t)))
+    reader.readUint64(this->timestamp);
+    reader.readInt32(lat);
+    reader.readInt32(lng);
+    reader.readUint32(this->altitude);
+    uint8_t cmd = 0;
+    if (reader.readUint8(cmd))
     {
-        uint64_t tmp64;
-        memcpy(&tmp64, data + offset, sizeof(uint64_t));
-        this->timestamp = fss_be64toh(tmp64);
-        offset += sizeof(uint64_t);
-        int32_t tmp32;
-        memcpy(&tmp32, data + offset, sizeof(int32_t));
-        lat = static_cast<int32_t>(fss_be32toh(static_cast<uint32_t>(tmp32)));
-        offset += sizeof(int32_t);
-        memcpy(&tmp32, data + offset, sizeof(int32_t));
-        lng = static_cast<int32_t>(fss_be32toh(static_cast<uint32_t>(tmp32)));
-        offset += sizeof(int32_t);
-        uint32_t tmpu32;
-        memcpy(&tmpu32, data + offset, sizeof(uint32_t));
-        this->altitude = fss_be32toh(tmpu32);
-        offset += sizeof(uint32_t);
-        this->command = static_cast<fss_asset_command>(static_cast<uint8_t>(data[offset]));
+        this->command = static_cast<fss_asset_command>(cmd);
     }
     this->latitude = lat * FSS_COORD_SCALE;
     this->longitude = lng * FSS_COORD_SCALE;
@@ -841,18 +809,10 @@ flight_safety_system::transport::fss_message_smm_settings::packData(std::shared_
 void
 flight_safety_system::transport::fss_message_smm_settings::unpackData(const std::shared_ptr<buf_len> &bl)
 {
-    size_t offset = this->headerLength();
-    const char *data = bl->getData();
-    size_t length = bl->getLength();
-    if (!unpackString(data, length, offset, this->server_url))
-    {
-        return;
-    }
-    if (!unpackString(data, length, offset, this->username))
-    {
-        return;
-    }
-    unpackString(data, length, offset, this->password);
+    BufferReader reader(bl->getData(), bl->getLength(), this->headerLength());
+    reader.readString(this->server_url);
+    reader.readString(this->username);
+    reader.readString(this->password);
 }
 
 flight_safety_system::transport::fss_message_smm_settings::fss_message_smm_settings(std::string t_server_url, secure_string t_username, secure_string t_password) : fss_message(message_type_smm_settings), server_url(std::move(t_server_url)), username(std::move(t_username)), password(std::move(t_password))
@@ -902,19 +862,14 @@ flight_safety_system::transport::fss_message_server_list::packData(std::shared_p
 void
 flight_safety_system::transport::fss_message_server_list::unpackData(const std::shared_ptr<buf_len> &bl)
 {
-    size_t offset = this->headerLength();
-    const char *data = bl->getData();
-    size_t length = bl->getLength();
-    while (offset <= length && length - offset >= (sizeof(uint16_t) + sizeof(uint16_t)))
+    BufferReader reader(bl->getData(), bl->getLength(), this->headerLength());
+    while (reader.ok())
     {
-        uint16_t tmp;
-        memcpy(&tmp, data + offset, sizeof(uint16_t));
-        uint16_t port = fss_be16toh(tmp);
-        offset += sizeof(uint16_t);
+        uint16_t port = 0;
         std::string server_addr;
-        if (!unpackString(data, length, offset, server_addr))
+        if (!reader.readUint16(port) || !reader.readString(server_addr))
         {
-            return;
+            break;
         }
         this->servers.emplace_back(server_addr, port);
     }
@@ -952,15 +907,9 @@ flight_safety_system::transport::fss_message_identity_non_aircraft::packData(std
 void
 flight_safety_system::transport::fss_message_identity_non_aircraft::unpackData(const std::shared_ptr<buf_len> &bl)
 {
-    size_t offset = this->headerLength();
-    const char *data = bl->getData();
-    size_t length = bl->getLength();
-    if (length - offset >= (sizeof(uint64_t)))
-    {
-        uint64_t tmp;
-        memcpy(&tmp, data + offset, sizeof(uint64_t));
-        this->capabilities = fss_be64toh(tmp);
-    }
+    BufferReader reader(bl->getData(), bl->getLength(), this->headerLength());
+    this->capabilities = 0;
+    reader.readUint64(this->capabilities);
 }
 
 flight_safety_system::transport::fss_message_identity_non_aircraft::fss_message_identity_non_aircraft() : fss_message(message_type_identity_non_aircraft)
@@ -1024,22 +973,13 @@ flight_safety_system::transport::fss_message_version::packData(std::shared_ptr<b
 void
 flight_safety_system::transport::fss_message_version::unpackData(const std::shared_ptr<buf_len> &bl)
 {
-    size_t offset = this->headerLength();
-    const char *data = bl->getData();
-    size_t length = bl->getLength();
-    if (length - offset >= sizeof(uint16_t) + sizeof(uint16_t) + sizeof(uint32_t))
-    {
-        uint16_t tmp16;
-        memcpy(&tmp16, data + offset, sizeof(uint16_t));
-        this->protocol_version = fss_be16toh(tmp16);
-        offset += sizeof(uint16_t);
-        memcpy(&tmp16, data + offset, sizeof(uint16_t));
-        this->min_supported_version = fss_be16toh(tmp16);
-        offset += sizeof(uint16_t);
-        uint32_t tmp32;
-        memcpy(&tmp32, data + offset, sizeof(uint32_t));
-        this->feature_flags = fss_be32toh(tmp32);
-    }
+    BufferReader reader(bl->getData(), bl->getLength(), this->headerLength());
+    this->protocol_version = 0;
+    this->min_supported_version = 0;
+    this->feature_flags = 0;
+    reader.readUint16(this->protocol_version);
+    reader.readUint16(this->min_supported_version);
+    reader.readUint32(this->feature_flags);
 }
 
 
