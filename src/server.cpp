@@ -143,7 +143,14 @@ main(int argc, char *argv[]) -> int
     listen = std::make_shared<flight_safety_system::transport_ssl::fss_listen>(config["port"].asInt(),
         connect_cb, ca_public_key, server_private_key, server_public_key, crl_file);
 
-    /* Split tick: sendCommand runs every command_poll_ms so safety-critical
+    /* Main-loop DB contract: the loop below must make NO synchronous DB
+     * reads. Reads are handled exclusively by the command_poller thread
+     * below, which caches results on each fss_client. The loop only calls
+     * sendCommand() (reads the cache), write-queue enqueues (async), and
+     * in-memory bookkeeping. A DB stall therefore cannot block heartbeats
+     * or timeout monitoring.
+     *
+     * Split tick: sendCommand runs every command_poll_ms so safety-critical
      * commands (TERM, DISARM) reach aircraft in <=100ms instead of <=1s.
      * Per-second tasks (RTT, timeout sweep) and per-15s tasks (server list,
      * SMM settings) retain their original cadence via the tick counter. */
