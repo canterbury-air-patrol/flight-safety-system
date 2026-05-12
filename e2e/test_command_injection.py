@@ -9,10 +9,8 @@ import pytest
 @pytest.mark.requires_docker
 def test_goto_command_delivered(db_conn, fake_client):
     """Server polls assets_assetcommand and sends asset_command_goto to any
-    connected client. The fake client logs nothing distinctive on receipt, so
-    we assert via database side-effect that can only happen if the command was
-    dispatched: the server must keep talking to the client (no crash), and
-    subsequent position rows continue to arrive after the command is injected."""
+    connected client. Asserts the full path: DB row -> server -> wire ->
+    client parser -> handleCommand, verified by the RCVD_CMD log line."""
     with db_conn.cursor() as cur:
         cur.execute("INSERT INTO assets_asset (name) VALUES ('test1') RETURNING id")
         asset_id = cur.fetchone()[0]
@@ -39,7 +37,16 @@ def test_goto_command_delivered(db_conn, fake_client):
         + client["log"].read_text(errors="replace")
     )
 
-    # And positions must keep flowing after the command landed.
+    log_content = client["log"].read_text(errors="replace")
+
+    # Verify the full delivery path: the client must have received, parsed,
+    # and handled the command (logged by the handleCommand override).
+    assert "RCVD_CMD: GOTO" in log_content, (
+        "fake-client did not log RCVD_CMD: GOTO — command may not have been "
+        "delivered or parsed correctly.\nClient log:\n" + log_content
+    )
+
+    # Positions must keep flowing after the command landed.
     with db_conn.cursor() as cur:
         cur.execute(
             "SELECT COUNT(*) FROM assets_assetposition WHERE asset_id = %s",
