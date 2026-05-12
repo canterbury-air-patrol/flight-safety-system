@@ -19,6 +19,7 @@
 #include "fss-server.hpp"
 #include "mock_database.hpp"
 #include "db-write-queue.hpp"
+#include "test_helpers.hpp"
 
 namespace fss = flight_safety_system;
 
@@ -139,10 +140,6 @@ TEST_CASE("session: rejects identify when no cert CN present")
 
 TEST_CASE("session: rejects non-aircraft identify when no cert CN present")
 {
-    /* todo16: a non-aircraft client with no cert CN must be rejected.
-     * Previously the non-aircraft branch accepted any cert valid against
-     * the CA without naming itself, bypassing the per-asset identity
-     * contract aircraft connections enforce (todo15). */
     fss_test::MockDatabase mock;
 
     auto conn = std::make_shared<FakeConnection>();
@@ -157,10 +154,44 @@ TEST_CASE("session: rejects non-aircraft identify when no cert CN present")
     REQUIRE_FALSE(session->isAircraft());
 }
 
-TEST_CASE("session: accepts non-aircraft identify when cert CN present")
+TEST_CASE("session: rejects non-aircraft identify when cert CN belongs to a known aircraft")
 {
-    /* todo16: with a leaf CN present, a non-aircraft identity is accepted
-     * and the connection is not torn down. */
+    fss_test::MockDatabase mock;
+    mock.asset_ids["aircraft-1"] = 42;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("aircraft-1");
+    NullClientHandler handler;
+
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity_non_aircraft>());
+
+    REQUIRE(handler.disconnects > 0);
+    REQUIRE_FALSE(session->isAircraft());
+}
+
+TEST_CASE("session: accepts non-aircraft identify when cert CN is not a known aircraft")
+{
+    fss_test::MockDatabase mock;
+    /* "ground-station-1" absent from asset_ids — not an aircraft */
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("ground-station-1");
+    NullClientHandler handler;
+
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    fss_test::capture_cerr cap;
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity_non_aircraft>());
+
+    REQUIRE(handler.disconnects == 0);
+    REQUIRE_FALSE(session->isAircraft());
+    REQUIRE(cap.str().find("Non-aircraft client identified: ground-station-1") != std::string::npos);
+}
+
+TEST_CASE("session: logs when an identified non-aircraft client disconnects")
+{
     fss_test::MockDatabase mock;
 
     auto conn = std::make_shared<FakeConnection>();
@@ -170,9 +201,12 @@ TEST_CASE("session: accepts non-aircraft identify when cert CN present")
     auto writer = make_mock_writer(mock);
     auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
     session->processMessage(std::make_shared<fss::transport::fss_message_identity_non_aircraft>());
-
     REQUIRE(handler.disconnects == 0);
-    REQUIRE_FALSE(session->isAircraft());
+
+    fss_test::capture_cerr cap;
+    session->processMessage(std::make_shared<fss::transport::fss_message_closed>());
+
+    REQUIRE(cap.str().find("Non-aircraft client disconnected: ground-station-1") != std::string::npos);
 }
 
 TEST_CASE("session: rejects identify when asset unknown to database")
