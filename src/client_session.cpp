@@ -220,6 +220,10 @@ fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss_mess
 #endif
     if (msg->getType() == fss::transport::message_type_closed)
     {
+        if (this->identified && !this->aircraft)
+        {
+            FSS_LOG_INFO("server", "Non-aircraft client disconnected: " << this->getName());
+        }
         this->client_handler->clientDisconnected(this);
         return;
     }
@@ -324,11 +328,6 @@ fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss_mess
         }
         else if(msg->getType() == fss::transport::message_type_identity_non_aircraft)
         {
-            /* todo16: identify the non-aircraft client by its leaf cert CN.
-             * Without this check any holder of any cert valid against the
-             * CA could become a non-aircraft session anonymously, bypassing
-             * the per-asset identity contract aircraft connections enforce
-             * (todo15). */
             auto possible_names = this->getConnection()->getClientNames();
             if (possible_names.empty())
             {
@@ -336,12 +335,20 @@ fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss_mess
                 this->client_handler->clientDisconnected(this);
                 return;
             }
+            const auto &client_name = possible_names.front();
+            if (this->dbc->getAssetId(client_name) != 0)
+            {
+                FSS_LOG_ERROR("server", "Rejecting non-aircraft client: CN " << client_name << " belongs to a known aircraft");
+                this->client_handler->clientDisconnected(this);
+                return;
+            }
             {
                 std::scoped_lock guard(this->client_lock);
-                this->name = possible_names.front();
+                this->name = client_name;
             }
             this->aircraft = false;
             this->identified = true;
+            FSS_LOG_INFO("server", "Non-aircraft client identified: " << client_name);
         }
         else
         {
