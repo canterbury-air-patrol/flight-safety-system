@@ -114,6 +114,22 @@ public:
             client->sendRTTRequest(rtt_req);
         }
     };
+    void pollCommands(flight_safety_system::server::IDatabase *dbc)
+    {
+        std::vector<std::pair<std::shared_ptr<flight_safety_system::server::fss_client>, uint64_t>> snapshot;
+        {
+            std::scoped_lock guard(this->lock);
+            for (const auto &c : this->clients)
+            {
+                uint64_t id = c->getCachedAssetId();
+                if (id != 0) { snapshot.emplace_back(c, id); }
+            }
+        }
+        for (auto &[client, asset_id] : snapshot)
+        {
+            client->setPendingCommand(dbc->getCommand(asset_id));
+        }
+    };
     void sendCommand()
     {
         std::scoped_lock guard(this->lock);

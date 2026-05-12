@@ -6,6 +6,7 @@
 #include "server-clients.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <iostream>
 #include <fstream>
 #include <csignal>
@@ -13,6 +14,7 @@
 #include <memory>
 #include <mutex>
 #include <atomic>
+#include <thread>
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Weffc++"
@@ -152,6 +154,15 @@ main(int argc, char *argv[]) -> int
     constexpr int usec_per_msec = 1000;
     constexpr int ticks_per_sec = 1000 / command_poll_ms;
     constexpr int send_config_period_ticks = 15 * ticks_per_sec;
+    std::atomic<bool> poll_running{true};
+    std::thread command_poller([&clients, &dbc, &poll_running, command_poll_ms]() {
+        while (poll_running.load())
+        {
+            clients->pollCommands(dbc.get());
+            std::this_thread::sleep_for(std::chrono::milliseconds(command_poll_ms));
+        }
+    });
+
     uint64_t tick_counter = 0;
     while (running == 1)
     {
@@ -191,11 +202,12 @@ main(int argc, char *argv[]) -> int
         tick_counter++;
     }
 
-    /* Explicit shutdown ordering: stop accepting before disconnecting
-     * clients; join all recv threads (via clients destructor) before
-     * draining the write queue; release the DB connection last since the
-     * sink captures it. */
+    /* Explicit shutdown ordering: stop accepting, then stop the command
+     * poller (which holds dbc), then tear down clients, then the write
+     * queue, then the DB connection. */
     listen.reset();
+    poll_running.store(false);
+    command_poller.join();
     clients.reset();
     writer->stop();
     writer.reset();

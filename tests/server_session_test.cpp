@@ -289,11 +289,11 @@ TEST_CASE("session: rapid sendCommand does not duplicate a single pending comman
     REQUIRE(command_count == 1);
 }
 
-TEST_CASE("session: a freshly queued command is delivered on the very next sendCommand")
+TEST_CASE("session: a freshly queued command is delivered after the poller updates the cache")
 {
-    /* todo09: the latency claim is "next 100ms tick picks it up". Model
-     * that by pushing a command AFTER identify, then issuing a single
-     * sendCommand and asserting the message appears immediately. */
+    /* Commands are delivered in two steps: the background poller fetches
+     * from the DB (simulated here by setPendingCommand) then the next
+     * sendCommand tick transmits it. */
     fss_test::MockDatabase mock;
     constexpr uint64_t asset_id = 9;
     mock.asset_ids["craft"] = asset_id;
@@ -308,8 +308,10 @@ TEST_CASE("session: a freshly queued command is delivered on the very next sendC
 
     const std::size_t sent_before = conn->sent.size();
 
-    mock.pushCommand(asset_id, std::make_shared<fss::server::asset_command>(
-        /*dbid*/ 42, /*ts*/ 500, "DISARM", 0.0, 0.0, 0));
+    auto cmd = std::make_shared<fss::server::asset_command>(
+        /*dbid*/ 42, /*ts*/ 500, "DISARM", 0.0, 0.0, 0);
+    mock.pushCommand(asset_id, cmd);
+    session->setPendingCommand(cmd);   // simulate one poller tick
     session->sendCommand();
 
     bool delivered = false;
