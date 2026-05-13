@@ -165,11 +165,10 @@ jobs:
         # Fail if any warnings were emitted
         ! grep -q "warning:" clang-tidy.log
 
-  # ─── 5. End-to-end tests (continue-on-error while flakes settle) ─────────
+  # ─── 5. End-to-end tests ─────────────────────────────────────────────────
   e2e:
     runs-on: ubuntu-latest
     needs: build-and-check
-    continue-on-error: true
 
     services:
       postgres:
