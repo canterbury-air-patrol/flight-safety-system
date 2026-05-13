@@ -78,14 +78,19 @@ public:
     virtual auto getActiveServers() -> std::vector<fss_server_details> = 0;
     virtual auto getSmmSettings(uint64_t asset_id) -> std::shared_ptr<smm_settings> = 0;
     virtual auto isConnected() const -> bool = 0;
+    virtual void tryReconnectIfNeeded() = 0;
 };
 
 class db_connection: public IDatabase {
 private:
     std::mutex db_lock;
     bool connected_{false};
+    std::string host_;
+    std::string user_;
+    std::string pass_;
+    std::string db_;
 public:
-    db_connection(const std::string &host, const std::string &user, const std::string &pass, const std::string &db);
+    db_connection(std::string host, std::string user, std::string pass, std::string db);
     db_connection(db_connection&) = delete;
     db_connection(db_connection&&) = delete;
     auto operator=(db_connection&) -> db_connection& = delete;
@@ -100,6 +105,7 @@ public:
     auto getActiveServers() -> std::vector<fss_server_details> override;
     auto getSmmSettings(uint64_t asset_id) -> std::shared_ptr<smm_settings> override;
     auto isConnected() const -> bool override;
+    void tryReconnectIfNeeded() override;
 };
 
 class fss_client_rtt {

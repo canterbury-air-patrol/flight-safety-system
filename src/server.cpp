@@ -222,6 +222,7 @@ main(int argc, char *argv[]) -> int
                 FSS_LOG_ERROR("server", "DB write failures since start: " << current_failures);
                 last_failure_count = current_failures;
             }
+            dbc->tryReconnectIfNeeded();
         }
         if ((tick_counter % send_config_period_ticks) == 0)
         {

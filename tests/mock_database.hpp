@@ -91,6 +91,7 @@ public:
     }
 
     auto isConnected() const -> bool override { return true; }
+    void tryReconnectIfNeeded() override {}
 
     void pushCommand(uint64_t asset_id, std::shared_ptr<flight_safety_system::server::asset_command> cmd)
     {
