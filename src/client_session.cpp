@@ -47,6 +47,8 @@ fss::server::asset_command::asset_command(uint64_t t_dbid, uint64_t t_timestamp,
         this->command = transport::asset_command_terminate;
     } else if (t_cmd == "MAN") {
         this->command = transport::asset_command_manual;
+    } else {
+        FSS_LOG_ERROR("server", "Unrecognised command string from DB: '" << t_cmd << "' (dbid=" << t_dbid << ")");
     }
 }
 
@@ -103,8 +105,13 @@ fss::server::fss_client::sendCommand()
     {
         this->last_command_send_ts = ts;
         this->last_command_dbid = ac->getDBId();
-        std::shared_ptr<fss::transport::fss_message_asset_command> msg = nullptr;
         auto command = ac->getCommand();
+        if (command == fss::transport::asset_command_unknown)
+        {
+            FSS_LOG_ERROR("server", "Refusing to dispatch unknown command type to " << this->name << " (dbid=" << ac->getDBId() << ")");
+            return;
+        }
+        std::shared_ptr<fss::transport::fss_message_asset_command> msg = nullptr;
         switch (command)
         {
             case fss::transport::asset_command_goto:
