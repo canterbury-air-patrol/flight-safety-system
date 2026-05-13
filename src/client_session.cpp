@@ -281,9 +281,9 @@ fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss_mess
     }
     if (!this->identified)
     {
-        /* todo02: legacy clients (pre-version-handshake) send identity
-         * directly. Log once so the legacy connection is visible, then
-         * fall through with negotiated_version = LEGACY (0). */
+        /* Legacy clients (pre-version-handshake) send identity directly.
+         * Log once so the connection is visible, then fall through with
+         * negotiated_version = LEGACY (0). */
         if (!this->version_received)
         {
             FSS_LOG_WARN("server", "Legacy client: no protocol version handshake (assuming version 0)");
