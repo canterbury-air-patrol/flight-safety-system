@@ -7,7 +7,6 @@ extern "C" {
 #include <string.h>
 }
 
-#include <cassert>
 #include <limits>
 #include <mutex>
 #include <string>
@@ -85,7 +84,11 @@ void
 flight_safety_system::server::db_connection::recordPosition(uint64_t asset_id, double latitude, double longitude, uint32_t altitude)
 {
     std::scoped_lock guard(this->db_lock);
-    assert(altitude <= static_cast<uint32_t>(std::numeric_limits<int>::max()));
+    if (altitude > static_cast<uint32_t>(std::numeric_limits<int>::max()))
+    {
+        FSS_LOG_ERROR("db", "Altitude " << altitude << " exceeds int range; discarding position record for asset " << asset_id);
+        return;
+    }
     db_position_create_entry(asset_id, latitude, longitude, static_cast<int>(altitude));
 }
 
