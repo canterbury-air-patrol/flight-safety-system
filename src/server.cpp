@@ -184,7 +184,7 @@ main(int argc, char *argv[]) -> int
     constexpr int ticks_per_sec = 1000 / command_poll_ms;
     constexpr int send_config_period_ticks = 15 * ticks_per_sec;
     std::atomic<bool> poll_running{true};
-    std::thread command_poller([&clients, &dbc, &poll_running, command_poll_ms]() {
+    std::thread command_poller([&clients, &dbc, &poll_running, command_poll_ms]() -> void {
         while (poll_running.load())
         {
             clients->pollCommands(dbc.get());
