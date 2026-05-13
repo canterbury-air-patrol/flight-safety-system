@@ -51,6 +51,11 @@ main(int argc, char *argv[]) -> int
     sigemptyset(&sa_int.sa_mask);
     sa_int.sa_flags = 0;
     sigaction(SIGINT, &sa_int, nullptr);
+    struct sigaction sa_term = {};
+    sa_term.sa_handler = sigIntHandler;
+    sigemptyset(&sa_term.sa_mask);
+    sa_term.sa_flags = 0;
+    sigaction(SIGTERM, &sa_term, nullptr);
     struct sigaction sa_hup = {};
     sa_hup.sa_handler = sigHupHandler;
     sigemptyset(&sa_hup.sa_mask);
