@@ -93,7 +93,7 @@ public:
 
 TEST_CASE("session: rejects identify when claimed name does not match cert CN")
 {
-    /* todo15: identity name must match a CN from the peer certificate.
+    /* Identity name must match a CN from the peer certificate.
      * A client presenting cert CN=craft must not be allowed to claim
      * identity "imposter" — that would let any holder of any valid
      * client cert masquerade as any aircraft. */
@@ -120,10 +120,10 @@ TEST_CASE("session: rejects identify when claimed name does not match cert CN")
 
 TEST_CASE("session: rejects identify when no cert CN present")
 {
-    /* todo15: getClientNames() returns empty when the peer presented no
-     * cert (or the leaf had no CN). The server must refuse to identify
-     * such a connection rather than treating absence of a CN as
-     * permission to claim any name. */
+    /* getClientNames() returns empty when the peer presented no cert (or
+     * the leaf had no CN). The server must refuse to identify such a
+     * connection rather than treating absence of a CN as permission to
+     * claim any name. */
     fss_test::MockDatabase mock;
     mock.asset_ids["craft"] = 1;
 
@@ -293,11 +293,11 @@ TEST_CASE("session: server list sent on identify contains seeded servers")
 
 TEST_CASE("session: rapid sendCommand does not duplicate a single pending command")
 {
-    /* todo09: the main loop now calls sendCommand every 100ms to drop
-     * command delivery latency. That is only safe if repeated calls with
-     * the same pending row do not resend the message. Verify idempotency
-     * by driving sendCommand for 2s worth of ticks against one
-     * queued command and counting command messages on the wire. */
+    /* sendCommand is called every 100ms to minimise command delivery
+     * latency. That is only safe if repeated calls with the same pending
+     * row do not resend the message. Verify idempotency by driving
+     * sendCommand for 2s worth of ticks against one queued command and
+     * counting command messages on the wire. */
     fss_test::MockDatabase mock;
     constexpr uint64_t asset_id = 7;
     mock.asset_ids["craft"] = asset_id;
@@ -384,9 +384,9 @@ TEST_CASE("session: RTT timeout disconnects client")
 
 TEST_CASE("session: version handshake stores negotiated version and replies")
 {
-    /* todo02: version exchange — when the client opens with a version
-     * message, the server records the negotiated version on the
-     * connection and replies with its own version. */
+    /* Version exchange: when the client opens with a version message,
+     * the server records the negotiated version on the connection and
+     * replies with its own version. */
     fss_test::MockDatabase mock;
     mock.asset_ids["craft"] = 1;
 
@@ -418,9 +418,8 @@ TEST_CASE("session: version handshake stores negotiated version and replies")
 
 TEST_CASE("session: version handshake rejects incompatible peer")
 {
-    /* todo02: when the client's max version is below our minimum, the
-     * server disconnects rather than continuing in an unsupported
-     * dialect. */
+    /* When the client's max version is below our minimum, the server
+     * disconnects rather than continuing in an unsupported dialect. */
     fss_test::MockDatabase mock;
     mock.asset_ids["craft"] = 1;
 
@@ -500,8 +499,8 @@ TEST_CASE("rate limiter: refill allows messages after bucket drains")
 
 TEST_CASE("session: legacy client (no version handshake) is accepted")
 {
-    /* todo02: pre-versioning clients send identity directly. The server
-     * must accept this and treat the connection as legacy (version 0). */
+    /* Pre-versioning clients send identity directly. The server must
+     * accept this and treat the connection as legacy (version 0). */
     fss_test::MockDatabase mock;
     mock.asset_ids["craft"] = 1;
 

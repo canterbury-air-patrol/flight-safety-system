@@ -318,7 +318,7 @@ flight_safety_system::client_ssl::fss_server::reconnect() -> bool
         else
         {
             this->getConnection()->setHandler(this);
-            /* todo02: protocol version handshake must be the first message
+            /* Protocol version handshake must be the first message
              * exchanged after TLS connect, before identity. */
             this->sendVersion();
             this->sendIdentify();

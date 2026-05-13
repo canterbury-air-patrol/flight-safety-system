@@ -17,7 +17,7 @@ namespace transport {
 
 static constexpr double FSS_COORD_SCALE = 0.0000001;
 
-/* Wire-protocol version handshake (todo02).
+/* Wire-protocol version handshake.
  * - FSS_PROTOCOL_VERSION_LEGACY (0): unversioned protocol that pre-dates the
  *   handshake. Used as the negotiated value when the peer never sends a
  *   version message (e.g. an old client still in the field).
@@ -66,8 +66,8 @@ using fss_message_type = enum fss_message_type_e {
     /* Please send identity */
     message_type_identity_required,
 
-    /* Protocol version handshake (todo02). Sent first by both peers after
-     * TLS handshake; the negotiated version is min(peer max, our max). */
+    /* Protocol version handshake. Sent first by both peers after the TLS
+     * handshake; the negotiated version is min(peer max, our max). */
     message_type_version,
 };
 

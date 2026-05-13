@@ -1,8 +1,7 @@
-"""todo09: the server polls for new commands every 100ms, so an injected row
-must reach the aircraft session in well under a second. This test inserts a
-TERM row and asserts the server's "dispatched command" log line appears in
-under 1 second — the pre-todo09 loop would have taken up to 1000ms plus the
-per-iteration body before sending."""
+"""The server polls for new commands every 100ms, so an injected row must
+reach the aircraft session in well under a second. This test inserts a TERM
+row and asserts the server's "dispatched command" log line appears in under
+1 second."""
 from __future__ import annotations
 
 import re
