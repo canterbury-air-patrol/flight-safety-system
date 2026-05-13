@@ -71,7 +71,7 @@ main(int argc, char *argv[]) -> int
     if (!configfile.is_open())
     {
         FSS_LOG_ERROR("server", "Failed to load configuration: " << conf_file);
-        exit(-1);
+        return 1;
     }
     Json::Value config;
     configfile >> config;
@@ -79,6 +79,28 @@ main(int argc, char *argv[]) -> int
     if (config.isMember("log_level"))
     {
         flight_safety_system::log::set_level(config["log_level"].asString());
+    }
+
+    auto cfg_require = [&](const char *path, const Json::Value &node, const char *key) -> bool {
+        if (!node.isMember(key) || node[key].asString().empty())
+        {
+            FSS_LOG_ERROR("server", "Missing required config field: " << path << "." << key);
+            return false;
+        }
+        return true;
+    };
+    bool cfg_ok = true;
+    if (!config.isMember("port")) { FSS_LOG_ERROR("server", "Missing required config field: port"); cfg_ok = false; }
+    cfg_ok &= cfg_require("postgres", config["postgres"], "host");
+    cfg_ok &= cfg_require("postgres", config["postgres"], "user");
+    cfg_ok &= cfg_require("postgres", config["postgres"], "pass");
+    cfg_ok &= cfg_require("postgres", config["postgres"], "db");
+    cfg_ok &= cfg_require("ssl", config["ssl"], "ca_public_key");
+    cfg_ok &= cfg_require("ssl", config["ssl"], "server_private_key");
+    cfg_ok &= cfg_require("ssl", config["ssl"], "server_public_key");
+    if (!cfg_ok)
+    {
+        return 1;
     }
 
     auto dbc = std::make_shared<flight_safety_system::server::db_connection>(config["postgres"]["host"].asString(), config["postgres"]["user"].asString(), config["postgres"]["pass"].asString(), config["postgres"]["db"].asString());
@@ -127,11 +149,6 @@ main(int argc, char *argv[]) -> int
     std::string ca_public_key = config["ssl"]["ca_public_key"].asString();
     std::string server_private_key = config["ssl"]["server_private_key"].asString();
     std::string server_public_key = config["ssl"]["server_public_key"].asString();
-    if (ca_public_key == "" || server_private_key == "" || server_public_key == "")
-    {
-        FSS_LOG_ERROR("server", "Missing ssl parameter, all of these are required: 'ca_public_key', 'server_private_key', 'server_public_key'");
-        exit(-1);
-    }
     std::string crl_file = config["ssl"].isMember("crl_file") ? config["ssl"]["crl_file"].asString() : std::string{};
     if (!crl_file.empty())
     {
