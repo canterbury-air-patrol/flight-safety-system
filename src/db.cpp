@@ -1,5 +1,6 @@
 #include "fss-server.hpp"
 #include "fss.hpp"
+#include "fss-log.hpp"
 
 extern "C" {
 #include "server-db.h"
@@ -13,15 +14,38 @@ extern "C" {
 #include <string_view>
 #include <vector>
 
-flight_safety_system::server::db_connection::db_connection(const std::string &host, const std::string &user, const std::string &pass, const std::string &db) : db_lock()
+flight_safety_system::server::db_connection::db_connection(std::string host, std::string user, std::string pass, std::string db) // NOLINT(bugprone-easily-swappable-parameters)
+    : db_lock(), host_(std::move(host)), user_(std::move(user)), pass_(std::move(pass)), db_(std::move(db))
 {
-    connected_ = (db_connect(host.c_str(), user.c_str(), pass.c_str(), db.c_str()) == 1);
+    connected_ = (db_connect(host_.c_str(), user_.c_str(), pass_.c_str(), db_.c_str()) == 1);
 }
 
 auto
 flight_safety_system::server::db_connection::isConnected() const -> bool
 {
     return connected_;
+}
+
+void
+flight_safety_system::server::db_connection::tryReconnectIfNeeded()
+{
+    std::scoped_lock guard(this->db_lock);
+    if (db_ping() != 0)
+    {
+        connected_ = true;
+        return;
+    }
+    FSS_LOG_WARN("db", "Database connection lost, attempting reconnect");
+    db_disconnect();
+    connected_ = (db_connect(host_.c_str(), user_.c_str(), pass_.c_str(), db_.c_str()) == 1);
+    if (connected_)
+    {
+        FSS_LOG_INFO("db", "Database reconnected successfully");
+    }
+    else
+    {
+        FSS_LOG_ERROR("db", "Database reconnect failed");
+    }
 }
 
 flight_safety_system::server::db_connection::~db_connection()

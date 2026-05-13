@@ -300,6 +300,15 @@ void db_disconnect(void)
     EXEC SQL DISCONNECT ALL;
 }
 
+int db_ping(void)
+{
+    EXEC SQL BEGIN DECLARE SECTION;
+    int x = 0;
+    EXEC SQL END DECLARE SECTION;
+    EXEC SQL SELECT 1 INTO :x;
+    return (sqlca.sqlcode >= 0) ? 1 : 0;
+}
+
 void db_free_fss_servers(struct fss_server_s **servers)
 {
     free(servers);
