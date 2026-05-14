@@ -108,8 +108,12 @@ public:
     };
     void sendRTTRequest(const std::shared_ptr<flight_safety_system::transport::fss_message_rtt_request> &rtt_req)
     {
-        std::scoped_lock guard(this->lock);
-        for(const auto &client: this->clients)
+        std::vector<std::shared_ptr<flight_safety_system::server::fss_client>> snapshot;
+        {
+            std::scoped_lock guard(this->lock);
+            std::copy(this->clients.begin(), this->clients.end(), std::back_inserter(snapshot));
+        }
+        for (const auto &client : snapshot)
         {
             client->sendRTTRequest(rtt_req);
         }
