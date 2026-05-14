@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define COMMAND_LEN 7
+#define COMMAND_LEN 16
 #define SMM_LOGIN_LEN 51
 #define SMM_SERVER_LEN 256
 #define SMM_PASSWORD_LEN 256
