@@ -1,4 +1,4 @@
-int db_connect(const char *host, const char *user, const char *pass, const char *db);
+int db_connect(const char *host, int port, const char *user, const char *pass, const char *db);
 void db_disconnect(void);
 int db_ping(void);
 

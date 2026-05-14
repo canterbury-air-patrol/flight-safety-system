@@ -278,6 +278,7 @@ def server_proc(
         config_path,
         SERVER_PORT=str(port),
         DB_HOST=migrated_db["host"],
+        DB_PORT=str(migrated_db["port"]),
         DB_USER=migrated_db["user"],
         DB_PASS=migrated_db["password"],
         DB_NAME=migrated_db["dbname"],

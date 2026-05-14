@@ -86,11 +86,12 @@ private:
     std::mutex db_lock;
     bool connected_{false};
     std::string host_;
+    int port_{5432};
     std::string user_;
     std::string pass_;
     std::string db_;
 public:
-    db_connection(std::string host, std::string user, std::string pass, std::string db);
+    db_connection(std::string host, int port, std::string user, std::string pass, std::string db);
     db_connection(db_connection&) = delete;
     db_connection(db_connection&&) = delete;
     auto operator=(db_connection&) -> db_connection& = delete;

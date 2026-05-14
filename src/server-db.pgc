@@ -8,36 +8,40 @@
 #define SMM_SERVER_LEN 256
 #define SMM_PASSWORD_LEN 256
 
-int db_connect(const char *host, const char *user, const char *pass, const char *db)
+int db_connect(const char *host, int port, const char *user, const char *pass, const char *db)
 {
+    /* Set connect_timeout and TCP keepalives via environment variables.
+     * overwrite=0 so this is a no-op on reconnects; the first call happens
+     * before any threads are started so the setenv is safe.
+     * keepalives_idle=10 / interval=5 / count=3 means the kernel declares
+     * the connection dead after 10 + 5*3 = 25 s of silence, replacing the
+     * OS default retransmit timeout of ~127 s. */
+    setenv("PGCONNECT_TIMEOUT",  "10", 0);
+    setenv("PGKEEPALIVES",       "1",  0);
+    setenv("PGKEEPALIVESIDLE",   "10", 0);
+    setenv("PGKEEPALIVEINTERVAL","5",  0);
+    setenv("PGKEEPALIVESCOUNT",  "3",  0);
+
+    /* ECPG connection target: dbname@host:port */
     char *target = NULL;
-    if (asprintf(&target, "%s@%s", db, host) < 0)
+    if (asprintf(&target, "%s@%s:%d", db, host, port) < 0)
     {
         return 0;
     }
-    /* Without a connect timeout libpq blocks for the OS TCP retransmit timeout
-     * (~127 s) when the host is unreachable. setenv is safe here: db_connect is
-     * called once at startup before any threads exist. */
-    setenv("PGCONNECT_TIMEOUT", "10", 1);
+
     EXEC SQL BEGIN DECLARE SECTION;
     const char *db_target = target;
-    const char *db_user = user;
-    const char *db_pass = pass;
+    const char *db_user   = user;
+    const char *db_pass   = pass;
     EXEC SQL END DECLARE SECTION;
 
-    if (db_pass != NULL && strlen(db_pass) > 0)
-    {
-        EXEC SQL CONNECT TO :db_target AS conn USER :db_user USING :db_pass;
-    }
-    else
-    {
-        EXEC SQL CONNECT TO :db_target AS conn USER :db_user;
-    }
+    EXEC SQL CONNECT TO :db_target AS conn USER :db_user USING :db_pass;
+
+    free(target);
 
     if (sqlca.sqlcode < 0)
     {
         sqlprint();
-        free(target);
         return 0;
     }
 
@@ -46,11 +50,9 @@ int db_connect(const char *host, const char *user, const char *pass, const char 
     if (sqlca.sqlcode < 0)
     {
         sqlprint();
-        free(target);
         return 0;
     }
 
-    free(target);
     return 1;
 }
 
