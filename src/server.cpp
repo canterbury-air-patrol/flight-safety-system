@@ -103,7 +103,9 @@ main(int argc, char *argv[]) -> int
         return 1;
     }
 
-    auto dbc = std::make_shared<flight_safety_system::server::db_connection>(config["postgres"]["host"].asString(), config["postgres"]["user"].asString(), config["postgres"]["pass"].asString(), config["postgres"]["db"].asString());
+    constexpr int default_pg_port = 5432;
+    int pg_port = config["postgres"].isMember("port") ? config["postgres"]["port"].asInt() : default_pg_port;
+    auto dbc = std::make_shared<flight_safety_system::server::db_connection>(config["postgres"]["host"].asString(), pg_port, config["postgres"]["user"].asString(), config["postgres"]["pass"].asString(), config["postgres"]["db"].asString());
 
     if (!dbc->isConnected())
     {

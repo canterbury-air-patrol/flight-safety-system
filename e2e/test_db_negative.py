@@ -54,6 +54,7 @@ def test_server_exits_when_db_host_invalid(certs_dir, tmp_path, migrated_db):
         config_path,
         SERVER_PORT=str(port),
         DB_HOST=UNREACHABLE_DB_HOST,
+        DB_PORT=str(migrated_db["port"]),
         DB_USER=migrated_db["user"],
         DB_PASS=migrated_db["password"],
         DB_NAME=migrated_db["dbname"],
