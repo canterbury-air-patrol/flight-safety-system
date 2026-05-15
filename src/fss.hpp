@@ -8,8 +8,6 @@
 #include <thread>
 #include <mutex>
 
-#include <iostream>
-
 #include <sys/socket.h>
 #include <netinet/in.h>
 
