@@ -1,3 +1,20 @@
+flight-safety-system (1.0.0) stable; urgency=medium
+
+  * First stable release.
+  * Async database writes; command delivery latency reduced to ~100ms.
+  * Automatic PostgreSQL reconnection on connection loss.
+  * TCP keepalives and connect timeout; fatal exit on unreachable DB at startup.
+  * Wire-protocol version handshake; replay protection via sequence numbers.
+  * Certificate Revocation List (CRL) support with live SIGHUP reload.
+  * Per-client token-bucket rate limiting.
+  * SMM credentials stored in secure (memory-locked, zero-on-free) storage.
+  * TLS cipher priority hardened; minimum GnuTLS bumped to 3.6.0.
+  * Identity validation restricted to leaf cert CN; unknown assets rejected.
+  * SIGTERM handled for graceful shutdown (systemd/docker stop).
+  * Library soversion bumped to 1.
+
+ -- Scott Parlane <sjp@canterburyairpatrol.org>  Fri, 16 May 2026 00:00:00 +0000
+
 flight-safety-system (0.12.3) unstable; urgency=medium
 
   * Updated
