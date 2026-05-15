@@ -3,7 +3,9 @@
     "db_queue_depth": 10000,
     "postgres": {
        "host": "localhost",
-       "user": "scott",
+       "port": 5432,
+       "user": "fss",
+       "pass": "changeme",
        "db": "fss"
     },
     "ssl": {
