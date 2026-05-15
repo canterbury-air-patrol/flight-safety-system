@@ -25,8 +25,8 @@ TEST_CASE("log: level filter suppresses lower-severity lines")
 
     flight_safety_system::log::set_level("error");
     FSS_LOG_ERROR("t", "err-visible");
-    FSS_LOG_WARN ("t", "warn-hidden");
-    FSS_LOG_INFO ("t", "info-hidden");
+    FSS_LOG_WARN("t", "warn-hidden");
+    FSS_LOG_INFO("t", "info-hidden");
     FSS_LOG_DEBUG("t", "debug-hidden");
 
     auto out = cap.str();
@@ -42,8 +42,8 @@ TEST_CASE("log: debug level lets every severity through")
 
     flight_safety_system::log::set_level("debug");
     FSS_LOG_ERROR("t", "e");
-    FSS_LOG_WARN ("t", "w");
-    FSS_LOG_INFO ("t", "i");
+    FSS_LOG_WARN("t", "w");
+    FSS_LOG_INFO("t", "i");
     FSS_LOG_DEBUG("t", "d");
 
     auto out = cap.str();
@@ -79,9 +79,7 @@ TEST_CASE("log: emitted lines match expected format")
     FSS_LOG_INFO("component-name", "hello world");
 
     auto out = cap.str();
-    std::regex pattern(
-        R"(^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z \[INFO \] \[component-name\] hello world\n$)"
-    );
+    std::regex pattern(R"(^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z \[INFO \] \[component-name\] hello world\n$)");
     REQUIRE(std::regex_match(out, pattern));
 }
 
@@ -99,7 +97,10 @@ TEST_CASE("log: concurrent writers produce no interleaved lines")
     for (int t = 0; t < thread_count; ++t)
     {
         workers.emplace_back([t, &start]() {
-            while (!start.load()) { std::this_thread::yield(); }
+            while (!start.load())
+            {
+                std::this_thread::yield();
+            }
             for (int i = 0; i < lines_per_thread; ++i)
             {
                 FSS_LOG_INFO("thr", "tid=" << t << " i=" << i);
@@ -107,19 +108,23 @@ TEST_CASE("log: concurrent writers produce no interleaved lines")
         });
     }
     start.store(true);
-    for (auto &w : workers) { w.join(); }
+    for (auto &w : workers)
+    {
+        w.join();
+    }
 
     auto out = cap.str();
-    std::regex line(
-        R"(^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z \[INFO \] \[thr\] tid=\d+ i=\d+$)"
-    );
+    std::regex line(R"(^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z \[INFO \] \[thr\] tid=\d+ i=\d+$)");
 
     size_t start_off = 0;
     size_t count = 0;
     while (start_off < out.size())
     {
         size_t nl = out.find('\n', start_off);
-        if (nl == std::string::npos) { break; }
+        if (nl == std::string::npos)
+        {
+            break;
+        }
         std::string ln = out.substr(start_off, nl - start_off);
         REQUIRE(std::regex_match(ln, line));
         ++count;

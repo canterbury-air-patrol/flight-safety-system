@@ -40,9 +40,12 @@ auto accept_cb(std::shared_ptr<fss_connection> new_conn) -> bool
 class large_queue_listen : public fss_listen {
 public:
     large_queue_listen(uint16_t t_port, flight_safety_system::transport::fss_connect_cb t_cb)
-        : fss_listen(t_port, std::move(t_cb)) {}
+        : fss_listen(t_port, std::move(t_cb))
+    {
+    }
 protected:
-    auto newConnection(int t_fd) -> std::shared_ptr<fss_connection> override {
+    auto newConnection(int t_fd) -> std::shared_ptr<fss_connection> override
+    {
         return fss_connection::create(t_fd, 20000);
     }
 };
@@ -78,7 +81,10 @@ TEST_CASE("queue: FIFO ordering is preserved across many messages")
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
             continue;
         }
-        if (msg->getType() == message_type_closed) { break; }
+        if (msg->getType() == message_type_closed)
+        {
+            break;
+        }
         REQUIRE(msg->getType() == message_type_identity);
         auto ident = std::dynamic_pointer_cast<fss_message_identity>(msg);
         REQUIRE(ident != nullptr);
@@ -142,7 +148,10 @@ TEST_CASE("queue: 10k messages over loopback with no drops")
         for (int i = 0; i < count; ++i)
         {
             auto msg = std::make_shared<fss_message_rtt_request>();
-            if (!client->sendMsg(msg)) { break; }
+            if (!client->sendMsg(msg))
+            {
+                break;
+            }
             produced.fetch_add(1);
         }
     });
@@ -157,7 +166,10 @@ TEST_CASE("queue: 10k messages over loopback with no drops")
             std::this_thread::sleep_for(std::chrono::milliseconds(2));
             continue;
         }
-        if (msg->getType() == message_type_closed) { break; }
+        if (msg->getType() == message_type_closed)
+        {
+            break;
+        }
         REQUIRE(msg->getType() == message_type_rtt_request);
         ++received;
     }

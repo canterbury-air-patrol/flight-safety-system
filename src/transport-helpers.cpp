@@ -10,8 +10,7 @@
 #include <arpa/inet.h>
 #include <netdb.h>
 
-auto
-convert_str_to_sa(const std::string &addr, uint16_t port, struct sockaddr_storage *sa) -> bool
+auto convert_str_to_sa(const std::string &addr, uint16_t port, struct sockaddr_storage *sa) -> bool
 {
     int family = AF_UNSPEC;
     /* Try converting an IPv4 address first, then IPv6, then DNS lookup */
@@ -29,7 +28,7 @@ convert_str_to_sa(const std::string &addr, uint16_t port, struct sockaddr_storag
     if (family == AF_UNSPEC)
     {
         struct in6_addr ia = {};
-        if (inet_pton (AF_INET6, addr.c_str(), &ia) == 1)
+        if (inet_pton(AF_INET6, addr.c_str(), &ia) == 1)
         {
             family = AF_INET6;
             auto *sa_in = as_sockaddr_in6(sa);
@@ -44,7 +43,7 @@ convert_str_to_sa(const std::string &addr, uint16_t port, struct sockaddr_storag
 
         if (getaddrinfo(addr.c_str(), nullptr, nullptr, &ai) == 0)
         {
-            memcpy (sa, ai->ai_addr, ai->ai_addrlen);
+            memcpy(sa, ai->ai_addr, ai->ai_addrlen);
             family = ai->ai_family;
             freeaddrinfo(ai);
         }
@@ -52,24 +51,23 @@ convert_str_to_sa(const std::string &addr, uint16_t port, struct sockaddr_storag
 
     switch (family)
     {
-        case AF_INET:
-        {
+        case AF_INET: {
             auto *sa_in = as_sockaddr_in(sa);
             sa_in->sin_port = htons(port);
-        } break;
-        case AF_INET6:
-        {
+        }
+        break;
+        case AF_INET6: {
             auto *sa_in = as_sockaddr_in6(sa);
             sa_in->sin6_port = htons(port);
-        } break;
+        }
+        break;
         default: break;
     }
-    
+
     return family != AF_UNSPEC;
 }
 
-void
-set_tcp_keepalive(int fd)
+void set_tcp_keepalive(int fd)
 {
     int val = 1;
     if (setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &val, sizeof(val)) < 0)

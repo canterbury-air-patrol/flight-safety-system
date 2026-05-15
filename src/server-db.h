@@ -4,8 +4,10 @@ int db_ping(void);
 
 unsigned long long db_get_asset_id(const char *asset_name);
 void db_rtt_create_entry(unsigned long long asset_id, unsigned long long delta);
-void db_status_create_entry(unsigned long long asset_id, unsigned short bat_percent, unsigned int bat_mah_used, double bat_voltage);
-void db_search_status_create_entry(unsigned long long asset_id, unsigned long long search_id, unsigned long long search_completed, unsigned long long search_total);
+void db_status_create_entry(unsigned long long asset_id, unsigned short bat_percent, unsigned int bat_mah_used,
+                            double bat_voltage);
+void db_search_status_create_entry(unsigned long long asset_id, unsigned long long search_id,
+                                   unsigned long long search_completed, unsigned long long search_total);
 void db_position_create_entry(unsigned long long asset_id, double latitude, double longitude, int altitude);
 
 struct asset_command_s {
@@ -17,8 +19,7 @@ struct asset_command_s {
     unsigned short altitude;
 };
 
-struct asset_command_s *
-db_asset_command_get(unsigned long long asset_id_arg);
+struct asset_command_s *db_asset_command_get(unsigned long long asset_id_arg);
 
 struct smm_settings_s {
     char *address;
@@ -26,16 +27,13 @@ struct smm_settings_s {
     char *password;
 };
 
-struct smm_settings_s *
-db_asset_smm_settings_get(unsigned long long asset_id_arg);
+struct smm_settings_s *db_asset_smm_settings_get(unsigned long long asset_id_arg);
 
 struct fss_server_s {
     char *address;
     int port;
 };
 
-struct fss_server_s **
-db_active_fss_servers_get(void);
+struct fss_server_s **db_active_fss_servers_get(void);
 
-void
-db_free_fss_servers(struct fss_server_s **servers);
+void db_free_fss_servers(struct fss_server_s **servers);

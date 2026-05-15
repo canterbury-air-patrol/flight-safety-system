@@ -6,8 +6,7 @@
 auto convert_str_to_sa(const std::string &addr, uint16_t port, struct sockaddr_storage *sa) -> bool;
 void set_tcp_keepalive(int fd);
 
-template<typename T>
-inline auto as_sockaddr(T *addr) -> struct sockaddr *
+template<typename T> inline auto as_sockaddr(T *addr) -> struct sockaddr *
 {
     return reinterpret_cast<struct sockaddr *>(addr); // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
 }

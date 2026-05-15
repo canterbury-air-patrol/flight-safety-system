@@ -39,7 +39,6 @@ public:
 
     auto getClientNames() -> std::list<std::string> override { return cert_names; }
     auto isPeerCertRevoked(const std::string & /*crl_file*/) const -> bool override { return revoked; }
-
 protected:
     auto sendMsg(const std::shared_ptr<fss::transport::buf_len> & /*bl*/) -> bool override { return true; }
 };
@@ -52,18 +51,12 @@ struct FakeClock : public fss::IClock {
 
 auto make_null_writer() -> std::shared_ptr<fss::server::db_write_queue>
 {
-    return std::make_shared<fss::server::db_write_queue>(
-        std::size_t{16},
-        [](const fss::server::db_write_task &) {}
-    );
+    return std::make_shared<fss::server::db_write_queue>(std::size_t{16}, [](const fss::server::db_write_task &) {});
 }
 
 /* Build a client that has completed the identity handshake as an aircraft. */
-auto make_aircraft_client(
-    const std::string &name,
-    fss_test::MockDatabase &mock,
-    server_clients &handler
-) -> std::shared_ptr<fss::server::fss_client>
+auto make_aircraft_client(const std::string &name, fss_test::MockDatabase &mock, server_clients &handler)
+    -> std::shared_ptr<fss::server::fss_client>
 {
     mock.asset_ids[name] = static_cast<uint64_t>(mock.asset_ids.size() + 1);
     auto conn = std::make_shared<FakeConnection>();

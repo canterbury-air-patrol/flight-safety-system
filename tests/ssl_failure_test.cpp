@@ -34,21 +34,21 @@
  * live under certs/expired/. */
 namespace {
 
-constexpr const char *CA_PUBLIC_FILE     = "certs/ca.public.pem";
+constexpr const char *CA_PUBLIC_FILE = "certs/ca.public.pem";
 constexpr const char *SERVER_PRIVATE_FILE = "certs/localhost.private.pem";
-constexpr const char *SERVER_PUBLIC_FILE  = "certs/localhost.public.pem";
+constexpr const char *SERVER_PUBLIC_FILE = "certs/localhost.public.pem";
 constexpr const char *CLIENT_PRIVATE_FILE = "certs/client.private.pem";
-constexpr const char *CLIENT_PUBLIC_FILE  = "certs/client.public.pem";
+constexpr const char *CLIENT_PUBLIC_FILE = "certs/client.public.pem";
 
-constexpr const char *ALT_CA_PUBLIC_FILE     = "certs-alt/ca.public.pem";
+constexpr const char *ALT_CA_PUBLIC_FILE = "certs-alt/ca.public.pem";
 constexpr const char *ALT_CLIENT_PRIVATE_FILE = "certs-alt/client.private.pem";
-constexpr const char *ALT_CLIENT_PUBLIC_FILE  = "certs-alt/client.public.pem";
+constexpr const char *ALT_CLIENT_PUBLIC_FILE = "certs-alt/client.public.pem";
 
 constexpr const char *EXPIRED_CLIENT_PRIVATE_FILE = "certs/expired/client.private.pem";
-constexpr const char *EXPIRED_CLIENT_PUBLIC_FILE  = "certs/expired/client.public.pem";
+constexpr const char *EXPIRED_CLIENT_PUBLIC_FILE = "certs/expired/client.public.pem";
 
 constexpr const char *GHOST_CLIENT_PRIVATE_FILE = "certs/ghost/client.private.pem";
-constexpr const char *GHOST_CLIENT_PUBLIC_FILE  = "certs/ghost/client.public.pem";
+constexpr const char *GHOST_CLIENT_PUBLIC_FILE = "certs/ghost/client.public.pem";
 
 std::shared_ptr<flight_safety_system::transport::fss_connection> accepted;
 
@@ -86,8 +86,7 @@ TEST_CASE("ssl: client rejects server cert signed by a different CA")
     accepted = nullptr;
 }
 
-TEST_CASE("ssl: server rejects client presenting an expired certificate",
-          "[ssl_expired]")
+TEST_CASE("ssl: server rejects client presenting an expired certificate", "[ssl_expired]")
 {
     accepted = nullptr;
     constexpr uint16_t port = 20513;
@@ -113,8 +112,7 @@ TEST_CASE("ssl: server rejects client presenting an expired certificate",
     accepted = nullptr;
 }
 
-TEST_CASE("ssl: server surfaces wrong-CN-but-CA-signed cert via getClientNames",
-          "[ssl_wrong_cn]")
+TEST_CASE("ssl: server surfaces wrong-CN-but-CA-signed cert via getClientNames", "[ssl_wrong_cn]")
 {
     /* A cert validly signed by the trusted CA but whose CN is not on any
      * asset list must complete the TLS handshake — that's what the trust
@@ -142,8 +140,7 @@ TEST_CASE("ssl: server surfaces wrong-CN-but-CA-signed cert via getClientNames",
 
     std::list<std::string> names = accepted->getClientNames();
     REQUIRE_FALSE(names.empty());
-    bool found = std::any_of(names.begin(), names.end(),
-        [](const std::string &n) { return n == "ghost-asset"; });
+    bool found = std::any_of(names.begin(), names.end(), [](const std::string &n) { return n == "ghost-asset"; });
     REQUIRE(found);
 
     accepted = nullptr;

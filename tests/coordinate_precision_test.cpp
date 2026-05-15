@@ -36,16 +36,14 @@ namespace {
 
 auto round_trip(double lat, double lng) -> std::pair<double, double>
 {
-    auto original = std::make_shared<fss_message_position_report>(
-        lat, lng, /*altitude*/ 100U,
-        /*heading*/ 0U, /*hor_vel*/ 0U, /*ver_vel*/ 0,
-        /*icao*/ 0U, std::string{"T1"},
-        /*squawk*/ 01200U, /*tslc*/ 0U, /*flags*/ 0U,
-        /*alt_type*/ 0U, /*emitter*/ 0U, /*timestamp*/ 0U);
+    auto original = std::make_shared<fss_message_position_report>(lat, lng, /*altitude*/ 100U,
+                                                                  /*heading*/ 0U, /*hor_vel*/ 0U, /*ver_vel*/ 0,
+                                                                  /*icao*/ 0U, std::string{"T1"},
+                                                                  /*squawk*/ 01200U, /*tslc*/ 0U, /*flags*/ 0U,
+                                                                  /*alt_type*/ 0U, /*emitter*/ 0U, /*timestamp*/ 0U);
     original->setId(1);
     auto bl = original->getPacked();
-    auto decoded = std::dynamic_pointer_cast<fss_message_position_report>(
-        fss_message::decode(bl));
+    auto decoded = std::dynamic_pointer_cast<fss_message_position_report>(fss_message::decode(bl));
     REQUIRE(decoded != nullptr);
     return {decoded->getLatitude(), decoded->getLongitude()};
 }
@@ -95,7 +93,7 @@ TEST_CASE("coord: southernmost latitudes round-trip")
     for (double target : {-85.0, -89.0, -89.999999})
     {
         double lat = 0.0, lng = 0.0;
-    std::tie(lat, lng) = round_trip(target, 0.0);
+        std::tie(lat, lng) = round_trip(target, 0.0);
         INFO("target latitude " << target);
         REQUIRE(std::fabs(lat - target) < 1e-6);
     }
@@ -106,7 +104,7 @@ TEST_CASE("coord: northernmost latitudes round-trip")
     for (double target : {85.0, 89.0, 89.999999})
     {
         double lat = 0.0, lng = 0.0;
-    std::tie(lat, lng) = round_trip(target, 0.0);
+        std::tie(lat, lng) = round_trip(target, 0.0);
         INFO("target latitude " << target);
         REQUIRE(std::fabs(lat - target) < 1e-6);
     }

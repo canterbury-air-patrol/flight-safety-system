@@ -18,17 +18,19 @@
 #include "fss-transport-ssl.hpp"
 #include "test_helpers.hpp"
 
-constexpr const char * CA_PUBLIC_FILE = "certs/ca.public.pem";
-constexpr const char * SERVER_PRIVATE_FILE = "certs/localhost.private.pem";
-constexpr const char * SERVER_PUBLIC_FILE = "certs/localhost.public.pem";
-constexpr const char * CLIENT_PRIVATE_FILE = "certs/client.private.pem";
-constexpr const char * CLIENT_PUBLIC_FILE = "certs/client.public.pem";
-constexpr const char * CLIENT_CRL_FILE = "certs/client.crl.pem";
-constexpr const char * EMPTY_CRL_FILE = "certs/empty.crl.pem";
+constexpr const char *CA_PUBLIC_FILE = "certs/ca.public.pem";
+constexpr const char *SERVER_PRIVATE_FILE = "certs/localhost.private.pem";
+constexpr const char *SERVER_PUBLIC_FILE = "certs/localhost.public.pem";
+constexpr const char *CLIENT_PRIVATE_FILE = "certs/client.private.pem";
+constexpr const char *CLIENT_PUBLIC_FILE = "certs/client.public.pem";
+constexpr const char *CLIENT_CRL_FILE = "certs/client.crl.pem";
+constexpr const char *EMPTY_CRL_FILE = "certs/empty.crl.pem";
 
 
-TEST_CASE("SSL - Connection Create (failure)") {
-    auto conn = std::make_shared<flight_safety_system::transport_ssl::fss_connection_client>(CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE);
+TEST_CASE("SSL - Connection Create (failure)")
+{
+    auto conn = std::make_shared<flight_safety_system::transport_ssl::fss_connection_client>(
+        CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE);
     REQUIRE(conn != nullptr);
 
     REQUIRE(!conn->connectTo("localhost", 1));
@@ -39,19 +41,23 @@ TEST_CASE("SSL - Connection Create (failure)") {
 }
 
 static std::shared_ptr<flight_safety_system::transport::fss_connection> client_conn = nullptr;
-static auto test_client_connect_cb (std::shared_ptr<flight_safety_system::transport::fss_connection> new_conn) -> bool
+static auto test_client_connect_cb(std::shared_ptr<flight_safety_system::transport::fss_connection> new_conn) -> bool
 {
     client_conn = std::move(new_conn);
     return true;
 }
 
 
-TEST_CASE("SSL - Listen Socket") {
+TEST_CASE("SSL - Listen Socket")
+{
     constexpr int listen_port = 20302;
-    auto listen = std::make_shared<flight_safety_system::transport_ssl::fss_listen>(listen_port, test_client_connect_cb, CA_PUBLIC_FILE, SERVER_PRIVATE_FILE, SERVER_PUBLIC_FILE);
+    auto listen = std::make_shared<flight_safety_system::transport_ssl::fss_listen>(
+        listen_port, test_client_connect_cb, CA_PUBLIC_FILE, SERVER_PRIVATE_FILE, SERVER_PUBLIC_FILE);
     REQUIRE(listen != nullptr);
 
-    std::shared_ptr<flight_safety_system::transport::fss_connection> conn = std::make_shared<flight_safety_system::transport_ssl::fss_connection_client>(CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE);
+    std::shared_ptr<flight_safety_system::transport::fss_connection> conn =
+        std::make_shared<flight_safety_system::transport_ssl::fss_connection_client>(
+            CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE);
     REQUIRE(conn != nullptr);
     REQUIRE(conn->connectTo("localhost", listen_port));
     auto send_msg = std::make_shared<flight_safety_system::transport::fss_message_identity>("testClient");
@@ -80,18 +86,17 @@ TEST_CASE("SSL - Listen Socket") {
     client_conn = nullptr;
 }
 
-class test_ssl_message_cb: public flight_safety_system::transport::fss_message_cb
-{
-    private:
-        std::shared_ptr<flight_safety_system::transport::fss_message> first{};
-    public:
-        explicit test_ssl_message_cb(std::shared_ptr<flight_safety_system::transport::fss_connection> t_conn) : fss_message_cb(std::move(t_conn)) {};
-        auto getFirstMsg() -> std::shared_ptr<flight_safety_system::transport::fss_message> {
-            return this->first;
-        }
-        void processMessage(std::shared_ptr<flight_safety_system::transport::fss_message> message) override {
-            this->first = std::move(message);
-        }
+class test_ssl_message_cb : public flight_safety_system::transport::fss_message_cb {
+private:
+    std::shared_ptr<flight_safety_system::transport::fss_message> first{};
+public:
+    explicit test_ssl_message_cb(std::shared_ptr<flight_safety_system::transport::fss_connection> t_conn)
+        : fss_message_cb(std::move(t_conn)) {};
+    auto getFirstMsg() -> std::shared_ptr<flight_safety_system::transport::fss_message> { return this->first; }
+    void processMessage(std::shared_ptr<flight_safety_system::transport::fss_message> message) override
+    {
+        this->first = std::move(message);
+    }
 };
 
 
@@ -99,10 +104,13 @@ TEST_CASE("SSL - Listen - Callback")
 {
     constexpr int listen_port = 20303;
 
-    auto listen = std::make_shared<flight_safety_system::transport_ssl::fss_listen>(listen_port, test_client_connect_cb, CA_PUBLIC_FILE, SERVER_PRIVATE_FILE, SERVER_PUBLIC_FILE);
+    auto listen = std::make_shared<flight_safety_system::transport_ssl::fss_listen>(
+        listen_port, test_client_connect_cb, CA_PUBLIC_FILE, SERVER_PRIVATE_FILE, SERVER_PUBLIC_FILE);
     REQUIRE(listen != nullptr);
 
-    std::shared_ptr<flight_safety_system::transport::fss_connection> conn = std::make_shared<flight_safety_system::transport_ssl::fss_connection_client>(CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE);
+    std::shared_ptr<flight_safety_system::transport::fss_connection> conn =
+        std::make_shared<flight_safety_system::transport_ssl::fss_connection_client>(
+            CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE);
     REQUIRE(conn != nullptr);
     REQUIRE(conn->connectTo("localhost", listen_port));
 
@@ -204,13 +212,11 @@ TEST_CASE("SSL - Negotiated cipher suite is AEAD (TLS 1.2+)")
     REQUIRE_FALSE(desc.empty());
 
     // Protocol must be TLS 1.2 or TLS 1.3 — TLS 1.0/1.1 are excluded by the priority string
-    bool modern_tls = desc.find("TLS1.2") != std::string::npos ||
-                      desc.find("TLS1.3") != std::string::npos;
+    bool modern_tls = desc.find("TLS1.2") != std::string::npos || desc.find("TLS1.3") != std::string::npos;
     REQUIRE(modern_tls);
 
     // Cipher must be AEAD (AES-GCM, AES-CCM, or ChaCha20-Poly1305)
-    bool aead = desc.find("GCM") != std::string::npos ||
-                desc.find("POLY1305") != std::string::npos ||
+    bool aead = desc.find("GCM") != std::string::npos || desc.find("POLY1305") != std::string::npos ||
                 desc.find("-CCM") != std::string::npos;
     REQUIRE(aead);
 

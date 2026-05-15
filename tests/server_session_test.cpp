@@ -45,12 +45,14 @@ public:
     ~FakeConnection() override = default;
 
     auto getClientNames() -> std::list<std::string> override { return cert_names; }
-
 protected:
     auto sendMsg(const std::shared_ptr<fss::transport::buf_len> &bl) -> bool override
     {
         auto msg = fss::transport::fss_message::decode(bl);
-        if (msg != nullptr) { sent.push_back(msg); }
+        if (msg != nullptr)
+        {
+            sent.push_back(msg);
+        }
         return true;
     }
 };
@@ -67,11 +69,18 @@ auto make_mock_writer(fss_test::MockDatabase &mock) -> std::shared_ptr<fss::serv
 {
     auto sink = [&mock](const fss::server::db_write_task &task) -> void {
         std::visit(fss::server::overloaded{
-            [&](const fss::server::rtt_write &w) -> void { mock.recordRtt(w.asset_id, w.rtt_ms); },
-            [&](const fss::server::position_write &w) -> void { mock.recordPosition(w.asset_id, w.latitude, w.longitude, w.altitude); },
-            [&](const fss::server::status_write &w) -> void { mock.recordStatus(w.asset_id, w.bat_percent, w.bat_mah_used, w.bat_voltage); },
-            [&](const fss::server::search_status_write &w) -> void { mock.recordSearchStatus(w.asset_id, w.search_id, w.completed, w.total); },
-        }, task);
+                       [&](const fss::server::rtt_write &w) -> void { mock.recordRtt(w.asset_id, w.rtt_ms); },
+                       [&](const fss::server::position_write &w) -> void {
+                           mock.recordPosition(w.asset_id, w.latitude, w.longitude, w.altitude);
+                       },
+                       [&](const fss::server::status_write &w) -> void {
+                           mock.recordStatus(w.asset_id, w.bat_percent, w.bat_mah_used, w.bat_voltage);
+                       },
+                       [&](const fss::server::search_status_write &w) -> void {
+                           mock.recordSearchStatus(w.asset_id, w.search_id, w.completed, w.total);
+                       },
+                   },
+                   task);
     };
     return std::make_shared<fss::server::db_write_queue>(std::size_t{1024}, sink);
 }
@@ -234,9 +243,9 @@ TEST_CASE("session: getCommand returns newest-timestamp entry")
     constexpr uint64_t asset_id = 42;
     mock.asset_ids["craft"] = asset_id;
     mock.pushCommand(asset_id, std::make_shared<fss::server::asset_command>(
-        /*dbid*/ 1, /*ts*/ 100, "HOLD", 0.0, 0.0, 0));
+                                   /*dbid*/ 1, /*ts*/ 100, "HOLD", 0.0, 0.0, 0));
     mock.pushCommand(asset_id, std::make_shared<fss::server::asset_command>(
-        /*dbid*/ 2, /*ts*/ 500, "RTL", 0.0, 0.0, 0));
+                                   /*dbid*/ 2, /*ts*/ 500, "RTL", 0.0, 0.0, 0));
 
     auto conn = std::make_shared<FakeConnection>();
     conn->cert_names.push_back("craft");
@@ -302,7 +311,7 @@ TEST_CASE("session: rapid sendCommand does not duplicate a single pending comman
     constexpr uint64_t asset_id = 7;
     mock.asset_ids["craft"] = asset_id;
     mock.pushCommand(asset_id, std::make_shared<fss::server::asset_command>(
-        /*dbid*/ 1, /*ts*/ 100, "TERM", 0.0, 0.0, 0));
+                                   /*dbid*/ 1, /*ts*/ 100, "TERM", 0.0, 0.0, 0));
 
     auto conn = std::make_shared<FakeConnection>();
     conn->cert_names.push_back("craft");
@@ -313,12 +322,18 @@ TEST_CASE("session: rapid sendCommand does not duplicate a single pending comman
     session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
 
     constexpr int ticks_per_sec = 1000 / fss::server::command_poll_ms;
-    for (int i = 0; i < 2 * ticks_per_sec; ++i) { session->sendCommand(); }
+    for (int i = 0; i < 2 * ticks_per_sec; ++i)
+    {
+        session->sendCommand();
+    }
 
     int command_count = 0;
     for (const auto &msg : conn->sent)
     {
-        if (msg->getType() == fss::transport::message_type_command) { ++command_count; }
+        if (msg->getType() == fss::transport::message_type_command)
+        {
+            ++command_count;
+        }
     }
     REQUIRE(command_count == 1);
 }
@@ -345,13 +360,16 @@ TEST_CASE("session: a freshly queued command is delivered after the poller updat
     auto cmd = std::make_shared<fss::server::asset_command>(
         /*dbid*/ 42, /*ts*/ 500, "DISARM", 0.0, 0.0, 0);
     mock.pushCommand(asset_id, cmd);
-    session->setPendingCommand(cmd);   // simulate one poller tick
+    session->setPendingCommand(cmd); // simulate one poller tick
     session->sendCommand();
 
     bool delivered = false;
     for (std::size_t i = sent_before; i < conn->sent.size(); ++i)
     {
-        if (conn->sent[i]->getType() == fss::transport::message_type_command) { delivered = true; }
+        if (conn->sent[i]->getType() == fss::transport::message_type_command)
+        {
+            delivered = true;
+        }
     }
     REQUIRE(delivered);
 }
@@ -372,12 +390,12 @@ TEST_CASE("session: RTT timeout disconnects client")
     session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
 
     auto rtt_req1 = std::make_shared<fss::transport::fss_message_rtt_request>();
-    session->sendRTTRequest(rtt_req1);      // queued at t=0
+    session->sendRTTRequest(rtt_req1); // queued at t=0
 
-    clock->advance(30001);                  // past rtt_timeout (30 s)
+    clock->advance(30001); // past rtt_timeout (30 s)
 
     auto rtt_req2 = std::make_shared<fss::transport::fss_message_rtt_request>();
-    session->sendRTTRequest(rtt_req2);      // triggers timeout → disconnect
+    session->sendRTTRequest(rtt_req2); // triggers timeout → disconnect
 
     REQUIRE(handler.disconnects > 0);
 }
@@ -399,10 +417,8 @@ TEST_CASE("session: version handshake stores negotiated version and replies")
 
     REQUIRE(conn->getNegotiatedVersion() == fss::transport::FSS_PROTOCOL_VERSION_LEGACY);
 
-    auto version = std::make_shared<fss::transport::fss_message_version>(
-        fss::transport::FSS_PROTOCOL_VERSION,
-        fss::transport::FSS_PROTOCOL_MIN_VERSION,
-        0U);
+    auto version = std::make_shared<fss::transport::fss_message_version>(fss::transport::FSS_PROTOCOL_VERSION,
+                                                                         fss::transport::FSS_PROTOCOL_MIN_VERSION, 0U);
     session->processMessage(version);
 
     REQUIRE(conn->getNegotiatedVersion() == fss::transport::FSS_PROTOCOL_VERSION);
@@ -411,7 +427,10 @@ TEST_CASE("session: version handshake stores negotiated version and replies")
     bool saw_version_response = false;
     for (const auto &m : conn->sent)
     {
-        if (m->getType() == fss::transport::message_type_version) { saw_version_response = true; }
+        if (m->getType() == fss::transport::message_type_version)
+        {
+            saw_version_response = true;
+        }
     }
     REQUIRE(saw_version_response);
 }
@@ -452,7 +471,7 @@ TEST_CASE("rate limiter: drops messages beyond burst capacity without disconnect
     auto writer = make_mock_writer(mock);
     auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
     session->setClock(clock);
-    session->setRateLimits(100, 0);  // 100-message burst, no refill
+    session->setRateLimits(100, 0); // 100-message burst, no refill
 
     session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
 
@@ -480,19 +499,25 @@ TEST_CASE("rate limiter: refill allows messages after bucket drains")
     auto writer = make_mock_writer(mock);
     auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
     session->setClock(clock);
-    session->setRateLimits(5, 10);  // 5-message burst, 10/s refill
+    session->setRateLimits(5, 10); // 5-message burst, 10/s refill
 
     session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
 
     auto pos = std::make_shared<fss::transport::fss_message_position_report>(
         0.0, 0.0, 0U, 0U, 0U, int16_t{0}, 0U, std::string{}, 0U, uint8_t{0}, 0U, uint8_t{0}, uint8_t{0}, uint64_t{0});
-    for (int i = 0; i < 10; ++i) { session->processMessage(pos); }
+    for (int i = 0; i < 10; ++i)
+    {
+        session->processMessage(pos);
+    }
     // 5 go through, 5 dropped
     REQUIRE(handler.broadcasts.size() == 5);
 
     // Advance 1 second → 10 new tokens (capped at 5)
     clock->advance(1000);
-    for (int i = 0; i < 10; ++i) { session->processMessage(pos); }
+    for (int i = 0; i < 10; ++i)
+    {
+        session->processMessage(pos);
+    }
     REQUIRE(handler.broadcasts.size() == 10);
     REQUIRE(handler.disconnects == 0);
 }
@@ -520,7 +545,10 @@ TEST_CASE("session: legacy client (no version handshake) is accepted")
     bool saw_server_list = false;
     for (const auto &m : conn->sent)
     {
-        if (m->getType() == fss::transport::message_type_server_list) { saw_server_list = true; }
+        if (m->getType() == fss::transport::message_type_server_list)
+        {
+            saw_server_list = true;
+        }
     }
     REQUIRE(saw_server_list);
 }
@@ -530,19 +558,15 @@ namespace {
 auto make_position_msg(uint64_t ts) -> std::shared_ptr<fss::transport::fss_message_position_report>
 {
     return std::make_shared<fss::transport::fss_message_position_report>(
-        0.0, 0.0, 0U, 0U, 0U, int16_t{0}, 0U, std::string{},
-        0U, uint8_t{0}, 0U, uint8_t{0}, uint8_t{0}, ts);
+        0.0, 0.0, 0U, 0U, 0U, int16_t{0}, 0U, std::string{}, 0U, uint8_t{0}, 0U, uint8_t{0}, uint8_t{0}, ts);
 }
 
 /* Drive a version + identity exchange over a v2 connection.
  * Returns the next seq the client should use for data messages. */
-auto establish_v2_session(
-    std::shared_ptr<fss::server::fss_client> &session,
-    uint64_t &next_id) -> void
+auto establish_v2_session(std::shared_ptr<fss::server::fss_client> &session, uint64_t &next_id) -> void
 {
-    auto version = std::make_shared<fss::transport::fss_message_version>(
-        fss::transport::FSS_PROTOCOL_VERSION,
-        fss::transport::FSS_PROTOCOL_MIN_VERSION, 0U);
+    auto version = std::make_shared<fss::transport::fss_message_version>(fss::transport::FSS_PROTOCOL_VERSION,
+                                                                         fss::transport::FSS_PROTOCOL_MIN_VERSION, 0U);
     version->setId(next_id++);
     session->processMessage(version);
 
@@ -578,10 +602,10 @@ TEST_CASE("session: v2 replayed data message is dropped")
 
     /* Replay the same message (same seq). */
     auto replay = make_position_msg(fss::fss_current_timestamp());
-    replay->setId(next_id);  // duplicate seq — replay
+    replay->setId(next_id); // duplicate seq — replay
     session->processMessage(replay);
-    REQUIRE(handler.broadcasts.size() == 1);  // not forwarded
-    REQUIRE(handler.disconnects == 0);        // connection stays up
+    REQUIRE(handler.broadcasts.size() == 1); // not forwarded
+    REQUIRE(handler.disconnects == 0);       // connection stays up
 }
 
 TEST_CASE("session: v2 replayed identity disconnects")
@@ -599,16 +623,15 @@ TEST_CASE("session: v2 replayed identity disconnects")
     auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
 
     /* Send version(seq=1) → server sets expected_seq=2. */
-    auto version = std::make_shared<fss::transport::fss_message_version>(
-        fss::transport::FSS_PROTOCOL_VERSION,
-        fss::transport::FSS_PROTOCOL_MIN_VERSION, 0U);
+    auto version = std::make_shared<fss::transport::fss_message_version>(fss::transport::FSS_PROTOCOL_VERSION,
+                                                                         fss::transport::FSS_PROTOCOL_MIN_VERSION, 0U);
     version->setId(1);
     session->processMessage(version);
     REQUIRE(conn->getNegotiatedVersion() == fss::transport::FSS_PROTOCOL_VERSION);
 
     /* Send identity with wrong seq (e.g. 5 instead of 2). */
     auto identity = std::make_shared<fss::transport::fss_message_identity>("craft");
-    identity->setId(5);  // out-of-order
+    identity->setId(5); // out-of-order
     session->processMessage(identity);
 
     REQUIRE(handler.disconnects > 0);
@@ -653,7 +676,7 @@ TEST_CASE("session: stale position report is discarded")
     NullClientHandler handler;
 
     auto clock = std::make_shared<FakeClock>();
-    clock->t = 100000;  // arbitrary "now" in ms
+    clock->t = 100000; // arbitrary "now" in ms
 
     auto writer = make_mock_writer(mock);
     auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);

@@ -13,16 +13,36 @@
 namespace flight_safety_system {
 namespace server {
 
-struct rtt_write            { uint64_t asset_id; uint64_t rtt_ms; };
-struct position_write       { uint64_t asset_id; double latitude; double longitude; uint32_t altitude; };
-struct status_write         { uint64_t asset_id; uint8_t bat_percent; uint32_t bat_mah_used; double bat_voltage; };
-struct search_status_write  { uint64_t asset_id; uint64_t search_id; uint64_t completed; uint64_t total; };
+struct rtt_write {
+    uint64_t asset_id;
+    uint64_t rtt_ms;
+};
+struct position_write {
+    uint64_t asset_id;
+    double latitude;
+    double longitude;
+    uint32_t altitude;
+};
+struct status_write {
+    uint64_t asset_id;
+    uint8_t bat_percent;
+    uint32_t bat_mah_used;
+    double bat_voltage;
+};
+struct search_status_write {
+    uint64_t asset_id;
+    uint64_t search_id;
+    uint64_t completed;
+    uint64_t total;
+};
 
 using db_write_task = std::variant<rtt_write, position_write, status_write, search_status_write>;
 using db_write_sink = std::function<void(const db_write_task &)>;
 
 /* C++17 overload helper for std::visit. */
-template<class... Ts> struct overloaded : Ts... { using Ts::operator()...; };
+template<class... Ts> struct overloaded : Ts... {
+    using Ts::operator()...;
+};
 template<class... Ts> overloaded(Ts...) -> overloaded<Ts...>;
 
 class db_write_queue {
@@ -38,7 +58,6 @@ private:
     std::thread worker{};
 
     void run();
-
 public:
     db_write_queue(std::size_t t_max_depth, db_write_sink t_sink);
     ~db_write_queue();

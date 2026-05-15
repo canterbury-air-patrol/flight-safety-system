@@ -14,10 +14,10 @@ class fss_client;
 class fss_server;
 
 enum connection_status {
-CLIENT_CONNECTION_STATUS_UNKNOWN,
-CLIENT_CONNECTION_STATUS_CONNECTED_1_SERVER,
-CLIENT_CONNECTION_STATUS_CONNECTED_2_OR_MORE,
-CLIENT_CONNECTION_STATUS_DISCONNECTED,
+    CLIENT_CONNECTION_STATUS_UNKNOWN,
+    CLIENT_CONNECTION_STATUS_CONNECTED_1_SERVER,
+    CLIENT_CONNECTION_STATUS_CONNECTED_2_OR_MORE,
+    CLIENT_CONNECTION_STATUS_DISCONNECTED,
 };
 
 class fss_client {
@@ -37,10 +37,10 @@ public:
     explicit fss_client(const std::string &config_file);
     explicit fss_client();
     explicit fss_client(std::string t_ca, std::string t_private_key, std::string t_public_key);
-    fss_client(fss_client&) = delete;
-    fss_client(fss_client&&) = delete;
-    auto operator=(fss_client&) -> fss_client& = delete;
-    auto operator=(fss_client&&) -> fss_client& = delete;
+    fss_client(fss_client &) = delete;
+    fss_client(fss_client &&) = delete;
+    auto operator=(fss_client &) -> fss_client & = delete;
+    auto operator=(fss_client &&) -> fss_client & = delete;
     virtual ~fss_client();
     virtual void connectTo(const std::string &t_address, uint16_t t_port, bool connect);
     virtual void attemptReconnect();
@@ -49,12 +49,16 @@ public:
     virtual auto getAssetName() -> std::string;
     virtual void serverRequiresReconnect(fss_server *server);
     virtual void updateServers(const std::shared_ptr<flight_safety_system::transport::fss_message_server_list> &msg);
-    virtual void handleCommand(const std::shared_ptr<flight_safety_system::transport::fss_message_asset_command> &msg __attribute__((unused)));
-    virtual void handlePositionReport(const std::shared_ptr<flight_safety_system::transport::fss_message_position_report> &msg __attribute__((unused)));
-    virtual void handleSMMSettings(const std::shared_ptr<flight_safety_system::transport::fss_message_smm_settings> &msg __attribute__((unused)));
+    virtual void handleCommand(const std::shared_ptr<flight_safety_system::transport::fss_message_asset_command> &msg
+                               __attribute__((unused)));
+    virtual void
+    handlePositionReport(const std::shared_ptr<flight_safety_system::transport::fss_message_position_report> &msg
+                         __attribute__((unused)));
+    virtual void handleSMMSettings(const std::shared_ptr<flight_safety_system::transport::fss_message_smm_settings> &msg
+                                   __attribute__((unused)));
 };
 
-class fss_server: public flight_safety_system::transport::fss_message_cb {
+class fss_server : public flight_safety_system::transport::fss_message_cb {
 private:
     fss_client *client;
     std::string address;
@@ -76,11 +80,12 @@ private:
 protected:
     virtual auto reconnect_to() -> bool;
 public:
-    fss_server(fss_client *t_client, std::string t_address, uint16_t t_port, std::string t_ca, std::string t_private_key, std::string t_public_key);
+    fss_server(fss_client *t_client, std::string t_address, uint16_t t_port, std::string t_ca,
+               std::string t_private_key, std::string t_public_key);
     fss_server(fss_server &other) = delete;
-    fss_server(fss_server&&) = delete;
-    auto operator=(fss_server&) -> fss_server& = delete;
-    auto operator=(fss_server&&) -> fss_server& = delete;
+    fss_server(fss_server &&) = delete;
+    auto operator=(fss_server &) -> fss_server & = delete;
+    auto operator=(fss_server &&) -> fss_server & = delete;
     ~fss_server() override;
     void processMessage(std::shared_ptr<flight_safety_system::transport::fss_message> message) override;
     virtual auto getAddress() -> std::string;

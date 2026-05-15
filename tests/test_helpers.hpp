@@ -28,7 +28,10 @@ inline auto wait_for(const std::function<bool()> &pred,
     auto deadline = std::chrono::steady_clock::now() + timeout;
     while (std::chrono::steady_clock::now() < deadline)
     {
-        if (pred()) { return true; }
+        if (pred())
+        {
+            return true;
+        }
         std::this_thread::sleep_for(poll);
     }
     return pred();
@@ -40,7 +43,10 @@ inline auto wait_for(const std::function<bool()> &pred,
 inline auto pick_port() -> uint16_t
 {
     int sock = ::socket(AF_INET6, SOCK_STREAM, IPPROTO_TCP);
-    if (sock < 0) { return 0; }
+    if (sock < 0)
+    {
+        return 0;
+    }
     struct sockaddr_in6 addr{};
     addr.sin6_family = AF_INET6;
     addr.sin6_port = 0;
@@ -74,15 +80,17 @@ public:
     auto operator=(capture_cerr &&) -> capture_cerr & = delete;
     ~capture_cerr() { std::cerr.rdbuf(original); }
     auto str() const -> std::string { return sink.str(); }
-    void clear() { sink.str(""); sink.clear(); }
+    void clear()
+    {
+        sink.str("");
+        sink.clear();
+    }
 };
 
 /* Build a buf_len with a valid header (length/type/id) but a caller-specified
  * payload and a caller-specified *declared* length field — allowing tests to
  * construct malformed messages (truncated, oversized-length, unknown-type). */
-inline auto make_framed_buffer(uint16_t type, uint64_t msg_id,
-                               const std::string &payload,
-                               uint16_t declared_length)
+inline auto make_framed_buffer(uint16_t type, uint64_t msg_id, const std::string &payload, uint16_t declared_length)
     -> std::shared_ptr<flight_safety_system::transport::buf_len>
 {
     auto bl = std::make_shared<flight_safety_system::transport::buf_len>();

@@ -31,7 +31,10 @@ namespace {
 auto make_paired_eof_fd() -> int
 {
     int fds[2];
-    if (::socketpair(AF_UNIX, SOCK_STREAM, 0, fds) != 0) { return -1; }
+    if (::socketpair(AF_UNIX, SOCK_STREAM, 0, fds) != 0)
+    {
+        return -1;
+    }
     ::close(fds[1]);
     return fds[0];
 }
@@ -80,7 +83,10 @@ TEST_CASE("tsan: concurrent sendMsg + disconnect on a connected pair")
         {
             auto msg = std::make_shared<fss_message_identity>("racer");
             ++send_attempts;
-            if (conn->sendMsg(msg)) { ++send_successes; }
+            if (conn->sendMsg(msg))
+            {
+                ++send_successes;
+            }
             std::this_thread::sleep_for(std::chrono::microseconds(50));
         }
     });

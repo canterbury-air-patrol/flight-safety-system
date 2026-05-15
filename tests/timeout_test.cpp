@@ -48,9 +48,8 @@ protected:
  * position_report, system_status, search_status), so a no-op sink suffices. */
 auto make_null_writer() -> std::shared_ptr<fss::server::db_write_queue>
 {
-    return std::make_shared<fss::server::db_write_queue>(
-        std::size_t{64},
-        [](const fss::server::db_write_task &) -> void {});
+    return std::make_shared<fss::server::db_write_queue>(std::size_t{64},
+                                                         [](const fss::server::db_write_task &) -> void {});
 }
 
 class NullClientHandler : public fss::server::fss_client_handler {
@@ -59,7 +58,9 @@ public:
     ~NullClientHandler() override = default;
     void clientDisconnected(fss::server::fss_client *) override { ++disconnects; }
     void broadcastMsg(const std::shared_ptr<fss::transport::fss_message> &,
-                      fss::server::fss_client * = nullptr) override {}
+                      fss::server::fss_client * = nullptr) override
+    {
+    }
 };
 
 /* ── server-side (fss_client) timeout tests ─────────────── */
@@ -197,10 +198,7 @@ public:
     int status_changes{0};
     fss::client_ssl::connection_status last_status{fss::client_ssl::CLIENT_CONNECTION_STATUS_UNKNOWN};
 
-    void add(const std::shared_ptr<fss::client_ssl::fss_server> &server)
-    {
-        this->addServer(server);
-    }
+    void add(const std::shared_ptr<fss::client_ssl::fss_server> &server) { this->addServer(server); }
 protected:
     void connectionStatusChange(fss::client_ssl::connection_status status) override
     {
@@ -214,8 +212,7 @@ protected:
 TEST_CASE("timeout: isServerTimedOut false before any message")
 {
     auto client = std::make_shared<TestClient>();
-    auto server = std::make_shared<AlwaysConnectedServer>(
-        client.get(), "127.0.0.1", uint16_t{9999}, "", "", "");
+    auto server = std::make_shared<AlwaysConnectedServer>(client.get(), "127.0.0.1", uint16_t{9999}, "", "", "");
     auto clock = std::make_shared<FakeClock>();
     server->setClock(clock);
 
@@ -226,8 +223,7 @@ TEST_CASE("timeout: isServerTimedOut false before any message")
 TEST_CASE("timeout: isServerTimedOut false right after message")
 {
     auto client = std::make_shared<TestClient>();
-    auto server = std::make_shared<AlwaysConnectedServer>(
-        client.get(), "127.0.0.1", uint16_t{9999}, "", "", "");
+    auto server = std::make_shared<AlwaysConnectedServer>(client.get(), "127.0.0.1", uint16_t{9999}, "", "", "");
     auto clock = std::make_shared<FakeClock>();
     server->setClock(clock);
 
@@ -241,8 +237,7 @@ TEST_CASE("timeout: isServerTimedOut false right after message")
 TEST_CASE("timeout: isServerTimedOut true after timeout without messages")
 {
     auto client = std::make_shared<TestClient>();
-    auto server = std::make_shared<AlwaysConnectedServer>(
-        client.get(), "127.0.0.1", uint16_t{9999}, "", "", "");
+    auto server = std::make_shared<AlwaysConnectedServer>(client.get(), "127.0.0.1", uint16_t{9999}, "", "", "");
     auto clock = std::make_shared<FakeClock>();
     server->setClock(clock);
 
@@ -255,8 +250,7 @@ TEST_CASE("timeout: isServerTimedOut true after timeout without messages")
 TEST_CASE("timeout: attemptReconnect moves timed-out server to reconnect queue")
 {
     auto client = std::make_shared<TestClient>();
-    auto server = std::make_shared<AlwaysConnectedServer>(
-        client.get(), "127.0.0.1", uint16_t{9999}, "", "", "");
+    auto server = std::make_shared<AlwaysConnectedServer>(client.get(), "127.0.0.1", uint16_t{9999}, "", "", "");
     auto clock = std::make_shared<FakeClock>();
     server->setClock(clock);
 

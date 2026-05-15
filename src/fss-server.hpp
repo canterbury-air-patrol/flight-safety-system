@@ -12,7 +12,7 @@
 #include <mutex>
 #include <vector>
 
-namespace  flight_safety_system {
+namespace flight_safety_system {
 namespace server {
 
 constexpr int command_poll_ms = 100;
@@ -29,8 +29,7 @@ public:
     auto getPassword() -> const secure_string &;
 };
 
-class fss_server_details
-{
+class fss_server_details {
 private:
     std::string address;
     uint16_t port;
@@ -49,7 +48,8 @@ private:
     double longitude;
     uint16_t altitude;
 public:
-    asset_command(uint64_t t_dbid, uint64_t t_timestamp, const std::string &t_cmd, double t_latitude, double t_longitude, uint16_t t_altitude);
+    asset_command(uint64_t t_dbid, uint64_t t_timestamp, const std::string &t_cmd, double t_latitude,
+                  double t_longitude, uint16_t t_altitude);
     auto getDBId() -> uint64_t;
     auto getTimeStamp() -> uint64_t;
     auto getCommand() -> transport::fss_asset_command;
@@ -81,7 +81,7 @@ public:
     virtual void tryReconnectIfNeeded() = 0;
 };
 
-class db_connection: public IDatabase {
+class db_connection : public IDatabase {
 private:
     std::mutex db_lock;
     bool connected_{false};
@@ -92,10 +92,10 @@ private:
     std::string db_;
 public:
     db_connection(std::string host, int port, std::string user, std::string pass, std::string db);
-    db_connection(db_connection&) = delete;
-    db_connection(db_connection&&) = delete;
-    auto operator=(db_connection&) -> db_connection& = delete;
-    auto operator=(db_connection&&) -> db_connection& = delete;
+    db_connection(db_connection &) = delete;
+    db_connection(db_connection &&) = delete;
+    auto operator=(db_connection &) -> db_connection & = delete;
+    auto operator=(db_connection &&) -> db_connection & = delete;
     ~db_connection() override;
     auto getAssetId(const std::string &name) -> uint64_t override;
     void recordPosition(uint64_t asset_id, double latitude, double longitude, uint32_t altitude) override;
@@ -128,7 +128,7 @@ public:
     virtual void broadcastMsg(const std::shared_ptr<transport::fss_message> &msg, fss_client *except = nullptr) = 0;
 };
 
-class fss_client: public transport::fss_message_cb {
+class fss_client : public transport::fss_message_cb {
 private:
     std::atomic<bool> identified{false};
     std::atomic<bool> aircraft{false};
@@ -153,11 +153,12 @@ private:
     uint64_t rate_limit_rejects{0};
     uint64_t last_rate_limit_log_ms{0};
 public:
-    fss_client(std::shared_ptr<transport::fss_connection> conn, IDatabase *t_dbc, std::shared_ptr<db_write_queue> t_writer, fss_client_handler *t_handler);
-    fss_client(fss_client&) = delete;
-    fss_client(fss_client&&) = delete;
-    auto operator=(fss_client&) -> fss_client& = delete;
-    auto operator=(fss_client&&) -> fss_client& = delete;
+    fss_client(std::shared_ptr<transport::fss_connection> conn, IDatabase *t_dbc,
+               std::shared_ptr<db_write_queue> t_writer, fss_client_handler *t_handler);
+    fss_client(fss_client &) = delete;
+    fss_client(fss_client &&) = delete;
+    auto operator=(fss_client &) -> fss_client & = delete;
+    auto operator=(fss_client &&) -> fss_client & = delete;
     ~fss_client() override;
     void processMessage(std::shared_ptr<transport::fss_message> message) override;
     void sendRTTRequest(const std::shared_ptr<transport::fss_message_rtt_request> &rtt_req);

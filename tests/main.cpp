@@ -1,4 +1,4 @@
-#define CATCH_CONFIG_MAIN  // This tells Catch to provide a main() - only do this in one cpp file
+#define CATCH_CONFIG_MAIN // This tells Catch to provide a main() - only do this in one cpp file
 #ifdef HAVE_CATCH2_CATCH_ALL_HPP
 #include <catch2/catch_all.hpp>
 #elif HAVE_CATCH2_CATCH_HPP
@@ -21,5 +21,4 @@ struct sigpipe_ignore_init {
     sigpipe_ignore_init() { std::signal(SIGPIPE, SIG_IGN); }
 };
 sigpipe_ignore_init sigpipe_guard{};
-}
-
+} // namespace
