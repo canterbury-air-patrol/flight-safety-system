@@ -3,16 +3,27 @@
 [![C/C++ CI](https://github.com/canterbury-air-patrol/flight-safety-system/actions/workflows/c-cpp.yml/badge.svg?branch=develop)](https://github.com/canterbury-air-patrol/flight-safety-system/actions/workflows/c-cpp.yml)
 [![codecov](https://codecov.io/gh/canterbury-air-patrol/flight-safety-system/branch/develop/graph/badge.svg)](https://codecov.io/gh/canterbury-air-patrol/flight-safety-system)
 
-Flight-Safety-System is a system for maintaining control of RPAS. 
+Flight-Safety-System is a system for maintaining control of RPAS.
 
 FSS provides a means of sending basic commands (RTL, Hold, Resume, etc) to an aircraft while monitoring the position, battery status, and mission progress.
 
-## Basic Setup
-#### Dependencies
-Dependencies are jsoncpp (load/read the config), gnutls/gnutlsxx (for secure connections), ecpg (for the server), catch2 (for tests).
+See [CHANGELOG.md](CHANGELOG.md) for a full history of changes.
 
-On debian/ubuntu you will need to `apt install libjsoncpp-dev libgnutls28-dev ecpg-dev catch2`
+## Basic Setup
+
+### Dependencies
+
+Dependencies are jsoncpp (load/read the config), gnutls/gnutlsxx (for secure connections), ecpg (for the server), and catch2 (for tests).
+
+Building from source also requires autoconf, automake, and libtool to generate the build system.
+
+On Debian/Ubuntu:
+```
+apt install autoconf automake libtool libjsoncpp-dev libgnutls28-dev libecpg-dev catch2
+```
+
 ### Build/Install
+
 You can build this package from source:
 ```
 git clone https://github.com/canterbury-air-patrol/flight-safety-system.git
@@ -24,55 +35,96 @@ make install
 ```
 
 ### Running the Server
+
 The flight-safety-system server uses a [postgresql](https://www.postgresql.org/)+[postgis](https://postgis.net/) database for storing configuration, commands, and recording historic data.
- 
-The [web frontend](https://github.com/canterbury-air-patrol/flight-safety-system-web/) is a separate project and will need to be setup and have been connected to the database before the server is run.
+
+The [web frontend](https://github.com/canterbury-air-patrol/flight-safety-system-web/) is a separate project and will need to be set up and connected to the database before the server is run.
 
 Create a [server.json](examples/server.json) file with the correct port and database settings.
 
-Then start the server `fss-server server.json`
+Then start the server:
+```
+fss-server server.json
+```
+
+#### Signal handling
+
+| Signal  | Effect |
+|---------|--------|
+| SIGTERM | Graceful shutdown — stops accepting connections, drains the write queue, and exits cleanly. Compatible with `systemctl stop` and `docker stop`. |
+| SIGINT  | Same as SIGTERM. |
+| SIGHUP  | Reloads the CRL file (if configured) and disconnects any currently connected clients whose certificates appear on the updated CRL. No restart required. |
 
 ### Client
+
 There is no full client implementation shipped with flight-safety-system, however there is a [library](src/fss-client-ssl.hpp) to use and an [example client](examples/fake_client.cpp) that can be used as a starting point.
 
 ## Redundancy
-Redundancy is available by running multiple independent servers, the normal client configuration allows for specifying multiple servers to connect to. 
 
-Also, each server can include configuration of all known servers and this information will be provided to clients periodically to allow them to learn about and connect to all of the servers.
+Redundancy is available by running multiple independent servers; the normal client configuration allows for specifying multiple servers to connect to.
+
+Each server can also be configured with a list of all known servers, and this information is provided to clients periodically so they can discover and connect to all servers automatically.
 
 ## SSL Support
-It is required to use SSL to protect the connection between clients and servers. A common CA will be needed so that the clients and servers can verify each other by certificate.
+
+TLS is required to protect the connection between clients and servers. A shared CA is needed so that clients and servers can verify each other by certificate. The server uses the client certificate's Common Name as the asset identity.
 
 ### Generating certificates
-Scripts are provided in the certs directory to help generate and sign the certificates.
 
-First, generate a CA cert
+Scripts are provided in the `certs` directory to help generate and sign certificates.
+
+Generate a CA certificate:
 ```
 cd certs
 ./generate-ca.sh
 ```
-Keep ca.private.pem in a safe place, it is needed to sign the server and client certificates. If it is used to sign a certificate that you do not trust, you will need to recreate your CA and re-generate all the server and client certifictes.
+Keep `ca.private.pem` in a safe place — it is needed to sign all server and client certificates. If a certificate signed by this CA is compromised, you will need to either revoke it (see below) or recreate the CA and regenerate all certificates.
 
-Generate certificates for each server:
+Generate a certificate for each server:
 ```
 cd certs
 ./generate-server.sh server1.my.domain
 ```
-Use the IP address or dns name that the clients will be configured to talk to as the name for the server certificate. This is required to allow the clients to verify both the server is trusted, and they have connected to the correct server.
+Use the IP address or DNS name that clients will connect to. Clients verify both that the server is trusted and that they have connected to the correct host.
 
-Generate certificates for each client:
+Generate a certificate for each client:
 ```
 cd certs
 ./generate-client.sh client-name
 ```
-Use the name of the client as it is configured on the servers. The servers will use the name in the certificate to make sure the client is reporting as the correct device.
+Use the name of the client as enrolled in the database. The server matches the certificate CN against the asset registry to authenticate the client.
+
+### Certificate revocation (CRL)
+
+To revoke a certificate without replacing the CA, add a `crl_file` entry to `server.json`:
+```json
+"ssl": {
+    "ca_public_key": "certs/ca.public.pem",
+    "server_private_key": "certs/server.private.pem",
+    "server_public_key": "certs/server.public.pem",
+    "crl_file": "certs/revoked.crl"
+}
+```
+Send `SIGHUP` to a running server to reload the CRL and immediately disconnect any clients whose certificates appear on it. No restart is required.
 
 ## Other software
-Primarily flight-safety-system is designed to run alongside [Search Management Map](https://github.com/canterbury-air-patrol/search-management-map/)
+
+Primarily flight-safety-system is designed to run alongside [Search Management Map](https://github.com/canterbury-air-patrol/search-management-map/).
 
 [Canterbury Air Patrol](http://www.canterburyairpatrol.org) has a [client](https://github.com/canterbury-air-patrol/fss-smm-mav) that integrates Flight-Safety-System and Search Management Map to control an aircraft running [ArduPilot](https://www.ardupilot.org).
 
-There is an [ADS-B Integration](https://github.com/canterbury-air-patrol/fss-adsb/) that allows positions reports from ADS-B Out aircraft to be relayed to FSS clients.
+There is an [ADS-B Integration](https://github.com/canterbury-air-patrol/fss-adsb/) that allows position reports from ADS-B Out aircraft to be relayed to FSS clients.
+
+## Release strategy
+
+Stable releases are cut from long-lived `release/X.Y` branches. The `develop` branch carries ongoing work and merges into a `release/X.Y` branch when a release is prepared. Bug fixes are applied to `develop` first and then cherry-picked to the relevant `release/X.Y` branch, resulting in patch releases (`X.Y.1`, `X.Y.2`, etc.). The `master` branch always points to the latest stable release.
+
+In short:
+
+- `master` — latest stable release
+- `release/X.Y` — maintenance branch for the X.Y line; source of all X.Y.Z tags
+- `develop` — integration branch for the next release
 
 ## License
-This project is licensed under GNU GPLv2 see the [LICENSE](LICENSE.md) file for details.
+
+This project is licensed under GNU GPLv2 — see the [LICENSE](LICENSE.md) file for details.
