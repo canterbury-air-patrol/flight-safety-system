@@ -23,3 +23,15 @@ depcomp
 *.lo
 *.o
 *.pc
+# Editor backups
+*~
+# Clang tooling
+clang-tidy.log
+compile_commands.json
+# Python
+__pycache__/
+# Automake
+.dirstamp
+# gcov coverage artefacts
+*.gcno
+*.gcda
