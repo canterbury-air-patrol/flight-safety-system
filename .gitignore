@@ -23,6 +23,8 @@ depcomp
 *.lo
 *.o
 *.pc
+# Local working notes
+todo/
 # Editor backups
 *~
 # Clang tooling
