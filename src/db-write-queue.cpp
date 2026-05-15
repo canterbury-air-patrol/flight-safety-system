@@ -18,14 +18,16 @@ db_write_queue::~db_write_queue()
     this->stop();
 }
 
-void
-db_write_queue::enqueue(db_write_task task)
+void db_write_queue::enqueue(db_write_task task)
 {
     bool did_drop = false;
     uint64_t total_dropped = 0;
     {
         std::scoped_lock guard(this->mtx);
-        if (this->stopping) { return; }
+        if (this->stopping)
+        {
+            return;
+        }
         if (this->q.size() >= this->max_depth)
         {
             this->q.pop_front();
@@ -48,12 +50,14 @@ db_write_queue::enqueue(db_write_task task)
     }
 }
 
-void
-db_write_queue::stop()
+void db_write_queue::stop()
 {
     {
         std::scoped_lock guard(this->mtx);
-        if (this->stopping) { return; }
+        if (this->stopping)
+        {
+            return;
+        }
         this->stopping = true;
     }
     this->cv.notify_all();
@@ -63,27 +67,23 @@ db_write_queue::stop()
     }
 }
 
-auto
-db_write_queue::dropped_count() const -> uint64_t
+auto db_write_queue::dropped_count() const -> uint64_t
 {
     return this->dropped.load();
 }
 
-auto
-db_write_queue::write_failure_count() const -> uint64_t
+auto db_write_queue::write_failure_count() const -> uint64_t
 {
     return this->write_failures.load();
 }
 
-auto
-db_write_queue::pending_count() const -> std::size_t
+auto db_write_queue::pending_count() const -> std::size_t
 {
     std::scoped_lock guard(this->mtx);
     return this->q.size();
 }
 
-void
-db_write_queue::run()
+void db_write_queue::run()
 {
     for (;;)
     {
@@ -91,7 +91,10 @@ db_write_queue::run()
         {
             std::unique_lock<std::mutex> lock(this->mtx);
             this->cv.wait(lock, [this]() -> bool { return this->stopping || !this->q.empty(); });
-            if (this->stopping && this->q.empty()) { return; }
+            if (this->stopping && this->q.empty())
+            {
+                return;
+            }
             task = this->q.front();
             this->q.pop_front();
         }

@@ -16,7 +16,6 @@ TEST_CASE("db_connection: invalid host reports not connected")
 {
     /* Use a host that is guaranteed to refuse the connection so the test
      * does not depend on a running PostgreSQL instance. */
-    flight_safety_system::server::db_connection dbc(
-        "db.invalid", 5432, "user", "pass", "db");
+    flight_safety_system::server::db_connection dbc("db.invalid", 5432, "user", "pass", "db");
     REQUIRE_FALSE(dbc.isConnected());
 }

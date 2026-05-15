@@ -37,11 +37,11 @@ namespace {
 
 /* Byte layout for position_report up to (and including) callsign, with fields
  * appended after. All fixed pieces; callsign alone varies. */
-constexpr size_t header_bytes        = 12;
-constexpr size_t fixed_before_cs     = 8 + 4 + 4 + 4 + 4 + 2 + 2 + 2 + 2; /* = 32 */
-constexpr size_t fixed_after_cs      = 2 + 1 + 1;                         /* = 4  */
+constexpr size_t header_bytes = 12;
+constexpr size_t fixed_before_cs = 8 + 4 + 4 + 4 + 4 + 2 + 2 + 2 + 2; /* = 32 */
+constexpr size_t fixed_after_cs = 2 + 1 + 1;                          /* = 4  */
 constexpr size_t callsign_len_prefix = 2;
-constexpr size_t align               = 8;
+constexpr size_t align = 8;
 
 auto pack_size_correct(size_t callsign_chars) -> size_t
 {
@@ -56,12 +56,11 @@ auto pack_position_report(const std::string &callsign) -> size_t
 {
     constexpr double lat = -43.5;
     constexpr double lng = 172.5;
-    auto msg = std::make_shared<fss_message_position_report>(
-        lat, lng, /*altitude*/ 100U,
-        /*heading*/ 0U, /*hor_vel*/ 0U, /*ver_vel*/ 0,
-        /*icao*/ 0U, callsign,
-        /*squawk*/ 01200U, /*tslc*/ 0U, /*flags*/ 0U,
-        /*alt_type*/ 0U, /*emitter*/ 0U, /*timestamp*/ 0U);
+    auto msg = std::make_shared<fss_message_position_report>(lat, lng, /*altitude*/ 100U,
+                                                             /*heading*/ 0U, /*hor_vel*/ 0U, /*ver_vel*/ 0,
+                                                             /*icao*/ 0U, callsign,
+                                                             /*squawk*/ 01200U, /*tslc*/ 0U, /*flags*/ 0U,
+                                                             /*alt_type*/ 0U, /*emitter*/ 0U, /*timestamp*/ 0U);
     msg->setId(1);
     return msg->getPacked()->getLength();
 }
@@ -73,8 +72,8 @@ TEST_CASE("alignment: non-aligned callsign lengths add no extra padding")
     /* These lengths never hit the aligned edge in the buggy formula, so they
      * must pass both before and after the fix — guarding against regression
      * the other way. */
-    for (size_t L : {size_t{0}, size_t{1}, size_t{3}, size_t{4}, size_t{5},
-                     size_t{7}, size_t{9}, size_t{15}, size_t{17}})
+    for (size_t L :
+         {size_t{0}, size_t{1}, size_t{3}, size_t{4}, size_t{5}, size_t{7}, size_t{9}, size_t{15}, size_t{17}})
     {
         std::string cs(L, 'X');
         INFO("callsign length " << L);
@@ -82,8 +81,7 @@ TEST_CASE("alignment: non-aligned callsign lengths add no extra padding")
     }
 }
 
-TEST_CASE("alignment: 8-byte-aligned callsign length adds 0 padding, not 8",
-          "[bug10]")
+TEST_CASE("alignment: 8-byte-aligned callsign length adds 0 padding, not 8", "[bug10]")
 {
     /* L where (header + fixed + 2 + L) % 8 == 0 triggers the bug.
      * header(12) + fixed_before_cs(32) + 2 = 46; L such that (46 + L) % 8 == 0:

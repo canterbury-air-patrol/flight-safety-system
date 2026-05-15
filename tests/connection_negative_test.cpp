@@ -48,7 +48,10 @@ auto accept_cb(std::shared_ptr<fss_connection> new_conn) -> bool
 auto raw_connect(uint16_t port) -> int
 {
     int s = ::socket(AF_INET6, SOCK_STREAM, IPPROTO_TCP);
-    if (s < 0) { return -1; }
+    if (s < 0)
+    {
+        return -1;
+    }
     sockaddr_in6 addr{};
     addr.sin6_family = AF_INET6;
     addr.sin6_port = htons(port);
@@ -76,10 +79,13 @@ TEST_CASE("negative: binding the same port twice fails cleanly")
      * process survives and the second listener does not hijack
      * traffic. */
     bool survived = true;
-    try {
+    try
+    {
         auto second = std::make_shared<fss_listen>(port, accept_cb);
         (void)second;
-    } catch (...) {
+    }
+    catch (...)
+    {
         /* Accept either a clean error return or an exception — both
          * are "clean" from the caller's perspective. */
     }
@@ -147,8 +153,7 @@ TEST_CASE("negative: slow peer — one byte per 50ms still decodes full message"
             received = accepted->getMsg();
             return received != nullptr && received->getType() == message_type_identity;
         },
-        std::chrono::milliseconds(5000),
-        std::chrono::milliseconds(25));
+        std::chrono::milliseconds(5000), std::chrono::milliseconds(25));
 
     slow_writer.join();
     ::close(fd);

@@ -17,7 +17,8 @@
 #include "fss-transport.hpp"
 #include "test_helpers.hpp"
 
-TEST_CASE("Connection Create (failure)") {
+TEST_CASE("Connection Create (failure)")
+{
     auto conn = std::make_shared<flight_safety_system::transport::fss_connection>();
     REQUIRE(conn != nullptr);
 
@@ -29,14 +30,15 @@ TEST_CASE("Connection Create (failure)") {
 }
 
 static std::shared_ptr<flight_safety_system::transport::fss_connection> client_conn = nullptr;
-static auto test_client_connect_cb (std::shared_ptr<flight_safety_system::transport::fss_connection> new_conn) -> bool
+static auto test_client_connect_cb(std::shared_ptr<flight_safety_system::transport::fss_connection> new_conn) -> bool
 {
     client_conn = std::move(new_conn);
     return true;
 }
 
 
-TEST_CASE("Listen Socket") {
+TEST_CASE("Listen Socket")
+{
     constexpr int listen_port = 20202;
     auto listen = std::make_shared<flight_safety_system::transport::fss_listen>(listen_port, test_client_connect_cb);
     REQUIRE(listen != nullptr);
@@ -70,18 +72,17 @@ TEST_CASE("Listen Socket") {
     client_conn = nullptr;
 }
 
-class test_message_cb: public flight_safety_system::transport::fss_message_cb
-{
-    private:
-        std::shared_ptr<flight_safety_system::transport::fss_message> first{};
-    public:
-        explicit test_message_cb(std::shared_ptr<flight_safety_system::transport::fss_connection> t_conn) : fss_message_cb(std::move(t_conn)) {};
-        auto getFirstMsg() -> std::shared_ptr<flight_safety_system::transport::fss_message> {
-            return this->first;
-        }
-        void processMessage(std::shared_ptr<flight_safety_system::transport::fss_message> message) override {
-            this->first = std::move(message);
-        }
+class test_message_cb : public flight_safety_system::transport::fss_message_cb {
+private:
+    std::shared_ptr<flight_safety_system::transport::fss_message> first{};
+public:
+    explicit test_message_cb(std::shared_ptr<flight_safety_system::transport::fss_connection> t_conn)
+        : fss_message_cb(std::move(t_conn)) {};
+    auto getFirstMsg() -> std::shared_ptr<flight_safety_system::transport::fss_message> { return this->first; }
+    void processMessage(std::shared_ptr<flight_safety_system::transport::fss_message> message) override
+    {
+        this->first = std::move(message);
+    }
 };
 
 
@@ -89,9 +90,12 @@ class small_queue_listen : public flight_safety_system::transport::fss_listen {
 public:
     static constexpr size_t queue_limit = 5;
     small_queue_listen(uint16_t t_port, flight_safety_system::transport::fss_connect_cb t_cb)
-        : fss_listen(t_port, std::move(t_cb)) {}
+        : fss_listen(t_port, std::move(t_cb))
+    {
+    }
 protected:
-    auto newConnection(int t_fd) -> std::shared_ptr<flight_safety_system::transport::fss_connection> override {
+    auto newConnection(int t_fd) -> std::shared_ptr<flight_safety_system::transport::fss_connection> override
+    {
         return flight_safety_system::transport::fss_connection::create(t_fd, queue_limit);
     }
 };
@@ -111,7 +115,8 @@ TEST_CASE("Queue overflow drops oldest messages")
 
     REQUIRE(fss_test::wait_for([]() { return client_conn != nullptr; }));
 
-    for (size_t i = 0; i < small_queue_listen::queue_limit + extra; ++i) {
+    for (size_t i = 0; i < small_queue_listen::queue_limit + extra; ++i)
+    {
         conn->sendMsg(std::make_shared<flight_safety_system::transport::fss_message_rtt_request>());
     }
 
@@ -119,7 +124,10 @@ TEST_CASE("Queue overflow drops oldest messages")
     REQUIRE(client_conn->getDroppedMessages() == extra);
 
     size_t count = 0;
-    while (client_conn->getMsg() != nullptr) { ++count; }
+    while (client_conn->getMsg() != nullptr)
+    {
+        ++count;
+    }
     REQUIRE(count == small_queue_listen::queue_limit);
 
     conn = nullptr;

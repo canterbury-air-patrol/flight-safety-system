@@ -39,7 +39,10 @@ auto accept_oversized_cb(std::shared_ptr<fss_connection> new_conn) -> bool
 auto raw_connect_oversized(uint16_t port) -> int
 {
     int s = ::socket(AF_INET6, SOCK_STREAM, IPPROTO_TCP);
-    if (s < 0) { return -1; }
+    if (s < 0)
+    {
+        return -1;
+    }
     sockaddr_in6 addr{};
     addr.sin6_family = AF_INET6;
     addr.sin6_port = htons(port);

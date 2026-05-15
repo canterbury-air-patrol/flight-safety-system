@@ -40,9 +40,7 @@ namespace {
 /* Construct a buf_len from a raw byte sequence. */
 auto from_bytes(const std::vector<uint8_t> &bytes) -> std::shared_ptr<buf_len>
 {
-    return std::make_shared<buf_len>(
-        reinterpret_cast<const char *>(bytes.data()),
-        static_cast<uint16_t>(bytes.size()));
+    return std::make_shared<buf_len>(reinterpret_cast<const char *>(bytes.data()), static_cast<uint16_t>(bytes.size()));
 }
 
 auto to_bytes(const std::shared_ptr<buf_len> &bl) -> std::vector<uint8_t>
@@ -90,14 +88,22 @@ TEST_CASE("endianness: identity pack produces the documented big-endian bytes")
      * beyond them may vary slightly in value (should all be zero) so we only
      * assert the deterministic prefix. */
     REQUIRE(bytes.size() >= 16U);
-    REQUIRE(bytes[0] == 0x00); REQUIRE(bytes[1] == 0x10);       /* length = 16 */
-    REQUIRE(bytes[2] == 0x00); REQUIRE(bytes[3] == 0x02);       /* type = identity */
-    REQUIRE(bytes[4]  == 0x00); REQUIRE(bytes[5]  == 0x00);
-    REQUIRE(bytes[6]  == 0x00); REQUIRE(bytes[7]  == 0x00);
-    REQUIRE(bytes[8]  == 0x00); REQUIRE(bytes[9]  == 0x00);
-    REQUIRE(bytes[10] == 0x00); REQUIRE(bytes[11] == 0x2A);     /* id = 42 */
-    REQUIRE(bytes[12] == 't');  REQUIRE(bytes[13] == 'e');
-    REQUIRE(bytes[14] == 's');  REQUIRE(bytes[15] == 't');
+    REQUIRE(bytes[0] == 0x00);
+    REQUIRE(bytes[1] == 0x10); /* length = 16 */
+    REQUIRE(bytes[2] == 0x00);
+    REQUIRE(bytes[3] == 0x02); /* type = identity */
+    REQUIRE(bytes[4] == 0x00);
+    REQUIRE(bytes[5] == 0x00);
+    REQUIRE(bytes[6] == 0x00);
+    REQUIRE(bytes[7] == 0x00);
+    REQUIRE(bytes[8] == 0x00);
+    REQUIRE(bytes[9] == 0x00);
+    REQUIRE(bytes[10] == 0x00);
+    REQUIRE(bytes[11] == 0x2A); /* id = 42 */
+    REQUIRE(bytes[12] == 't');
+    REQUIRE(bytes[13] == 'e');
+    REQUIRE(bytes[14] == 's');
+    REQUIRE(bytes[15] == 't');
 }
 
 TEST_CASE("endianness: rtt_response pack/unpack uses big-endian 64-bit id")
@@ -109,17 +115,26 @@ TEST_CASE("endianness: rtt_response pack/unpack uses big-endian 64-bit id")
 
     REQUIRE(bytes.size() >= 20U);
     /* header: length | type(rtt_response=4) | id */
-    REQUIRE(bytes[2] == 0x00); REQUIRE(bytes[3] == 0x04);
+    REQUIRE(bytes[2] == 0x00);
+    REQUIRE(bytes[3] == 0x04);
     /* id is 8 bytes big-endian starting at offset 4 */
-    REQUIRE(bytes[4]  == 0xAA); REQUIRE(bytes[5]  == 0xBB);
-    REQUIRE(bytes[6]  == 0xCC); REQUIRE(bytes[7]  == 0xDD);
-    REQUIRE(bytes[8]  == 0xEE); REQUIRE(bytes[9]  == 0xFF);
-    REQUIRE(bytes[10] == 0x00); REQUIRE(bytes[11] == 0x11);
+    REQUIRE(bytes[4] == 0xAA);
+    REQUIRE(bytes[5] == 0xBB);
+    REQUIRE(bytes[6] == 0xCC);
+    REQUIRE(bytes[7] == 0xDD);
+    REQUIRE(bytes[8] == 0xEE);
+    REQUIRE(bytes[9] == 0xFF);
+    REQUIRE(bytes[10] == 0x00);
+    REQUIRE(bytes[11] == 0x11);
     /* request_id is 8 bytes big-endian starting at offset 12 */
-    REQUIRE(bytes[12] == 0x01); REQUIRE(bytes[13] == 0x02);
-    REQUIRE(bytes[14] == 0x03); REQUIRE(bytes[15] == 0x04);
-    REQUIRE(bytes[16] == 0x05); REQUIRE(bytes[17] == 0x06);
-    REQUIRE(bytes[18] == 0x07); REQUIRE(bytes[19] == 0x08);
+    REQUIRE(bytes[12] == 0x01);
+    REQUIRE(bytes[13] == 0x02);
+    REQUIRE(bytes[14] == 0x03);
+    REQUIRE(bytes[15] == 0x04);
+    REQUIRE(bytes[16] == 0x05);
+    REQUIRE(bytes[17] == 0x06);
+    REQUIRE(bytes[18] == 0x07);
+    REQUIRE(bytes[19] == 0x08);
 
     auto decoded = fss_message::decode(bl);
     REQUIRE(decoded != nullptr);
@@ -141,7 +156,16 @@ TEST_CASE("endianness: search_status uses big-endian 64-bit fields")
 
     /* header 12 bytes, then three 8-byte big-endian fields */
     REQUIRE(bytes.size() >= 12U + 24U);
-    for (int i = 0; i < 8; ++i) { REQUIRE(bytes[12 + i] == 0x11); }
-    for (int i = 0; i < 8; ++i) { REQUIRE(bytes[20 + i] == 0x22); }
-    for (int i = 0; i < 8; ++i) { REQUIRE(bytes[28 + i] == 0x33); }
+    for (int i = 0; i < 8; ++i)
+    {
+        REQUIRE(bytes[12 + i] == 0x11);
+    }
+    for (int i = 0; i < 8; ++i)
+    {
+        REQUIRE(bytes[20 + i] == 0x22);
+    }
+    for (int i = 0; i < 8; ++i)
+    {
+        REQUIRE(bytes[28 + i] == 0x33);
+    }
 }

@@ -43,8 +43,7 @@ void sigHupHandler(int signum __attribute__((unused)))
     reload_crl = 1;
 }
 
-auto
-main(int argc, char *argv[]) -> int
+auto main(int argc, char *argv[]) -> int
 {
     struct sigaction sa_int = {};
     sa_int.sa_handler = sigIntHandler;
@@ -90,7 +89,11 @@ main(int argc, char *argv[]) -> int
         return true;
     };
     bool cfg_ok = true;
-    if (!config.isMember("port")) { FSS_LOG_ERROR("server", "Missing required config field: port"); cfg_ok = false; }
+    if (!config.isMember("port"))
+    {
+        FSS_LOG_ERROR("server", "Missing required config field: port");
+        cfg_ok = false;
+    }
     cfg_ok &= cfg_require("postgres", config["postgres"], "host");
     cfg_ok &= cfg_require("postgres", config["postgres"], "user");
     cfg_ok &= cfg_require("postgres", config["postgres"], "pass");
@@ -105,7 +108,9 @@ main(int argc, char *argv[]) -> int
 
     constexpr int default_pg_port = 5432;
     int pg_port = config["postgres"].isMember("port") ? config["postgres"]["port"].asInt() : default_pg_port;
-    auto dbc = std::make_shared<flight_safety_system::server::db_connection>(config["postgres"]["host"].asString(), pg_port, config["postgres"]["user"].asString(), config["postgres"]["pass"].asString(), config["postgres"]["db"].asString());
+    auto dbc = std::make_shared<flight_safety_system::server::db_connection>(
+        config["postgres"]["host"].asString(), pg_port, config["postgres"]["user"].asString(),
+        config["postgres"]["pass"].asString(), config["postgres"]["db"].asString());
 
     if (!dbc->isConnected())
     {
@@ -114,13 +119,13 @@ main(int argc, char *argv[]) -> int
     }
 
     constexpr std::size_t default_db_queue_depth = 10000;
-    std::size_t db_queue_depth = config.isMember("db_queue_depth") ? config["db_queue_depth"].asUInt() : default_db_queue_depth;
+    std::size_t db_queue_depth =
+        config.isMember("db_queue_depth") ? config["db_queue_depth"].asUInt() : default_db_queue_depth;
     flight_safety_system::server::db_write_sink sink =
         [dbc](const flight_safety_system::server::db_write_task &task) -> void {
-            std::visit(flight_safety_system::server::overloaded{
-                [&](const flight_safety_system::server::rtt_write &w) -> void {
-                    dbc->recordRtt(w.asset_id, w.rtt_ms);
-                },
+        std::visit(
+            flight_safety_system::server::overloaded{
+                [&](const flight_safety_system::server::rtt_write &w) -> void { dbc->recordRtt(w.asset_id, w.rtt_ms); },
                 [&](const flight_safety_system::server::position_write &w) -> void {
                     dbc->recordPosition(w.asset_id, w.latitude, w.longitude, w.altitude);
                 },
@@ -130,20 +135,24 @@ main(int argc, char *argv[]) -> int
                 [&](const flight_safety_system::server::search_status_write &w) -> void {
                     dbc->recordSearchStatus(w.asset_id, w.search_id, w.completed, w.total);
                 },
-            }, task);
-        };
+            },
+            task);
+    };
     auto writer = std::make_shared<flight_safety_system::server::db_write_queue>(db_queue_depth, sink);
 
     auto clients = std::make_shared<server_clients>();
     constexpr int default_client_timeout_sec = 30;
     constexpr int msec_per_sec = 1000;
-    uint64_t client_timeout_sec = config.isMember("client_timeout") ? config["client_timeout"].asUInt64() : default_client_timeout_sec;
+    uint64_t client_timeout_sec =
+        config.isMember("client_timeout") ? config["client_timeout"].asUInt64() : default_client_timeout_sec;
     clients->setClientTimeoutMs(client_timeout_sec * msec_per_sec);
 
     constexpr uint64_t default_rate_capacity = 100;
     constexpr uint64_t default_rate_refill_per_s = 20;
-    uint64_t rate_capacity = config.isMember("message_rate_capacity") ? config["message_rate_capacity"].asUInt64() : default_rate_capacity;
-    uint64_t rate_refill = config.isMember("message_rate_refill") ? config["message_rate_refill"].asUInt64() : default_rate_refill_per_s;
+    uint64_t rate_capacity =
+        config.isMember("message_rate_capacity") ? config["message_rate_capacity"].asUInt64() : default_rate_capacity;
+    uint64_t rate_refill =
+        config.isMember("message_rate_refill") ? config["message_rate_refill"].asUInt64() : default_rate_refill_per_s;
     clients->setClientRateLimits(rate_capacity, rate_refill);
 
     std::shared_ptr<flight_safety_system::transport::fss_listen> listen;
@@ -159,13 +168,14 @@ main(int argc, char *argv[]) -> int
     flight_safety_system::transport::fss_connect_cb connect_cb =
         [dbc, writer, &clients](std::shared_ptr<flight_safety_system::transport::fss_connection> conn) -> bool {
 #ifdef DEBUG
-            std::cout << "New client connected" << std::endl;
+        std::cout << "New client connected" << std::endl;
 #endif
-            clients->clientConnected(std::make_shared<flight_safety_system::server::fss_client>(std::move(conn), dbc.get(), writer, clients.get()));
-            return true;
-        };
-    listen = std::make_shared<flight_safety_system::transport_ssl::fss_listen>(config["port"].asInt(),
-        connect_cb, ca_public_key, server_private_key, server_public_key, crl_file);
+        clients->clientConnected(std::make_shared<flight_safety_system::server::fss_client>(std::move(conn), dbc.get(),
+                                                                                            writer, clients.get()));
+        return true;
+    };
+    listen = std::make_shared<flight_safety_system::transport_ssl::fss_listen>(
+        config["port"].asInt(), connect_cb, ca_public_key, server_private_key, server_public_key, crl_file);
 
     /* Main-loop DB contract: the loop below must make NO synchronous DB
      * reads. Reads are handled exclusively by the command_poller thread

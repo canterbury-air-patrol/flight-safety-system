@@ -100,7 +100,7 @@ public:
     buf_len();
     buf_len(const char *_data, uint16_t len);
     buf_len(const void *_data, uint16_t len);
-    auto operator=(buf_len &&) -> buf_len& = delete;
+    auto operator=(buf_len &&) -> buf_len & = delete;
     virtual ~buf_len();
     auto operator=(const buf_len &other) -> buf_len &;
     auto isValid() -> bool;
@@ -121,11 +121,11 @@ protected:
 public:
     explicit fss_message_cb(std::shared_ptr<fss_connection> t_conn);
     fss_message_cb(const fss_message_cb &from);
-    fss_message_cb(fss_message_cb&&) = delete;
-    auto operator=(fss_message_cb &) -> fss_message_cb& = delete;
-    auto operator=(fss_message_cb &&) -> fss_message_cb& = delete;
+    fss_message_cb(fss_message_cb &&) = delete;
+    auto operator=(fss_message_cb &) -> fss_message_cb & = delete;
+    auto operator=(fss_message_cb &&) -> fss_message_cb & = delete;
     virtual ~fss_message_cb();
-    auto operator=(const fss_message_cb& other) -> fss_message_cb&;
+    auto operator=(const fss_message_cb &other) -> fss_message_cb &;
     virtual void processMessage(std::shared_ptr<fss_message> message) = 0;
     virtual auto getConnection() -> std::shared_ptr<fss_connection>;
     virtual auto connected() -> bool;
@@ -159,10 +159,10 @@ public:
     fss_connection();
     static auto create(int fd, size_t t_max_queue_size = default_max_queue_size) -> std::shared_ptr<fss_connection>;
     auto getDroppedMessages() -> uint64_t;
-    fss_connection(fss_connection&) = delete;
-    fss_connection(fss_connection&&) = delete;
-    auto operator=(fss_connection &) -> fss_connection& = delete;
-    auto operator=(fss_connection &&) -> fss_connection& = delete;
+    fss_connection(fss_connection &) = delete;
+    fss_connection(fss_connection &&) = delete;
+    auto operator=(fss_connection &) -> fss_connection & = delete;
+    auto operator=(fss_connection &&) -> fss_connection & = delete;
     virtual ~fss_connection();
     void setHandler(fss_message_cb *cb);
     virtual auto connectTo(const std::string &address, uint16_t port) -> bool;
@@ -189,8 +189,8 @@ public:
     fss_listen(uint16_t t_port, fss_connect_cb t_cb);
     fss_listen(fss_listen &) = delete;
     fss_listen(fss_listen &&) = delete;
-    auto operator=(fss_listen &) -> fss_listen& = delete;
-    auto operator=(fss_listen &&) -> fss_listen& = delete;
+    auto operator=(fss_listen &) -> fss_listen & = delete;
+    auto operator=(fss_listen &&) -> fss_listen & = delete;
     ~fss_listen() override;
     void processMessages() override;
 };
@@ -207,8 +207,8 @@ public:
     fss_message(uint64_t t_id, fss_message_type t_type);
     fss_message(fss_message &) = delete;
     fss_message(fss_message &&) = delete;
-    auto operator=(fss_message &) -> fss_message& = delete;
-    auto operator=(fss_message &&) -> fss_message& = delete;
+    auto operator=(fss_message &) -> fss_message & = delete;
+    auto operator=(fss_message &&) -> fss_message & = delete;
     virtual ~fss_message();
     void setId(uint64_t t_id);
     auto getId() -> uint64_t;
@@ -224,7 +224,7 @@ public:
     static auto decode(const std::shared_ptr<buf_len> &bl) -> std::shared_ptr<fss_message>;
 };
 
-class fss_message_closed: public fss_message {
+class fss_message_closed : public fss_message {
 protected:
     void packData(std::shared_ptr<buf_len>) override;
 public:
@@ -283,9 +283,8 @@ protected:
     void unpackData(const std::shared_ptr<buf_len> &bl);
     void packData(std::shared_ptr<buf_len> bl) override;
 public:
-    fss_message_position_report(double t_latitude, double t_longitude, uint32_t t_altitude,
-                                uint16_t t_heading, uint16_t t_hor_vel, int16_t t_ver_vel,
-                                uint32_t t_icao_address, std::string t_callsign,
+    fss_message_position_report(double t_latitude, double t_longitude, uint32_t t_altitude, uint16_t t_heading,
+                                uint16_t t_hor_vel, int16_t t_ver_vel, uint32_t t_icao_address, std::string t_callsign,
                                 uint16_t t_squawk, uint8_t t_tslc, uint16_t t_flags, uint8_t t_alt_type,
                                 uint8_t t_emitter_type, uint64_t t_timestamp);
     fss_message_position_report(uint64_t t_id, const std::shared_ptr<buf_len> &bl);
@@ -305,7 +304,7 @@ public:
     virtual auto getEmitterType() -> uint8_t;
 };
 
-class fss_message_system_status: public fss_message {
+class fss_message_system_status : public fss_message {
 private:
     uint8_t bat_percent;
     uint32_t mah_used;
@@ -314,14 +313,14 @@ protected:
     void unpackData(const std::shared_ptr<buf_len> &bl);
     void packData(std::shared_ptr<buf_len> bl) override;
 public:
-    fss_message_system_status(uint8_t bat_remaining_percent, uint32_t bat_mah_used, double bat_voltage=0.0);
+    fss_message_system_status(uint8_t bat_remaining_percent, uint32_t bat_mah_used, double bat_voltage = 0.0);
     fss_message_system_status(uint64_t t_id, const std::shared_ptr<buf_len> &bl);
     virtual auto getBatRemaining() -> uint8_t;
     virtual auto getBatMAHUsed() -> uint32_t;
     virtual auto getBatVoltage() -> double;
 };
 
-class fss_message_search_status: public fss_message {
+class fss_message_search_status : public fss_message {
 private:
     uint64_t search_id;
     uint64_t point_completed;
@@ -337,7 +336,7 @@ public:
     virtual auto getSearchTotal() -> uint64_t;
 };
 
-class fss_message_asset_command: public fss_message {
+class fss_message_asset_command : public fss_message {
 private:
     fss_asset_command command;
     double latitude;
@@ -359,7 +358,7 @@ public:
     auto getTimeStamp() -> uint64_t override;
 };
 
-class fss_message_smm_settings: public fss_message {
+class fss_message_smm_settings : public fss_message {
 private:
     std::string server_url;
     secure_string username;
@@ -375,7 +374,7 @@ public:
     virtual auto getPassword() -> const secure_string &;
 };
 
-class fss_message_server_list: public fss_message {
+class fss_message_server_list : public fss_message {
 private:
     std::vector<std::pair<std::string, uint16_t>> servers;
 protected:
@@ -388,7 +387,7 @@ public:
     virtual auto getServers() -> std::vector<std::pair<std::string, uint16_t>>;
 };
 
-class fss_message_identity_non_aircraft: public fss_message {
+class fss_message_identity_non_aircraft : public fss_message {
 private:
     uint64_t capabilities{0};
 protected:

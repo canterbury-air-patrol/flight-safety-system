@@ -17,7 +17,8 @@
 
 #include "fss-transport.hpp"
 
-TEST_CASE("Close Connection Check") {
+TEST_CASE("Close Connection Check")
+{
     auto msg_id = static_cast<uint64_t>(random());
 
     /* Create a test closed connection */
@@ -38,7 +39,8 @@ TEST_CASE("Close Connection Check") {
     REQUIRE(msg->getTimeStamp() == 0);
 }
 
-TEST_CASE("Identity Message Check") {
+TEST_CASE("Identity Message Check")
+{
     auto msg_id = static_cast<uint64_t>(random());
 
     /* Create a test identity */
@@ -60,12 +62,14 @@ TEST_CASE("Identity Message Check") {
     auto decoded_generic = flight_safety_system::transport::fss_message::decode(bl);
     REQUIRE(decoded_generic->getType() == flight_safety_system::transport::message_type_identity);
     REQUIRE(decoded_generic->getId() == msg_id);
-    auto decoded_generic_identity = std::dynamic_pointer_cast<flight_safety_system::transport::fss_message_identity>(decoded_generic);
+    auto decoded_generic_identity =
+        std::dynamic_pointer_cast<flight_safety_system::transport::fss_message_identity>(decoded_generic);
     REQUIRE(decoded_generic_identity != nullptr);
     REQUIRE(decoded_generic_identity->getName() == "test1");
 }
 
-TEST_CASE("RTT Request Message Check") {
+TEST_CASE("RTT Request Message Check")
+{
     auto msg_id = static_cast<uint64_t>(random());
 
     /* Create a test rtt request */
@@ -88,7 +92,8 @@ TEST_CASE("RTT Request Message Check") {
     REQUIRE(decoded_generic->getId() == msg_id);
 }
 
-TEST_CASE("RTT Response Message Check") {
+TEST_CASE("RTT Response Message Check")
+{
     auto msg_id = static_cast<uint64_t>(random());
     auto request_id = static_cast<uint64_t>(random());
 
@@ -113,11 +118,13 @@ TEST_CASE("RTT Response Message Check") {
     REQUIRE(decoded_generic->getType() == flight_safety_system::transport::message_type_rtt_response);
     /* Check input == output */
     REQUIRE(decoded_generic->getId() == msg_id);
-    auto decoded_generic_rtt_resp = std::dynamic_pointer_cast<flight_safety_system::transport::fss_message_rtt_response>(decoded_generic);
+    auto decoded_generic_rtt_resp =
+        std::dynamic_pointer_cast<flight_safety_system::transport::fss_message_rtt_response>(decoded_generic);
     REQUIRE((decoded_generic_rtt_resp)->getRequestId() == request_id);
 }
 
-TEST_CASE("Position Report Message Check") {
+TEST_CASE("Position Report Message Check")
+{
     auto msg_id = static_cast<uint64_t>(random());
     constexpr double pos_lat = -43.5;
     constexpr double pos_lng = 172.0;
@@ -136,7 +143,9 @@ TEST_CASE("Position Report Message Check") {
     constexpr int emitter_type = 14;
 
     /* Create a test position report */
-    auto msg = std::make_shared<flight_safety_system::transport::fss_message_position_report>(pos_lat, pos_lng, altitude, heading, hor_vel, vert_vel, icao_address, "ZK-ABC", vfr_squawk, 0, flags, 1, emitter_type, timestamp);
+    auto msg = std::make_shared<flight_safety_system::transport::fss_message_position_report>(
+        pos_lat, pos_lng, altitude, heading, hor_vel, vert_vel, icao_address, "ZK-ABC", vfr_squawk, 0, flags, 1,
+        emitter_type, timestamp);
     /* Check the type */
     REQUIRE(msg->getType() == flight_safety_system::transport::message_type_position_report);
     /* Check the parameters */
@@ -187,7 +196,8 @@ TEST_CASE("Position Report Message Check") {
     REQUIRE(decoded_generic->getTimeStamp() == timestamp);
 }
 
-TEST_CASE("System Status Message Check") {
+TEST_CASE("System Status Message Check")
+{
     auto msg_id = static_cast<uint64_t>(random());
     constexpr int max_bat_level = 100;
     auto bat_level = random() % max_bat_level;
@@ -195,10 +205,11 @@ TEST_CASE("System Status Message Check") {
     auto bat_used = random() % max_bat_used;
     constexpr int max_bat_voltage = 11000;
     auto bat_voltage_n = random() % max_bat_voltage;
-    double bat_voltage = (double) bat_voltage_n / 1000.0;
+    double bat_voltage = (double)bat_voltage_n / 1000.0;
 
     /* Create a test system status */
-    auto msg = std::make_shared<flight_safety_system::transport::fss_message_system_status>(bat_level, bat_used, bat_voltage);
+    auto msg =
+        std::make_shared<flight_safety_system::transport::fss_message_system_status>(bat_level, bat_used, bat_voltage);
     /* Check the type */
     REQUIRE(msg->getType() == flight_safety_system::transport::message_type_system_status);
     /* Check the parameters */
@@ -223,7 +234,8 @@ TEST_CASE("System Status Message Check") {
     REQUIRE(decoded_generic->getType() == flight_safety_system::transport::message_type_system_status);
     /* Check input == output */
     REQUIRE(decoded_generic->getId() == msg_id);
-    auto decoded_generic_status = std::dynamic_pointer_cast<flight_safety_system::transport::fss_message_system_status>(decoded_generic);
+    auto decoded_generic_status =
+        std::dynamic_pointer_cast<flight_safety_system::transport::fss_message_system_status>(decoded_generic);
     REQUIRE(decoded_generic_status != nullptr);
     REQUIRE(decoded_generic_status->getBatRemaining() == bat_level);
     REQUIRE(decoded_generic_status->getBatMAHUsed() == bat_used);
@@ -231,7 +243,8 @@ TEST_CASE("System Status Message Check") {
 }
 
 
-TEST_CASE("Search Status Message Check") {
+TEST_CASE("Search Status Message Check")
+{
     auto msg_id = static_cast<uint64_t>(random());
     constexpr int max_search_values = 1000;
     auto search_id = static_cast<uint64_t>(random() % max_search_values);
@@ -239,7 +252,8 @@ TEST_CASE("Search Status Message Check") {
     auto search_progress = static_cast<uint64_t>(random() % search_total);
 
     /* Create a test search status */
-    auto msg = std::make_shared<flight_safety_system::transport::fss_message_search_status>(search_id, search_progress, search_total);
+    auto msg = std::make_shared<flight_safety_system::transport::fss_message_search_status>(search_id, search_progress,
+                                                                                            search_total);
     /* Check the type */
     REQUIRE(msg->getType() == flight_safety_system::transport::message_type_search_status);
     /* Check the parameters */
@@ -263,19 +277,22 @@ TEST_CASE("Search Status Message Check") {
     REQUIRE(decoded_generic->getType() == flight_safety_system::transport::message_type_search_status);
     /* Check input == output */
     REQUIRE(decoded_generic->getId() == msg_id);
-    auto decoded_generic_search = std::dynamic_pointer_cast<flight_safety_system::transport::fss_message_search_status>(decoded_generic);
+    auto decoded_generic_search =
+        std::dynamic_pointer_cast<flight_safety_system::transport::fss_message_search_status>(decoded_generic);
     REQUIRE(decoded_generic_search != nullptr);
     REQUIRE(decoded_generic_search->getSearchId() == search_id);
     REQUIRE(decoded_generic_search->getSearchCompleted() == search_progress);
     REQUIRE(decoded_generic_search->getSearchTotal() == search_total);
 }
 
-TEST_CASE("Asset Command Message Check - Basic") {
+TEST_CASE("Asset Command Message Check - Basic")
+{
     auto msg_id = static_cast<uint64_t>(random());
     auto timestamp = static_cast<uint64_t>(random());
 
     /* Create a test asset command */
-    auto msg = std::make_shared<flight_safety_system::transport::fss_message_asset_command>(flight_safety_system::transport::asset_command_rtl, timestamp);
+    auto msg = std::make_shared<flight_safety_system::transport::fss_message_asset_command>(
+        flight_safety_system::transport::asset_command_rtl, timestamp);
     /* Check the type */
     REQUIRE(msg->getType() == flight_safety_system::transport::message_type_command);
     /* Check the parameters */
@@ -297,19 +314,22 @@ TEST_CASE("Asset Command Message Check - Basic") {
     REQUIRE(decoded_generic->getType() == flight_safety_system::transport::message_type_command);
     /* Check input == output */
     REQUIRE(decoded_generic->getId() == msg_id);
-    auto decoded_generic_command = std::dynamic_pointer_cast<flight_safety_system::transport::fss_message_asset_command>(decoded_generic);
+    auto decoded_generic_command =
+        std::dynamic_pointer_cast<flight_safety_system::transport::fss_message_asset_command>(decoded_generic);
     REQUIRE(decoded_generic_command->getCommand() == flight_safety_system::transport::asset_command_rtl);
     REQUIRE(decoded_generic_command->getTimeStamp() == timestamp);
 }
 
-TEST_CASE("Asset Command Message Check - Position") {
+TEST_CASE("Asset Command Message Check - Position")
+{
     auto msg_id = static_cast<uint64_t>(random());
     auto timestamp = static_cast<uint64_t>(random());
     constexpr double goto_lat = -43.5;
     constexpr double goto_lng = 172.0;
 
     /* Create a test asset command */
-    auto msg = std::make_shared<flight_safety_system::transport::fss_message_asset_command>(flight_safety_system::transport::asset_command_goto, timestamp, goto_lat, goto_lng);
+    auto msg = std::make_shared<flight_safety_system::transport::fss_message_asset_command>(
+        flight_safety_system::transport::asset_command_goto, timestamp, goto_lat, goto_lng);
     /* Check the type */
     REQUIRE(msg->getType() == flight_safety_system::transport::message_type_command);
     /* Check the parameters */
@@ -327,7 +347,7 @@ TEST_CASE("Asset Command Message Check - Position") {
     /* Check input == output */
     REQUIRE(decoded->getId() == msg_id);
     REQUIRE(decoded->getCommand() == flight_safety_system::transport::asset_command_goto);
-    REQUIRE(decoded->getTimeStamp() ==  timestamp);
+    REQUIRE(decoded->getTimeStamp() == timestamp);
     REQUIRE(decoded->getLatitude() == goto_lat);
     REQUIRE(decoded->getLongitude() == goto_lng);
     auto decoded_generic = flight_safety_system::transport::fss_message::decode(bl);
@@ -335,7 +355,8 @@ TEST_CASE("Asset Command Message Check - Position") {
     REQUIRE(decoded->getType() == flight_safety_system::transport::message_type_command);
     /* Check input == output */
     REQUIRE(decoded_generic->getId() == msg_id);
-    auto decoded_generic_command = std::dynamic_pointer_cast<flight_safety_system::transport::fss_message_asset_command>(decoded_generic);
+    auto decoded_generic_command =
+        std::dynamic_pointer_cast<flight_safety_system::transport::fss_message_asset_command>(decoded_generic);
     REQUIRE(decoded_generic_command != nullptr);
     REQUIRE(decoded_generic_command->getCommand() == flight_safety_system::transport::asset_command_goto);
     REQUIRE(decoded_generic->getTimeStamp() == timestamp);
@@ -343,13 +364,15 @@ TEST_CASE("Asset Command Message Check - Position") {
     REQUIRE(decoded_generic->getLongitude() == goto_lng);
 }
 
-TEST_CASE("Asset Command Message Check - Altitude") {
+TEST_CASE("Asset Command Message Check - Altitude")
+{
     auto msg_id = static_cast<uint64_t>(random());
     auto timestamp = static_cast<uint64_t>(random());
     auto altitude = random();
 
     /* Create a test asset command */
-    auto msg = std::make_shared<flight_safety_system::transport::fss_message_asset_command>(flight_safety_system::transport::asset_command_altitude, timestamp, altitude);
+    auto msg = std::make_shared<flight_safety_system::transport::fss_message_asset_command>(
+        flight_safety_system::transport::asset_command_altitude, timestamp, altitude);
     /* Check the type */
     REQUIRE(msg->getType() == flight_safety_system::transport::message_type_command);
     /* Check the parameters */
@@ -373,17 +396,21 @@ TEST_CASE("Asset Command Message Check - Altitude") {
     REQUIRE(decoded_generic->getType() == flight_safety_system::transport::message_type_command);
     /* Check input == output */
     REQUIRE(decoded_generic->getId() == msg_id);
-    auto decoded_generic_command = std::dynamic_pointer_cast<flight_safety_system::transport::fss_message_asset_command>(decoded_generic);
+    auto decoded_generic_command =
+        std::dynamic_pointer_cast<flight_safety_system::transport::fss_message_asset_command>(decoded_generic);
     REQUIRE(decoded_generic_command->getCommand() == flight_safety_system::transport::asset_command_altitude);
     REQUIRE(decoded_generic->getTimeStamp() == timestamp);
     REQUIRE(decoded_generic->getAltitude() == altitude);
 }
 
-TEST_CASE("SMM Settings Message Check") {
+TEST_CASE("SMM Settings Message Check")
+{
     auto msg_id = static_cast<uint64_t>(random());
 
     /* Create a test asset command */
-    auto msg = std::make_shared<flight_safety_system::transport::fss_message_smm_settings>("https://localhost/", flight_safety_system::secure_string(std::string_view("asset")), flight_safety_system::secure_string(std::string_view("password1")));
+    auto msg = std::make_shared<flight_safety_system::transport::fss_message_smm_settings>(
+        "https://localhost/", flight_safety_system::secure_string(std::string_view("asset")),
+        flight_safety_system::secure_string(std::string_view("password1")));
     /* Check the type */
     REQUIRE(msg->getType() == flight_safety_system::transport::message_type_smm_settings);
     /* Check the parameters */
@@ -407,14 +434,16 @@ TEST_CASE("SMM Settings Message Check") {
     REQUIRE(decoded_generic->getType() == flight_safety_system::transport::message_type_smm_settings);
     /* Check input == output */
     REQUIRE(decoded_generic->getId() == msg_id);
-    auto decoded_generic_smm = std::dynamic_pointer_cast<flight_safety_system::transport::fss_message_smm_settings>(decoded_generic);
+    auto decoded_generic_smm =
+        std::dynamic_pointer_cast<flight_safety_system::transport::fss_message_smm_settings>(decoded_generic);
     REQUIRE(decoded_generic_smm != nullptr);
     REQUIRE(decoded_generic_smm->getServerURL() == "https://localhost/");
     REQUIRE(decoded_generic_smm->getUsername() == "asset");
     REQUIRE(decoded_generic_smm->getPassword() == "password1");
 }
 
-TEST_CASE("Server List Message Check") {
+TEST_CASE("Server List Message Check")
+{
     auto msg_id = static_cast<uint64_t>(random());
     constexpr int port_max = 65535;
     auto server_port = random() % port_max;
@@ -448,7 +477,8 @@ TEST_CASE("Server List Message Check") {
     REQUIRE(decoded_generic->getType() == flight_safety_system::transport::message_type_server_list);
     /* Check input == output */
     REQUIRE(decoded_generic->getId() == msg_id);
-    auto decoded_generic_servers = std::dynamic_pointer_cast<flight_safety_system::transport::fss_message_server_list>(decoded_generic);
+    auto decoded_generic_servers =
+        std::dynamic_pointer_cast<flight_safety_system::transport::fss_message_server_list>(decoded_generic);
     REQUIRE(decoded_generic_servers != nullptr);
     auto sl3 = decoded_generic_servers->getServers();
     REQUIRE(!sl3.empty());
@@ -456,7 +486,8 @@ TEST_CASE("Server List Message Check") {
     REQUIRE(sl3[0].second == server_port);
 }
 
-TEST_CASE("Position Report String Alignment") {
+TEST_CASE("Position Report String Alignment")
+{
     /* Callsign "AB" (2 bytes): buf is at 44 bytes when packString is called,
        so len(2) + "AB"(2) = 4 bytes reaches offset 48, which is already 8-byte
        aligned. The bug would add 8 extra padding bytes; the fix adds 0. */
@@ -471,7 +502,8 @@ TEST_CASE("Position Report String Alignment") {
     REQUIRE(decoded->getCallSign() == "AB");
 }
 
-TEST_CASE("Identity (Non-Aircraft) Message Check") {
+TEST_CASE("Identity (Non-Aircraft) Message Check")
+{
     auto msg_id = static_cast<uint64_t>(random());
     constexpr int bit_1 = 13;
     constexpr int bit_2 = 12;
@@ -503,7 +535,8 @@ TEST_CASE("Identity (Non-Aircraft) Message Check") {
     REQUIRE(decoded_generic->getId() == msg_id);
 }
 
-TEST_CASE("Version Message Round-trip") {
+TEST_CASE("Version Message Round-trip")
+{
     auto msg_id = static_cast<uint64_t>(random());
     constexpr uint16_t version = 3;
     constexpr uint16_t min_version = 2;
@@ -530,14 +563,16 @@ TEST_CASE("Version Message Round-trip") {
     REQUIRE(decoded_generic != nullptr);
     REQUIRE(decoded_generic->getType() == flight_safety_system::transport::message_type_version);
     REQUIRE(decoded_generic->getId() == msg_id);
-    auto decoded_generic_version = std::dynamic_pointer_cast<flight_safety_system::transport::fss_message_version>(decoded_generic);
+    auto decoded_generic_version =
+        std::dynamic_pointer_cast<flight_safety_system::transport::fss_message_version>(decoded_generic);
     REQUIRE(decoded_generic_version != nullptr);
     REQUIRE(decoded_generic_version->getProtocolVersion() == version);
     REQUIRE(decoded_generic_version->getMinSupportedVersion() == min_version);
     REQUIRE(decoded_generic_version->getFeatureFlags() == flags);
 }
 
-TEST_CASE("Version Message Defaults") {
+TEST_CASE("Version Message Defaults")
+{
     auto msg = std::make_shared<flight_safety_system::transport::fss_message_version>();
     REQUIRE(msg->getType() == flight_safety_system::transport::message_type_version);
     REQUIRE(msg->getProtocolVersion() == flight_safety_system::transport::FSS_PROTOCOL_VERSION);

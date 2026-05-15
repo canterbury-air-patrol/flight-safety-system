@@ -21,10 +21,28 @@ public:
     std::map<uint64_t, std::vector<std::shared_ptr<flight_safety_system::server::asset_command>>> commands{};
     std::vector<flight_safety_system::server::fss_server_details> active_servers{};
 
-    struct recorded_rtt { uint64_t asset_id; uint64_t rtt_ms; };
-    struct recorded_pos { uint64_t asset_id; double latitude; double longitude; uint32_t altitude; };
-    struct recorded_status { uint64_t asset_id; uint8_t bat_percent; uint32_t bat_mah_used; double bat_voltage; };
-    struct recorded_search { uint64_t asset_id; uint64_t search_id; uint64_t completed; uint64_t total; };
+    struct recorded_rtt {
+        uint64_t asset_id;
+        uint64_t rtt_ms;
+    };
+    struct recorded_pos {
+        uint64_t asset_id;
+        double latitude;
+        double longitude;
+        uint32_t altitude;
+    };
+    struct recorded_status {
+        uint64_t asset_id;
+        uint8_t bat_percent;
+        uint32_t bat_mah_used;
+        double bat_voltage;
+    };
+    struct recorded_search {
+        uint64_t asset_id;
+        uint64_t search_id;
+        uint64_t completed;
+        uint64_t total;
+    };
 
     std::vector<recorded_rtt> rtts{};
     std::vector<recorded_pos> positions{};
@@ -49,10 +67,7 @@ public:
         positions.push_back({asset_id, latitude, longitude, altitude});
     }
 
-    void recordRtt(uint64_t asset_id, uint64_t rtt_ms) override
-    {
-        rtts.push_back({asset_id, rtt_ms});
-    }
+    void recordRtt(uint64_t asset_id, uint64_t rtt_ms) override { rtts.push_back({asset_id, rtt_ms}); }
 
     void recordStatus(uint64_t asset_id, uint8_t bat_percent, uint32_t bat_mah_used, double bat_voltage) override
     {
@@ -67,7 +82,10 @@ public:
     auto getCommand(uint64_t asset_id) -> std::shared_ptr<flight_safety_system::server::asset_command> override
     {
         auto it = commands.find(asset_id);
-        if (it == commands.end() || it->second.empty()) { return nullptr; }
+        if (it == commands.end() || it->second.empty())
+        {
+            return nullptr;
+        }
         std::shared_ptr<flight_safety_system::server::asset_command> newest = nullptr;
         for (const auto &cmd : it->second)
         {

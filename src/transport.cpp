@@ -21,10 +21,9 @@
 
 #include "transport.hpp"
 
-namespace
-{
+namespace {
 
-auto safe_close_fd(int fd, const char* context) -> int
+auto safe_close_fd(int fd, const char *context) -> int
 {
     for (;;)
     {
@@ -41,7 +40,7 @@ auto safe_close_fd(int fd, const char* context) -> int
     }
 }
 
-auto safe_shutdown_fd(int fd, const char* context) -> int
+auto safe_shutdown_fd(int fd, const char *context) -> int
 {
     for (;;)
     {
@@ -66,19 +65,16 @@ auto safe_shutdown_fd(int fd, const char* context) -> int
 
 #ifdef DEBUG
 /* Run inet_ntop on a sockaddr_storage object */
-const char *
-inet_ntop_stor(struct sockaddr_storage *src, char *dst, size_t dstlen, uint16_t *port)
+const char *inet_ntop_stor(struct sockaddr_storage *src, char *dst, size_t dstlen, uint16_t *port)
 {
     switch (src->ss_family)
     {
-        case AF_INET:
-        {
+        case AF_INET: {
             auto *sa_in = as_sockaddr_in(src);
             *port = ntohs(sa_in->sin_port);
             return inet_ntop(AF_INET, &sa_in->sin_addr, dst, dstlen);
         }
-        case AF_INET6:
-        {
+        case AF_INET6: {
             auto *sa_in6 = as_sockaddr_in6(src);
             *port = ntohs(sa_in6->sin6_port);
             return inet_ntop(AF_INET6, &sa_in6->sin6_addr, dst, dstlen);
@@ -90,27 +86,26 @@ inet_ntop_stor(struct sockaddr_storage *src, char *dst, size_t dstlen, uint16_t 
 
 flight_safety_system::transport::fss_connection::fss_connection() = default;
 
-flight_safety_system::transport::fss_connection::fss_connection(int t_fd, size_t t_max_queue_size) // NOLINT(bugprone-easily-swappable-parameters)
+flight_safety_system::transport::fss_connection::fss_connection(
+    int t_fd, size_t t_max_queue_size) // NOLINT(bugprone-easily-swappable-parameters)
     : fd(t_fd), max_queue_size(t_max_queue_size)
 {
 }
 
-auto
-flight_safety_system::transport::fss_connection::create(int t_fd, size_t t_max_queue_size) -> std::shared_ptr<fss_connection>
+auto flight_safety_system::transport::fss_connection::create(int t_fd, size_t t_max_queue_size)
+    -> std::shared_ptr<fss_connection>
 {
     auto conn = std::shared_ptr<fss_connection>(new fss_connection(t_fd, t_max_queue_size));
     conn->startRecvThread(std::thread([conn]() -> void { conn->processMessages(); }));
     return conn;
 }
 
-auto
-flight_safety_system::transport::fss_connection::getDroppedMessages() -> uint64_t
+auto flight_safety_system::transport::fss_connection::getDroppedMessages() -> uint64_t
 {
     return this->dropped_messages.load();
 }
 
-void
-flight_safety_system::transport::fss_connection::disconnect()
+void flight_safety_system::transport::fss_connection::disconnect()
 {
     this->run.store(false);
     int orig_fd = this->fd.exchange(-1);
@@ -139,7 +134,7 @@ flight_safety_system::transport::fss_connection::disconnect()
 flight_safety_system::transport::fss_connection::~fss_connection()
 {
     fss_connection::disconnect();
-    while(!this->messages.empty())
+    while (!this->messages.empty())
     {
         auto msg = this->messages.front();
         this->messages.pop();
@@ -151,8 +146,7 @@ auto flight_safety_system::transport::fss_connection::getMessageId() -> uint64_t
     return ++this->last_msg_id;
 }
 
-void
-flight_safety_system::transport::fss_connection::processMessages()
+void flight_safety_system::transport::fss_connection::processMessages()
 {
     this->run.store(true);
     while (this->run.load())
@@ -194,7 +188,8 @@ flight_safety_system::transport::fss_connection::processMessages()
                     uint64_t dropped = ++this->dropped_messages;
                     if (dropped == 1 || dropped % 100 == 0)
                     {
-                        FSS_LOG_WARN("transport", "Message queue full, dropping oldest message. Total dropped: " << dropped);
+                        FSS_LOG_WARN("transport",
+                                     "Message queue full, dropping oldest message. Total dropped: " << dropped);
                     }
                 }
                 this->messages.push(msg);
@@ -203,8 +198,8 @@ flight_safety_system::transport::fss_connection::processMessages()
     }
 }
 
-auto
-flight_safety_system::transport::fss_connection::getMsg() -> std::shared_ptr<flight_safety_system::transport::fss_message>
+auto flight_safety_system::transport::fss_connection::getMsg()
+    -> std::shared_ptr<flight_safety_system::transport::fss_message>
 {
     std::scoped_lock lock_holder(this->msg_lock);
     if (this->handler == nullptr)
@@ -222,21 +217,20 @@ flight_safety_system::transport::fss_connection::getMsg() -> std::shared_ptr<fli
     return nullptr;
 }
 
-auto
-flight_safety_system::transport::fss_connection::connectTo(const std::string &address, uint16_t port) -> bool
+auto flight_safety_system::transport::fss_connection::connectTo(const std::string &address, uint16_t port) -> bool
 {
     struct sockaddr_storage remote = {};
-    if (!convert_str_to_sa (address, port, &remote))
+    if (!convert_str_to_sa(address, port, &remote))
     {
         FSS_LOG_ERROR("transport", "Failed to convert '" << address << "' to a usable address");
         return false;
     }
 
 #ifdef DEBUG
-        char addr_str[INET6_ADDRSTRLEN];
-        uint16_t client_port;
-        inet_ntop_stor(&remote, addr_str, INET6_ADDRSTRLEN, &client_port);
-        std::cout << "Trying to connect to " << address << " (" << addr_str << "):" << port << std::endl;
+    char addr_str[INET6_ADDRSTRLEN];
+    uint16_t client_port;
+    inet_ntop_stor(&remote, addr_str, INET6_ADDRSTRLEN, &client_port);
+    std::cout << "Trying to connect to " << address << " (" << addr_str << "):" << port << std::endl;
 #endif
 
     if (this->fd.load() == -1)
@@ -252,7 +246,8 @@ flight_safety_system::transport::fss_connection::connectTo(const std::string &ad
         FSS_PERROR("transport", "setsockopt TCP_SYNCNT failed, using kernel default");
     }
 
-    if (connect(current_fd, as_sockaddr(&remote), remote.ss_family == AF_INET ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6)) < 0)
+    if (connect(current_fd, as_sockaddr(&remote),
+                remote.ss_family == AF_INET ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6)) < 0)
     {
         FSS_PERROR("transport", "Failed to connect to " + address);
         safe_close_fd(this->fd.exchange(-1), "transport/connect");
@@ -266,8 +261,7 @@ flight_safety_system::transport::fss_connection::connectTo(const std::string &ad
     return true;
 }
 
-auto
-flight_safety_system::transport::fss_connection::sendMsg(const std::shared_ptr<fss_message> &msg) -> bool
+auto flight_safety_system::transport::fss_connection::sendMsg(const std::shared_ptr<fss_message> &msg) -> bool
 {
     std::scoped_lock lock_holder(this->send_lock);
     msg->setId(this->getMessageId());
@@ -284,12 +278,11 @@ flight_safety_system::transport::fss_connection::sendMsg(const std::shared_ptr<f
 }
 
 #ifdef DEBUG
-static void
-print_bl(std::shared_ptr<flight_safety_system::transport::buf_len> bl)
+static void print_bl(std::shared_ptr<flight_safety_system::transport::buf_len> bl)
 {
     const auto *data = static_cast<const unsigned char *>(static_cast<const void *>(bl->getData()));
     size_t len = bl->getLength();
-    for(size_t o = 0; o < len; o++)
+    for (size_t o = 0; o < len; o++)
     {
         printf("0x%04zx: 0x%02x '%1c'\n", o, data[o], data[o]);
     }
@@ -297,8 +290,7 @@ print_bl(std::shared_ptr<flight_safety_system::transport::buf_len> bl)
 }
 #endif
 
-auto
-flight_safety_system::transport::fss_connection::sendMsg(const std::shared_ptr<buf_len> &bl) -> bool
+auto flight_safety_system::transport::fss_connection::sendMsg(const std::shared_ptr<buf_len> &bl) -> bool
 {
     int current_fd = this->fd.load();
     if (current_fd == -1)
@@ -323,14 +315,13 @@ flight_safety_system::transport::fss_connection::sendMsg(const std::shared_ptr<b
     return true;
 }
 
-void
-flight_safety_system::transport::fss_connection::setHandler(fss_message_cb *cb)
+void flight_safety_system::transport::fss_connection::setHandler(fss_message_cb *cb)
 {
     std::scoped_lock lock_holder(this->msg_lock);
     this->handler = cb;
     if (this->handler != nullptr)
     {
-        while(!this->messages.empty())
+        while (!this->messages.empty())
         {
             auto msg = this->messages.front();
             this->messages.pop();
@@ -339,8 +330,7 @@ flight_safety_system::transport::fss_connection::setHandler(fss_message_cb *cb)
     }
 }
 
-auto
-flight_safety_system::transport::fss_connection::recvBytes(void *t_bytes, size_t t_max_bytes) -> ssize_t
+auto flight_safety_system::transport::fss_connection::recvBytes(void *t_bytes, size_t t_max_bytes) -> ssize_t
 {
     int current_fd = this->fd.load();
     if (current_fd < 0)
@@ -350,27 +340,24 @@ flight_safety_system::transport::fss_connection::recvBytes(void *t_bytes, size_t
     return recv(current_fd, t_bytes, t_max_bytes, 0);
 }
 
-auto
-flight_safety_system::transport::fss_connection::getFd() -> int
+auto flight_safety_system::transport::fss_connection::getFd() -> int
 {
     return this->fd.load();
 }
 
-void
-flight_safety_system::transport::fss_connection::setFd(int new_fd)
+void flight_safety_system::transport::fss_connection::setFd(int new_fd)
 {
     this->fd.store(new_fd);
 }
 
-void
-flight_safety_system::transport::fss_connection::startRecvThread(std::thread t_recv_thread)
+void flight_safety_system::transport::fss_connection::startRecvThread(std::thread t_recv_thread)
 {
     this->recv_thread = std::move(t_recv_thread);
 }
 
 
-auto
-flight_safety_system::transport::fss_connection::recvMsg() -> std::shared_ptr<flight_safety_system::transport::fss_message>
+auto flight_safety_system::transport::fss_connection::recvMsg()
+    -> std::shared_ptr<flight_safety_system::transport::fss_message>
 {
     std::shared_ptr<flight_safety_system::transport::fss_message> msg = nullptr;
     std::array<std::uint8_t, sizeof(uint16_t)> header{};
@@ -402,7 +389,8 @@ flight_safety_system::transport::fss_connection::recvMsg() -> std::shared_ptr<fl
     auto total_length = static_cast<ssize_t>(data_length);
     if (data_length % sizeof(uint64_t) != 0)
     {
-        total_length += static_cast<ssize_t>(sizeof(uint64_t)) - (total_length % static_cast<ssize_t>(sizeof(uint64_t)));
+        total_length +=
+            static_cast<ssize_t>(sizeof(uint64_t)) - (total_length % static_cast<ssize_t>(sizeof(uint64_t)));
     }
     if (total_length < static_cast<ssize_t>(sizeof(uint16_t)))
     {
@@ -443,14 +431,14 @@ flight_safety_system::transport::fss_connection::recvMsg() -> std::shared_ptr<fl
     return msg;
 }
 
-auto
-flight_safety_system::transport::fss_connection::getClientNames() -> std::list<std::string>
+auto flight_safety_system::transport::fss_connection::getClientNames() -> std::list<std::string>
 {
     std::list<std::string> ret;
     return ret;
 }
 
-flight_safety_system::transport::fss_listen::fss_listen(uint16_t t_port, fss_connect_cb t_cb) : fss_connection(), port(t_port), cb(std::move(t_cb))
+flight_safety_system::transport::fss_listen::fss_listen(uint16_t t_port, fss_connect_cb t_cb)
+    : fss_connection(), port(t_port), cb(std::move(t_cb))
 {
     this->startListening();
 }
@@ -460,14 +448,12 @@ flight_safety_system::transport::fss_listen::~fss_listen()
     this->disconnect();
 }
 
-static void
-listen_thread(flight_safety_system::transport::fss_listen *listen)
+static void listen_thread(flight_safety_system::transport::fss_listen *listen)
 {
     listen->processMessages();
 }
 
-void
-flight_safety_system::transport::fss_listen::processMessages()
+void flight_safety_system::transport::fss_listen::processMessages()
 {
     while (this->getFd() >= 0)
     {
@@ -503,14 +489,13 @@ flight_safety_system::transport::fss_listen::processMessages()
     }
 }
 
-auto
-flight_safety_system::transport::fss_listen::newConnection(int t_newfd) -> std::shared_ptr<flight_safety_system::transport::fss_connection>
+auto flight_safety_system::transport::fss_listen::newConnection(int t_newfd)
+    -> std::shared_ptr<flight_safety_system::transport::fss_connection>
 {
     return flight_safety_system::transport::fss_connection::create(t_newfd);
 }
 
-auto
-flight_safety_system::transport::fss_listen::startListening() -> bool
+auto flight_safety_system::transport::fss_listen::startListening() -> bool
 {
     /* open the socket */
     if (this->getFd() < 0)
@@ -537,7 +522,7 @@ flight_safety_system::transport::fss_listen::startListening() -> bool
         this->setFd(-1);
         return false;
     }
-    if(listen(this->getFd(), this->max_pending_connections) < 0)
+    if (listen(this->getFd(), this->max_pending_connections) < 0)
     {
         FSS_PERROR("transport", "Failed to listen on socket");
         safe_close_fd(this->getFd(), "transport/listen");

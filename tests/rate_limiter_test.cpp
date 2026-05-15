@@ -75,7 +75,10 @@ TEST_CASE("rate_limiter: large elapsed time refills up to capacity")
 {
     fss::rate_limiter rl(5, 1);
     // drain the bucket
-    for (int i = 0; i < 5; i++) { rl.consume(0); }
+    for (int i = 0; i < 5; i++)
+    {
+        rl.consume(0);
+    }
     REQUIRE(!rl.consume(0));
     // 1 hour later: 3600 tokens would be added but capped at 5
     REQUIRE(rl.consume(3600000));

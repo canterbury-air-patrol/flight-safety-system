@@ -22,22 +22,23 @@ private:
     uint64_t rate_refill_per_s{20};
 public:
     server_clients() = default;
-    ~server_clients() override {
+    ~server_clients() override
+    {
         this->shutting_down = true;
         std::scoped_lock guard(this->lock);
-        for (const auto &c: this->clients)
+        for (const auto &c : this->clients)
         {
             c->disconnect();
         }
     }
-    server_clients(server_clients&) = delete;
-    server_clients(server_clients&&) = delete;
-    auto operator=(server_clients&) -> server_clients& = delete;
-    auto operator=(server_clients&&) -> server_clients& = delete;
+    server_clients(server_clients &) = delete;
+    server_clients(server_clients &&) = delete;
+    auto operator=(server_clients &) -> server_clients & = delete;
+    auto operator=(server_clients &&) -> server_clients & = delete;
     void cleanupRemovableClients()
     {
         std::scoped_lock guard(this->lock);
-        while(!this->disconnected.empty())
+        while (!this->disconnected.empty())
         {
             auto client = this->disconnected.front();
             this->disconnected.pop();
@@ -61,17 +62,18 @@ public:
     void clientDisconnected(flight_safety_system::server::fss_client *client) override
     {
         std::scoped_lock guard(this->lock);
-        if (this->shutting_down) return;
-        auto it = std::find_if(this->clients.begin(), this->clients.end(), [client](const auto &c) -> auto {
-            return c.get() == client;
-        });
+        if (this->shutting_down)
+            return;
+        auto it = std::find_if(this->clients.begin(), this->clients.end(),
+                               [client](const auto &c) -> auto { return c.get() == client; });
         if (it != this->clients.end())
         {
             this->disconnected.push(*it);
             this->clients.erase(it);
         }
     };
-    void broadcastMsg(const std::shared_ptr<flight_safety_system::transport::fss_message> &msg, flight_safety_system::server::fss_client *except = nullptr) override
+    void broadcastMsg(const std::shared_ptr<flight_safety_system::transport::fss_message> &msg,
+                      flight_safety_system::server::fss_client *except = nullptr) override
     {
         std::scoped_lock guard(this->lock);
         for (const auto &client : this->clients)
@@ -101,7 +103,7 @@ public:
     void sendSMMSettings()
     {
         std::scoped_lock guard(this->lock);
-        for(const auto &client: this->clients)
+        for (const auto &client : this->clients)
         {
             client->sendSMMSettings();
         }
@@ -126,7 +128,10 @@ public:
             for (const auto &c : this->clients)
             {
                 uint64_t id = c->getCachedAssetId();
-                if (id != 0) { snapshot.emplace_back(c, id); }
+                if (id != 0)
+                {
+                    snapshot.emplace_back(c, id);
+                }
             }
         }
         for (auto &[client, asset_id] : snapshot)
@@ -137,7 +142,7 @@ public:
     void sendCommand()
     {
         std::scoped_lock guard(this->lock);
-        for(const auto &client: this->clients)
+        for (const auto &client : this->clients)
         {
             client->sendCommand();
         }

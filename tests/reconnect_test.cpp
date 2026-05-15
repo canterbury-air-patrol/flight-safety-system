@@ -26,11 +26,11 @@
  * tests/client.cpp. */
 namespace {
 
-constexpr const char *CA_PUBLIC_FILE     = "certs/ca.public.pem";
-constexpr const char *SERVER_PRIVATE_FILE = "certs/localhost.private.pem";
-constexpr const char *SERVER_PUBLIC_FILE  = "certs/localhost.public.pem";
-constexpr const char *CLIENT_PRIVATE_FILE = "certs/client.private.pem";
-constexpr const char *CLIENT_PUBLIC_FILE  = "certs/client.public.pem";
+constexpr const char* CA_PUBLIC_FILE = "certs/ca.public.pem";
+constexpr const char* SERVER_PRIVATE_FILE = "certs/localhost.private.pem";
+constexpr const char* SERVER_PUBLIC_FILE = "certs/localhost.public.pem";
+constexpr const char* CLIENT_PRIVATE_FILE = "certs/client.private.pem";
+constexpr const char* CLIENT_PUBLIC_FILE = "certs/client.public.pem";
 
 std::shared_ptr<flight_safety_system::transport::fss_connection> accepted_conn;
 
@@ -42,8 +42,8 @@ auto accept_cb(std::shared_ptr<flight_safety_system::transport::fss_connection> 
 
 auto make_listener(uint16_t port)
 {
-    return std::make_shared<flight_safety_system::transport_ssl::fss_listen>(
-        port, accept_cb, CA_PUBLIC_FILE, SERVER_PRIVATE_FILE, SERVER_PUBLIC_FILE);
+    return std::make_shared<flight_safety_system::transport_ssl::fss_listen>(port, accept_cb, CA_PUBLIC_FILE,
+                                                                             SERVER_PRIVATE_FILE, SERVER_PUBLIC_FILE);
 }
 
 struct FakeClock : public flight_safety_system::IClock {
@@ -79,8 +79,8 @@ TEST_CASE("reconnect: client reconnects after listener bounce")
     auto listen = make_listener(port);
     REQUIRE(listen != nullptr);
 
-    auto client = std::make_shared<flight_safety_system::client_ssl::fss_client>(
-        CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE);
+    auto client = std::make_shared<flight_safety_system::client_ssl::fss_client>(CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE,
+                                                                                 CLIENT_PUBLIC_FILE);
     client->connectTo("localhost", port, /*connect*/ true);
 
     REQUIRE(fss_test::wait_for([]() { return accepted_conn != nullptr; }));
@@ -113,8 +113,7 @@ TEST_CASE("reconnect: client reconnects after listener bounce")
             client->attemptReconnect();
             return accepted_conn != nullptr;
         },
-        std::chrono::milliseconds(15000),
-        std::chrono::milliseconds(200)));
+        std::chrono::milliseconds(15000), std::chrono::milliseconds(200)));
 
     accepted_conn = nullptr;
 }
@@ -128,8 +127,8 @@ TEST_CASE("reconnect: attemptReconnect is throttled within the retry window")
      * throttle would otherwise amount to a reconnect storm. */
     constexpr uint16_t closed_port = 20506;
 
-    auto client = std::make_shared<flight_safety_system::client_ssl::fss_client>(
-        CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE);
+    auto client = std::make_shared<flight_safety_system::client_ssl::fss_client>(CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE,
+                                                                                 CLIENT_PUBLIC_FILE);
     /* Register a server pointed at a closed port. connect=true triggers
      * the first failed reconnect, arming last_tried. */
     client->connectTo("127.0.0.1", closed_port, /*connect*/ true);
@@ -141,18 +140,20 @@ TEST_CASE("reconnect: attemptReconnect is throttled within the retry window")
      * call is a no-op (actual connect() attempts to a closed port take
      * a kernel round-trip each). */
     auto start = std::chrono::steady_clock::now();
-    for (int i = 0; i < 100; ++i) { client->attemptReconnect(); }
+    for (int i = 0; i < 100; ++i)
+    {
+        client->attemptReconnect();
+    }
     auto elapsed = std::chrono::steady_clock::now() - start;
     REQUIRE(std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count() < 500);
 }
 
 TEST_CASE("reconnect: fake clock throttles attempts within retry window")
 {
-    auto client = std::make_shared<flight_safety_system::client_ssl::fss_client>(
-        CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE);
-    auto server = std::make_shared<CountingServer>(
-        client.get(), "127.0.0.1", static_cast<uint16_t>(20599),
-        CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE);
+    auto client = std::make_shared<flight_safety_system::client_ssl::fss_client>(CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE,
+                                                                                 CLIENT_PUBLIC_FILE);
+    auto server = std::make_shared<CountingServer>(client.get(), "127.0.0.1", static_cast<uint16_t>(20599),
+                                                   CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE);
     auto fake = std::make_shared<FakeClock>();
     server->setClock(fake);
 
@@ -172,11 +173,10 @@ TEST_CASE("reconnect: fake clock throttles attempts within retry window")
 
 TEST_CASE("reconnect: fake clock exposes exponential backoff growth")
 {
-    auto client = std::make_shared<flight_safety_system::client_ssl::fss_client>(
-        CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE);
-    auto server = std::make_shared<CountingServer>(
-        client.get(), "127.0.0.1", static_cast<uint16_t>(20600),
-        CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE);
+    auto client = std::make_shared<flight_safety_system::client_ssl::fss_client>(CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE,
+                                                                                 CLIENT_PUBLIC_FILE);
+    auto server = std::make_shared<CountingServer>(client.get(), "127.0.0.1", static_cast<uint16_t>(20600),
+                                                   CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE);
     auto fake = std::make_shared<FakeClock>();
     server->setClock(fake);
 
@@ -210,16 +210,15 @@ TEST_CASE("reconnect: fake clock exposes exponential backoff growth")
 
 TEST_CASE("reconnect: jitter keeps effective delay within 25% of base")
 {
-    auto client = std::make_shared<flight_safety_system::client_ssl::fss_client>(
-        CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE);
+    auto client = std::make_shared<flight_safety_system::client_ssl::fss_client>(CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE,
+                                                                                 CLIENT_PUBLIC_FILE);
 
     /* Run enough instances to verify bounds and variation. */
     std::vector<uint64_t> delays;
     for (int i = 0; i < 20; ++i)
     {
-        auto server = std::make_shared<CountingServer>(
-            client.get(), "127.0.0.1", static_cast<uint16_t>(20601),
-            CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE);
+        auto server = std::make_shared<CountingServer>(client.get(), "127.0.0.1", static_cast<uint16_t>(20601),
+                                                       CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE);
         auto fake = std::make_shared<FakeClock>();
         server->setClock(fake);
 
@@ -235,14 +234,13 @@ TEST_CASE("reconnect: jitter keeps effective delay within 25% of base")
     }
 
     /* Delays must not all be identical — jitter should introduce variation. */
-    bool any_differ = std::any_of(delays.begin() + 1, delays.end(),
-                                  [&](uint64_t d) { return d != delays[0]; });
+    bool any_differ = std::any_of(delays.begin() + 1, delays.end(), [&](uint64_t d) { return d != delays[0]; });
     REQUIRE(any_differ);
 }
 
 TEST_CASE("reconnect: multi-server failover keeps secondary reachable")
 {
-    constexpr uint16_t port_primary   = 20507;
+    constexpr uint16_t port_primary = 20507;
     constexpr uint16_t port_secondary = 20508;
 
     auto listen_primary = make_listener(port_primary);
@@ -251,8 +249,8 @@ TEST_CASE("reconnect: multi-server failover keeps secondary reachable")
     REQUIRE(listen_secondary != nullptr);
 
     accepted_conn = nullptr;
-    auto client = std::make_shared<flight_safety_system::client_ssl::fss_client>(
-        CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE);
+    auto client = std::make_shared<flight_safety_system::client_ssl::fss_client>(CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE,
+                                                                                 CLIENT_PUBLIC_FILE);
     client->connectTo("localhost", port_primary, /*connect*/ true);
     REQUIRE(fss_test::wait_for([]() { return accepted_conn != nullptr; }));
     auto primary_conn = accepted_conn;
@@ -274,8 +272,11 @@ TEST_CASE("reconnect: multi-server failover keeps secondary reachable")
     /* The secondary recv thread should see the rtt_request. */
     REQUIRE(fss_test::wait_for([&]() {
         auto msg = secondary_conn->getMsg();
-        if (msg == nullptr) { return false; }
-        return msg->getType() == flight_safety_system::transport::message_type_identity
-            || msg->getType() == flight_safety_system::transport::message_type_rtt_request;
+        if (msg == nullptr)
+        {
+            return false;
+        }
+        return msg->getType() == flight_safety_system::transport::message_type_identity ||
+               msg->getType() == flight_safety_system::transport::message_type_rtt_request;
     }));
 }

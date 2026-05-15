@@ -37,14 +37,18 @@ struct CapturingSink {
 
     void operator()(const fss::server::db_write_task &task)
     {
-        if (delay.count() > 0) { std::this_thread::sleep_for(delay); }
+        if (delay.count() > 0)
+        {
+            std::this_thread::sleep_for(delay);
+        }
         std::lock_guard<std::mutex> guard(mtx);
         std::visit(fss::server::overloaded{
-            [&](const fss::server::rtt_write &w) -> void { asset_ids.push_back(w.asset_id); },
-            [&](const fss::server::position_write &w) -> void { asset_ids.push_back(w.asset_id); },
-            [&](const fss::server::status_write &w) -> void { asset_ids.push_back(w.asset_id); },
-            [&](const fss::server::search_status_write &w) -> void { asset_ids.push_back(w.asset_id); },
-        }, task);
+                       [&](const fss::server::rtt_write &w) -> void { asset_ids.push_back(w.asset_id); },
+                       [&](const fss::server::position_write &w) -> void { asset_ids.push_back(w.asset_id); },
+                       [&](const fss::server::status_write &w) -> void { asset_ids.push_back(w.asset_id); },
+                       [&](const fss::server::search_status_write &w) -> void { asset_ids.push_back(w.asset_id); },
+                   },
+                   task);
         count.fetch_add(1);
     }
 
@@ -183,8 +187,7 @@ TEST_CASE("db_write_queue: slow sink does not block producers")
     /* The slow sink should not have processed many items yet. */
     REQUIRE(cap->count.load() < 5);
 
-    REQUIRE(fss_test::wait_for([&]() -> bool { return cap->count.load() == 20; },
-                               std::chrono::milliseconds(6000)));
+    REQUIRE(fss_test::wait_for([&]() -> bool { return cap->count.load() == 20; }, std::chrono::milliseconds(6000)));
     q.stop();
 }
 

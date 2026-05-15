@@ -31,4 +31,3 @@ public:
     auto now_ms() const -> uint64_t override;
 };
 } // namespace flight_safety_system
-

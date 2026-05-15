@@ -69,8 +69,7 @@ TEST_CASE("malformed: decode returns nullptr for unknown message type")
 
 TEST_CASE("malformed: decode returns nullptr for message_type_unknown")
 {
-    auto bl = fss_test::make_framed_buffer(
-        static_cast<uint16_t>(message_type_unknown), 1, "", 12);
+    auto bl = fss_test::make_framed_buffer(static_cast<uint16_t>(message_type_unknown), 1, "", 12);
     REQUIRE(fss_message::decode(bl) == nullptr);
 }
 
@@ -175,10 +174,8 @@ TEST_CASE("decode type consistency: identity_non_aircraft")
 
 TEST_CASE("decode type consistency: position_report")
 {
-    auto orig = std::make_shared<fss_message_position_report>(
-        -33.8688, 151.2093, 100,
-        0, 0, 0,
-        0, "TEST", 0, 0, 0, 0, 0, 0ULL);
+    auto orig =
+        std::make_shared<fss_message_position_report>(-33.8688, 151.2093, 100, 0, 0, 0, 0, "TEST", 0, 0, 0, 0, 0, 0ULL);
     orig->setId(11);
     auto decoded = fss_message::decode(orig->getPacked());
     REQUIRE(decoded != nullptr);
@@ -198,7 +195,9 @@ TEST_CASE("decode type consistency: command")
 
 TEST_CASE("decode type consistency: smm_settings")
 {
-    auto orig = std::make_shared<fss_message_smm_settings>("http://example.com", flight_safety_system::secure_string(std::string_view("user")), flight_safety_system::secure_string(std::string_view("pass")));
+    auto orig = std::make_shared<fss_message_smm_settings>(
+        "http://example.com", flight_safety_system::secure_string(std::string_view("user")),
+        flight_safety_system::secure_string(std::string_view("pass")));
     orig->setId(10);
     auto decoded = fss_message::decode(orig->getPacked());
     REQUIRE(decoded != nullptr);
@@ -239,16 +238,16 @@ TEST_CASE("malformed: oversized declared length does not read past buffer")
      * payload. The identity decode path reads the declared length as the
      * string size and will over-read if the bug is not fixed. */
     std::string tiny_payload(4, 'A');
-    auto bl = fss_test::make_framed_buffer(
-        static_cast<uint16_t>(message_type_identity),
-        1,
-        tiny_payload,
-        /* declared_length */ 0xFFFFU);
+    auto bl = fss_test::make_framed_buffer(static_cast<uint16_t>(message_type_identity), 1, tiny_payload,
+                                           /* declared_length */ 0xFFFFU);
 
     /* Correct behaviour: decode rejects the buffer (returns nullptr) or
      * returns a message whose name is bounded by the actual payload. */
     auto decoded = fss_message::decode(bl);
-    if (decoded == nullptr) { SUCCEED("rejected oversized length"); }
+    if (decoded == nullptr)
+    {
+        SUCCEED("rejected oversized length");
+    }
     else
     {
         auto ident = std::dynamic_pointer_cast<fss_message_identity>(decoded);
