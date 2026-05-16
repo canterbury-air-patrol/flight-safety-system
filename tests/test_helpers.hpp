@@ -17,6 +17,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include "fss-log.hpp"
 #include "fss-transport.hpp"
 
 namespace fss_test {
@@ -85,6 +86,24 @@ public:
         sink.str("");
         sink.clear();
     }
+};
+
+/* RAII guard for the global log level. Saves the level on construction and
+ * restores it on destruction, so a test that changes the level cannot leak
+ * that change into later tests — even if a REQUIRE fails mid-test. */
+class scoped_log_level {
+private:
+    flight_safety_system::log::level saved;
+public:
+    explicit scoped_log_level(const std::string &lvl) : saved(flight_safety_system::log::detail::current_level().load())
+    {
+        flight_safety_system::log::set_level(lvl);
+    }
+    scoped_log_level(const scoped_log_level &) = delete;
+    scoped_log_level(scoped_log_level &&) = delete;
+    auto operator=(const scoped_log_level &) -> scoped_log_level & = delete;
+    auto operator=(scoped_log_level &&) -> scoped_log_level & = delete;
+    ~scoped_log_level() { flight_safety_system::log::detail::current_level().store(saved); }
 };
 
 /* Build a buf_len with a valid header (length/type/id) but a caller-specified

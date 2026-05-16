@@ -23,7 +23,7 @@ TEST_CASE("log: level filter suppresses lower-severity lines")
 {
     fss_test::capture_cerr cap;
 
-    flight_safety_system::log::set_level("error");
+    fss_test::scoped_log_level guard("error");
     FSS_LOG_ERROR("t", "err-visible");
     FSS_LOG_WARN("t", "warn-hidden");
     FSS_LOG_INFO("t", "info-hidden");
@@ -40,7 +40,7 @@ TEST_CASE("log: debug level lets every severity through")
 {
     fss_test::capture_cerr cap;
 
-    flight_safety_system::log::set_level("debug");
+    fss_test::scoped_log_level guard("debug");
     FSS_LOG_ERROR("t", "e");
     FSS_LOG_WARN("t", "w");
     FSS_LOG_INFO("t", "i");
@@ -51,15 +51,12 @@ TEST_CASE("log: debug level lets every severity through")
     REQUIRE(out.find("[WARN ]") != std::string::npos);
     REQUIRE(out.find("[INFO ]") != std::string::npos);
     REQUIRE(out.find("[DEBUG]") != std::string::npos);
-
-    /* Restore default so later tests are unaffected. */
-    flight_safety_system::log::set_level("info");
 }
 
 TEST_CASE("log: FSS_PERROR appends strerror")
 {
     fss_test::capture_cerr cap;
-    flight_safety_system::log::set_level("error");
+    fss_test::scoped_log_level guard("error");
 
     errno = EACCES;
     FSS_PERROR("t", "open config");
@@ -67,14 +64,12 @@ TEST_CASE("log: FSS_PERROR appends strerror")
     auto out = cap.str();
     REQUIRE(out.find("open config") != std::string::npos);
     REQUIRE(out.find("Permission denied") != std::string::npos);
-
-    flight_safety_system::log::set_level("info");
 }
 
 TEST_CASE("log: emitted lines match expected format")
 {
     fss_test::capture_cerr cap;
-    flight_safety_system::log::set_level("info");
+    fss_test::scoped_log_level guard("info");
 
     FSS_LOG_INFO("component-name", "hello world");
 
@@ -86,7 +81,7 @@ TEST_CASE("log: emitted lines match expected format")
 TEST_CASE("log: concurrent writers produce no interleaved lines")
 {
     fss_test::capture_cerr cap;
-    flight_safety_system::log::set_level("info");
+    fss_test::scoped_log_level guard("info");
 
     constexpr int thread_count = 8;
     constexpr int lines_per_thread = 1000;
