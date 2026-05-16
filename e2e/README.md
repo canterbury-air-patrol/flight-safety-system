@@ -26,10 +26,10 @@ pytest
 Or from the repo root:
 
 ```sh
-make e2e
+make e2e-test
 ```
 
-`make e2e` is opt-in and is **not** part of `make check`.
+`make e2e-test` is opt-in and is **not** part of `make check`.
 
 ## How it works
 
