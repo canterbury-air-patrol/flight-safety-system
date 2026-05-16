@@ -32,8 +32,12 @@ clang-tidy.log
 compile_commands.json
 # Python
 __pycache__/
+.venv/
+.pytest_cache/
 # Automake
 .dirstamp
+# Dist tarballs
+*.tar.gz
 # gcov coverage artefacts
 *.gcno
 *.gcda

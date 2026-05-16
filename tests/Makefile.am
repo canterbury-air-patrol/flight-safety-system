@@ -1,6 +1,6 @@
 AUTOMAKE_OPTIONS = subdir-objects
 ACLOCAL_AMFLAGS = $(ACLOCAL_FLAGS)
-AM_CXXFLAGS = -pthread -fPIC -std=c++17 -I. -Werror -Wall -Wshadow -Wunused -Wnull-dereference -Wformat=2 -pedantic -Wnon-virtual-dtor -Woverloaded-virtual -Wpedantic -Weffc++ -I../src -include config.h
+AM_CXXFLAGS = -pthread -fPIC -std=c++17 -I. -Werror -Wall -Wshadow -Wunused -Wnull-dereference -Wformat=2 -pedantic -Wnon-virtual-dtor -Woverloaded-virtual -Wpedantic -Weffc++ -I$(top_srcdir)/src -include config.h
 
 if ENABLE_TESTS
 TESTS = all_test
@@ -33,20 +33,25 @@ all_test_SOURCES = main.cpp messages.cpp connection.cpp client.cpp \
 all_test_CFLAGS = $(ECPG_CFLAGS)
 all_test_LDADD = ../src/libfss-transport.la ../src/libfss-client-ssl.la ../src/libfss.la $(JSONCPP_LIBS) $(ECPG_LIBS)
 
-all_test_SOURCES += connection-ssl.cpp certs certs-alt certs/expired certs/ghost certs/client.crl.pem certs/empty.crl.pem
+all_test_SOURCES += connection-ssl.cpp
 all_test_LDADD += ../src/libfss-transport-ssl.la $(GNUTLS_LIBS) $(CATCH2_LIBS)
 
 EXTRA_DIST = test_helpers.hpp mock_database.hpp
 
 BUILT_SOURCES += certs certs-alt certs/expired certs/ghost certs/client.crl.pem certs/empty.crl.pem
 
+# Generated TLS fixtures live only in the build tree; remove them on clean
+# so `make distcheck` sees a pristine tree after distclean.
+clean-local:
+	rm -rf certs certs-alt
+
 certs:
 	mkdir certs
-	(cd certs; ../../certs/generate-ca.sh; ../../certs/generate-server.sh localhost; ../../certs/generate-client.sh client)
+	(cd certs; $(abs_top_srcdir)/certs/generate-ca.sh; $(abs_top_srcdir)/certs/generate-server.sh localhost; $(abs_top_srcdir)/certs/generate-client.sh client)
 
 certs-alt:
 	mkdir certs-alt
-	(cd certs-alt; ../../certs/generate-ca.sh; ../../certs/generate-server.sh localhost; ../../certs/generate-client.sh client)
+	(cd certs-alt; $(abs_top_srcdir)/certs/generate-ca.sh; $(abs_top_srcdir)/certs/generate-server.sh localhost; $(abs_top_srcdir)/certs/generate-client.sh client)
 
 certs/expired: certs
 	mkdir -p certs/expired
