@@ -137,7 +137,7 @@ jobs:
         sudo apt-get update -qq
         sudo apt-get install -y \
           libjsoncpp-dev libecpg-dev catch2 libgnutls28-dev gnutls-bin \
-          cppcheck clang-tidy bear
+          cppcheck clang-tidy clang-format bear
 
     - name: autogen
       run: ./autogen.sh
@@ -148,22 +148,8 @@ jobs:
     - name: build with compile DB
       run: bear -- make -j$(nproc)
 
-    - name: cppcheck
-      run: |
-        cppcheck \
-          --enable=warning,performance,portability,style \
-          --error-exitcode=1 \
-          --suppress=knownConditionTrueFalse:src/transport-ssl.cpp \
-          src/*.cpp
-
-    - name: clang-tidy
-      run: |
-        run-clang-tidy \
-          -p . \
-          'src/(?!server-db).*\.cpp$' \
-          2>&1 | tee clang-tidy.log
-        # Fail if any warnings were emitted
-        ! grep -q "warning:" clang-tidy.log
+    - name: code checks (clang-format, cppcheck, clang-tidy)
+      run: ./check-code.sh
 
   # ─── 5. End-to-end tests ─────────────────────────────────────────────────
   e2e:
