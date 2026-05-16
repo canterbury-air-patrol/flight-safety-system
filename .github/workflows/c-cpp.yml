@@ -137,7 +137,14 @@ jobs:
         sudo apt-get update -qq
         sudo apt-get install -y \
           libjsoncpp-dev libecpg-dev catch2 libgnutls28-dev gnutls-bin \
-          cppcheck clang-tidy clang-format bear
+          cppcheck clang-tidy bear
+
+    # clang-format output is version-dependent; pin the exact version the
+    # tree is formatted with so the formatting gate is reproducible.
+    - name: Install pinned clang-format
+      run: |
+        python3 -m venv /tmp/clang-format-venv
+        /tmp/clang-format-venv/bin/pip install -q clang-format==22.1.5
 
     - name: autogen
       run: ./autogen.sh
@@ -149,7 +156,7 @@ jobs:
       run: bear -- make -j$(nproc)
 
     - name: code checks (clang-format, cppcheck, clang-tidy)
-      run: ./check-code.sh
+      run: CLANG_FORMAT=/tmp/clang-format-venv/bin/clang-format ./check-code.sh
 
   # ─── 5. End-to-end tests ─────────────────────────────────────────────────
   e2e:

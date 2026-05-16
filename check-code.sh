@@ -2,7 +2,12 @@
 
 set -euo pipefail
 
-clang-format --dry-run -Werror src/*.cpp src/*.hpp src/server-db.h tests/*.cpp tests/*.hpp examples/*.cpp
+# clang-format output is not stable across major versions. The tree is
+# formatted with clang-format 22.1.x; CI pins that exact version and points
+# CLANG_FORMAT at it. Locally, set CLANG_FORMAT if your system clang-format
+# is a different major version.
+clang_format="${CLANG_FORMAT:-clang-format}"
+"$clang_format" --dry-run -Werror src/*.cpp src/*.hpp src/server-db.h tests/*.cpp tests/*.hpp examples/*.cpp
 
 # knownConditionTrueFalse in transport-ssl.cpp is a false positive emitted by
 # some cppcheck versions (notably the one on the CI runners); suppress it so
