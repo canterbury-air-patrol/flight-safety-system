@@ -19,7 +19,6 @@
 #include <vector>
 
 #include "db-write-queue.hpp"
-#include "fss-log.hpp"
 #include "test_helpers.hpp"
 
 namespace fss = flight_safety_system;
@@ -196,8 +195,8 @@ TEST_CASE("db_write_queue: drop log message appears on stderr when queue fills")
     auto cap = std::make_shared<CapturingSink>();
     cap->delay = std::chrono::milliseconds(50);
 
-    /* Earlier tests may have left level at ERROR; ensure WARN is visible. */
-    flight_safety_system::log::set_level("warn");
+    /* The drop notice is logged at WARN. */
+    fss_test::scoped_log_level guard("warn");
     fss_test::capture_cerr cerr_capture;
 
     {
@@ -214,7 +213,6 @@ TEST_CASE("db_write_queue: drop log message appears on stderr when queue fills")
     auto out = cerr_capture.str();
     REQUIRE(out.find("db-writer") != std::string::npos);
     REQUIRE(out.find("dropped") != std::string::npos);
-    flight_safety_system::log::set_level("info");
 }
 
 TEST_CASE("db_write_queue: write_failure_count tracks sink exceptions")
