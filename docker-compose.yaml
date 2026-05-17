@@ -19,7 +19,7 @@ services:
   server:
     build:
       context: .
-      dockerfile: docker/fss-server.Dockerfile
+      dockerfile: docker/fss-server-trixie.Dockerfile
     ports:
       - "20202:20202"
     links:
