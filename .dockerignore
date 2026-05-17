@@ -1,3 +1,52 @@
-docker/*.Dockerfile
+# ── Git internals ─────────────────────────────────────────────────────────────
+.git/
+
+# ── Everything in .gitignore (build artefacts from a dirty local tree) ────────
+.DS_Store
+aclocal.m4
+ar-lib
+autom4te.cache/
+compile
+m4/
+!m4/ax_cxx_compile_stdcxx.m4
+missing
+.libs/
+.deps/
+install-sh
+libtool
+ltmain.sh
+test-driver
+stamp-h1
+*.dSYM
+*.la
+Makefile
+Makefile.in
+configure
+configure.in
+config.*
+depcomp
+*.lo
+*.o
+*.pc
+todo/
+*~
+clang-tidy.log
+compile_commands.json
+__pycache__/
+.venv/
+.pytest_cache/
+.dirstamp
+*.tar.gz
+*.gcno
+*.gcda
+
+# ── Coverage reports (untracked, not in .gitignore) ───────────────────────────
+coverage*.info
+coverage_html/
+
+# ── Runtime secrets ───────────────────────────────────────────────────────────
 certs/*.pem
 certs/*.tmpl
+
+# ── Dockerfiles (not needed inside the build context) ─────────────────────────
+docker/*.Dockerfile
