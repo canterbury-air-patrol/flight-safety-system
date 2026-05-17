@@ -41,7 +41,8 @@ jobs:
           IMAGE="${{ secrets.DOCKERHUB_USERNAME }}/flight-safety-system-server"
           ref="${GITHUB_REF}"
           if [[ "$ref" == "refs/heads/develop" ]]; then
-            echo "tags=${IMAGE}:latest-${DISTRO}" >> "$GITHUB_OUTPUT"
+            sha="${GITHUB_SHA::7}"
+            printf "tags=${IMAGE}:latest-${DISTRO}\n${IMAGE}:${sha}-${DISTRO}\n" >> "$GITHUB_OUTPUT"
           elif [[ "$ref" == refs/heads/release/* ]]; then
             ver="${ref#refs/heads/release/}"
             echo "tags=${IMAGE}:${ver}-${DISTRO}" >> "$GITHUB_OUTPUT"
