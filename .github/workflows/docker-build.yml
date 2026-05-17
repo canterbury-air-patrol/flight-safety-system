@@ -1,0 +1,64 @@
+name: Docker Build and Push
+
+on:
+  push:
+    branches:
+      - master
+      - 'release/[0-9]*'
+    tags:
+      - 'v[0-9]*'
+      - '[0-9]*'
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - distro: trixie
+            dockerfile: docker/fss-server-trixie.Dockerfile
+          - distro: resolute
+            dockerfile: docker/fss-server-resolute.Dockerfile
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Compute image tags
+        id: tags
+        env:
+          DISTRO: ${{ matrix.distro }}
+        run: |
+          IMAGE="${{ secrets.DOCKERHUB_USERNAME }}/flight-safety-system-server"
+          ref="${GITHUB_REF}"
+          if [[ "$ref" == "refs/heads/master" ]]; then
+            echo "tags=${IMAGE}:latest-${DISTRO}" >> "$GITHUB_OUTPUT"
+          elif [[ "$ref" == refs/heads/release/* ]]; then
+            ver="${ref#refs/heads/release/}"
+            echo "tags=${IMAGE}:${ver}-${DISTRO}" >> "$GITHUB_OUTPUT"
+          elif [[ "$ref" == refs/tags/v* ]]; then
+            ver="${ref#refs/tags/v}"
+            echo "tags=${IMAGE}:${ver}-${DISTRO}" >> "$GITHUB_OUTPUT"
+          elif [[ "$ref" == refs/tags/* ]]; then
+            ver="${ref#refs/tags/}"
+            echo "tags=${IMAGE}:${ver}-${DISTRO}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          cache-from: type=gha,scope=${{ matrix.distro }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.distro }}
