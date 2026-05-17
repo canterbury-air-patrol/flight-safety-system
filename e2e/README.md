@@ -5,7 +5,7 @@ database, with real fake-client processes driving traffic over TLS.
 
 ## Prerequisites
 
-- `docker` daemon reachable (pulls `mdillon/postgis:11-alpine` on first run)
+- `docker` daemon reachable (pulls `postgis/postgis:18-3.6-alpine` on first run)
 - Python 3.9+
 - The project built with `--enable-server --enable-fake-client`:
 

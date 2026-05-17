@@ -32,7 +32,7 @@ FAKE_CLIENT_BIN = REPO_ROOT / "examples" / "fss-fake-client"
 CERT_SCRIPTS = REPO_ROOT / "certs"
 SCHEMA_DIR = E2E_ROOT / "schema"
 
-POSTGIS_IMAGE = "mdillon/postgis:11-alpine"
+POSTGIS_IMAGE = "postgis/postgis:18-3.6-alpine"
 STARTUP_TIMEOUT_S = 60
 
 
@@ -68,9 +68,9 @@ def pg_container() -> Iterator[Dict[str, object]]:
     Three modes (checked in order):
     1. FSS_E2E_EXTERNAL_DB is set — use an already-running Postgres (e.g.
        a GitHub Actions service container).  No Docker is started.
-    2. FSS_E2E_DOCKER_HOST_NET=1 — start mdillon/postgis with --network=host
+    2. FSS_E2E_DOCKER_HOST_NET=1 — start postgis/postgis with --network=host
        so the container shares the host network (needed on some sandboxes).
-    3. Default — start mdillon/postgis with a mapped port.
+    3. Default — start postgis/postgis with a mapped port.
     """
     external = os.environ.get("FSS_E2E_EXTERNAL_DB")
     if external:
