@@ -165,7 +165,7 @@ jobs:
 
     services:
       postgres:
-        image: mdillon/postgis:11-alpine
+        image: postgis/postgis:18-3.6-alpine
         env:
           POSTGRES_PASSWORD: e2e
         ports:

@@ -36,7 +36,7 @@ services:
     volumes:
       - "./certs:/certs:rw"
   db:
-    image: mdillon/postgis
+    image: postgis/postgis:18-3.6-alpine
     healthcheck:
       test: "pg_isready --username=postgres"
       timeout: 10s
