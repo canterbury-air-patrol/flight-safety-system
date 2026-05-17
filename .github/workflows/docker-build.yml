@@ -3,7 +3,7 @@ name: Docker Build and Push
 on:
   push:
     branches:
-      - master
+      - develop
       - 'release/[0-9]*'
     tags:
       - 'v[0-9]*'
@@ -40,7 +40,7 @@ jobs:
         run: |
           IMAGE="${{ secrets.DOCKERHUB_USERNAME }}/flight-safety-system-server"
           ref="${GITHUB_REF}"
-          if [[ "$ref" == "refs/heads/master" ]]; then
+          if [[ "$ref" == "refs/heads/develop" ]]; then
             echo "tags=${IMAGE}:latest-${DISTRO}" >> "$GITHUB_OUTPUT"
           elif [[ "$ref" == refs/heads/release/* ]]; then
             ver="${ref#refs/heads/release/}"
