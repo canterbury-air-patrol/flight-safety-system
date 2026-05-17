@@ -38,7 +38,7 @@ jobs:
         env:
           DISTRO: ${{ matrix.distro }}
         run: |
-          IMAGE="${{ secrets.DOCKERHUB_USERNAME }}/flight-safety-system-server"
+          IMAGE="canterburyairpatrol/flight-safety-system-server"
           ref="${GITHUB_REF}"
           if [[ "$ref" == "refs/heads/develop" ]]; then
             sha="${GITHUB_SHA::7}"
