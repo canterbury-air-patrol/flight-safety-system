@@ -42,7 +42,7 @@ jobs:
           ref="${GITHUB_REF}"
           if [[ "$ref" == "refs/heads/develop" ]]; then
             sha="${GITHUB_SHA::7}"
-            printf "tags=${IMAGE}:latest-${DISTRO}\n${IMAGE}:${sha}-${DISTRO}\n" >> "$GITHUB_OUTPUT"
+            echo "tags=${IMAGE}:latest-${DISTRO},${IMAGE}:${sha}-${DISTRO}" >> "$GITHUB_OUTPUT"
           elif [[ "$ref" == refs/heads/release/* ]]; then
             ver="${ref#refs/heads/release/}"
             echo "tags=${IMAGE}:${ver}-${DISTRO}" >> "$GITHUB_OUTPUT"
@@ -65,7 +65,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=${{ matrix.distro }}
 
       - name: Verify push succeeded
-        if: steps.tags.outputs.tags == ''
+        if: ${{ steps.tags.outputs.tags == '' }}
         run: |
           echo "::error::No tags were computed for ref ${GITHUB_REF} — image was built but not pushed."
           exit 1
