@@ -58,7 +58,13 @@ jobs:
         with:
           context: .
           file: ${{ matrix.dockerfile }}
-          push: true
+          push: ${{ steps.tags.outputs.tags != '' }}
           tags: ${{ steps.tags.outputs.tags }}
           cache-from: type=gha,scope=${{ matrix.distro }}
           cache-to: type=gha,mode=max,scope=${{ matrix.distro }}
+
+      - name: Verify push succeeded
+        if: steps.tags.outputs.tags == ''
+        run: |
+          echo "::error::No tags were computed for ref ${GITHUB_REF} — image was built but not pushed."
+          exit 1
