@@ -127,3 +127,32 @@ TEST_CASE("log: concurrent writers produce no interleaved lines")
     }
     REQUIRE(count == static_cast<size_t>(thread_count * lines_per_thread));
 }
+
+TEST_CASE("log: set_level covers all four string variants")
+{
+    namespace fss_log = flight_safety_system::log;
+
+    fss_test::scoped_log_level guard("info");
+
+    fss_log::set_level("warn");
+    REQUIRE(fss_log::detail::current_level().load() == fss_log::level::Warn);
+
+    fss_log::set_level("error");
+    REQUIRE(fss_log::detail::current_level().load() == fss_log::level::Error);
+
+    fss_log::set_level("info");
+    REQUIRE(fss_log::detail::current_level().load() == fss_log::level::Info);
+
+    fss_log::set_level("debug");
+    REQUIRE(fss_log::detail::current_level().load() == fss_log::level::Debug);
+}
+
+TEST_CASE("log: level_str returns expected tag for each level")
+{
+    namespace fss_log = flight_safety_system::log;
+
+    REQUIRE(std::string(fss_log::detail::level_str(fss_log::level::Error)) == "ERROR");
+    REQUIRE(std::string(fss_log::detail::level_str(fss_log::level::Warn)) == "WARN ");
+    REQUIRE(std::string(fss_log::detail::level_str(fss_log::level::Info)) == "INFO ");
+    REQUIRE(std::string(fss_log::detail::level_str(fss_log::level::Debug)) == "DEBUG");
+}
