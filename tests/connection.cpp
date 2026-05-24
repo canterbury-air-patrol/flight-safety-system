@@ -134,6 +134,13 @@ TEST_CASE("Queue overflow drops oldest messages")
     client_conn = nullptr;
 }
 
+TEST_CASE("fss_connection: base isPeerCertRevoked always returns false")
+{
+    auto conn = std::make_shared<flight_safety_system::transport::fss_connection>();
+    REQUIRE_FALSE(conn->isPeerCertRevoked(""));
+    REQUIRE_FALSE(conn->isPeerCertRevoked("/any/path.pem"));
+}
+
 TEST_CASE("Listen - Callback")
 {
     constexpr int listen_port = 20203;
