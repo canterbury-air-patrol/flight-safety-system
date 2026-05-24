@@ -50,7 +50,9 @@ static auto test_client_connect_cb(std::shared_ptr<flight_safety_system::transpo
 
 TEST_CASE("SSL - Listen Socket")
 {
-    constexpr int listen_port = 20302;
+    client_conn = nullptr;
+    const uint16_t listen_port = fss_test::pick_port();
+    REQUIRE(listen_port != 0);
     auto listen = std::make_shared<flight_safety_system::transport_ssl::fss_listen>(
         listen_port, test_client_connect_cb, CA_PUBLIC_FILE, SERVER_PRIVATE_FILE, SERVER_PUBLIC_FILE);
     REQUIRE(listen != nullptr);
@@ -65,14 +67,17 @@ TEST_CASE("SSL - Listen Socket")
 
     REQUIRE(fss_test::wait_for([]() { return client_conn != nullptr; }));
 
-    conn = nullptr;
-
+    // Drain identity before dropping the client connection.  Dropping conn
+    // while the server's recv thread hasn't yet dequeued the identity bytes
+    // causes a race where message_type_closed arrives first.
     std::shared_ptr<flight_safety_system::transport::fss_message> msg;
     REQUIRE(fss_test::wait_for([&]() {
         msg = client_conn->getMsg();
         return msg != nullptr;
     }));
     REQUIRE(msg->getType() == flight_safety_system::transport::message_type_identity);
+
+    conn = nullptr;
 
     REQUIRE(fss_test::wait_for([&]() {
         msg = client_conn->getMsg();
@@ -102,7 +107,9 @@ public:
 
 TEST_CASE("SSL - Listen - Callback")
 {
-    constexpr int listen_port = 20303;
+    client_conn = nullptr;
+    const uint16_t listen_port = fss_test::pick_port();
+    REQUIRE(listen_port != 0);
 
     auto listen = std::make_shared<flight_safety_system::transport_ssl::fss_listen>(
         listen_port, test_client_connect_cb, CA_PUBLIC_FILE, SERVER_PRIVATE_FILE, SERVER_PUBLIC_FILE);

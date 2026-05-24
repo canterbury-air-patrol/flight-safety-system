@@ -324,20 +324,30 @@ auto flight_safety_system::transport_ssl::fss_connection::recvBytes(void *t_byte
         FSS_LOG_ERROR("ssl", "Attempt to recv on unusable transport_ssl::fss_connection");
         return -2;
     }
-    ssize_t bytes_recved = -1;
-    try
+    for (;;)
     {
-        bytes_recved = this->session->recv(t_bytes, t_max_bytes);
-    }
-    catch (gnutls::exception &ex)
-    {
-        FSS_LOG_ERROR("ssl", "recv: caught gnutls exception: " << ex.get_code() << ", " << ex.what());
-        if (ex.get_code() != GNUTLS_E_AGAIN)
+        ssize_t bytes_recved = -1;
+        try
         {
-            this->usable = false;
+            bytes_recved = this->session->recv(t_bytes, t_max_bytes);
         }
+        catch (gnutls::exception &ex)
+        {
+            if (ex.get_code() == GNUTLS_E_AGAIN || ex.get_code() == GNUTLS_E_INTERRUPTED)
+            {
+                continue;
+            }
+            FSS_LOG_ERROR("ssl", "recv: caught gnutls exception: " << ex.get_code() << ", " << ex.what());
+            this->usable = false;
+            return bytes_recved;
+        }
+        /* Some C++ wrapper variants return AGAIN/INTERRUPTED rather than throwing. */
+        if (bytes_recved == GNUTLS_E_AGAIN || bytes_recved == GNUTLS_E_INTERRUPTED)
+        {
+            continue;
+        }
+        return bytes_recved;
     }
-    return bytes_recved;
 }
 
 auto flight_safety_system::transport_ssl::fss_listen::newConnection(int t_newfd)
