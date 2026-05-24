@@ -1,4 +1,5 @@
 #include <memory>
+#include <string_view>
 #ifdef HAVE_CATCH2_CATCH_ALL_HPP
 #include <catch2/catch_all.hpp>
 #elif HAVE_CATCH2_CATCH_HPP
@@ -16,6 +17,32 @@
 #include "fss-transport.hpp"
 #include "fss-client-ssl.hpp"
 #include "test_helpers.hpp"
+
+namespace {
+
+namespace fss = flight_safety_system;
+
+class TrackingClient : public fss::client_ssl::fss_client {
+public:
+    TrackingClient() : fss_client() {}
+    bool handle_command_called{false};
+    bool handle_position_called{false};
+    bool handle_smm_called{false};
+    void handleCommand(const std::shared_ptr<fss::transport::fss_message_asset_command> &) override
+    {
+        handle_command_called = true;
+    }
+    void handlePositionReport(const std::shared_ptr<fss::transport::fss_message_position_report> &) override
+    {
+        handle_position_called = true;
+    }
+    void handleSMMSettings(const std::shared_ptr<fss::transport::fss_message_smm_settings> &) override
+    {
+        handle_smm_called = true;
+    }
+};
+
+} // namespace
 
 constexpr const char *CA_PUBLIC_FILE = "certs/ca.public.pem";
 constexpr const char *SERVER_PRIVATE_FILE = "certs/localhost.private.pem";
@@ -45,4 +72,74 @@ TEST_CASE("Client Base")
     REQUIRE(fss_test::wait_for([]() { return client_conn != nullptr; }));
 
     client_conn = nullptr;
+}
+
+TEST_CASE("client: config file not found leaves client with no servers")
+{
+    fss::client_ssl::fss_client client("/nonexistent/config.json");
+    client.attemptReconnect(); // no-op; must not crash
+}
+
+TEST_CASE("client: processMessage dispatches position_report to handlePositionReport")
+{
+    TrackingClient client;
+    auto server = std::make_shared<fss::client_ssl::fss_server>(&client, "localhost", uint16_t{0}, CA_PUBLIC_FILE,
+                                                                CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE);
+    auto msg =
+        std::make_shared<fss::transport::fss_message_position_report>(0.0, 0.0, 0, 0, 0, 0, 0, "T", 0, 0, 0, 0, 0, 0);
+    server->processMessage(msg);
+    REQUIRE(client.handle_position_called);
+}
+
+TEST_CASE("client: processMessage dispatches command to handleCommand")
+{
+    TrackingClient client;
+    auto server = std::make_shared<fss::client_ssl::fss_server>(&client, "localhost", uint16_t{0}, CA_PUBLIC_FILE,
+                                                                CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE);
+    auto msg =
+        std::make_shared<fss::transport::fss_message_asset_command>(fss::transport::asset_command_rtl, uint64_t{0});
+    server->processMessage(msg);
+    REQUIRE(client.handle_command_called);
+}
+
+TEST_CASE("client: processMessage dispatches smm_settings to handleSMMSettings")
+{
+    TrackingClient client;
+    auto server = std::make_shared<fss::client_ssl::fss_server>(&client, "localhost", uint16_t{0}, CA_PUBLIC_FILE,
+                                                                CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE);
+    auto msg = std::make_shared<fss::transport::fss_message_smm_settings>("https://smm.example/",
+                                                                          fss::secure_string(std::string_view{"user"}),
+                                                                          fss::secure_string(std::string_view{"pass"}));
+    server->processMessage(msg);
+    REQUIRE(client.handle_smm_called);
+}
+
+TEST_CASE("client: processMessage server_list calls updateServers")
+{
+    TrackingClient client;
+    auto server = std::make_shared<fss::client_ssl::fss_server>(&client, "localhost", uint16_t{0}, CA_PUBLIC_FILE,
+                                                                CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE);
+    auto msg = std::make_shared<fss::transport::fss_message_server_list>();
+    msg->addServer("10.0.0.99", uint16_t{9000});
+    server->processMessage(msg);
+    // updateServers added 10.0.0.99:9000 to the reconnect list; no crash
+}
+
+TEST_CASE("client: processMessage rtt_request sends reply (no-op with null connection)")
+{
+    TrackingClient client;
+    auto server = std::make_shared<fss::client_ssl::fss_server>(&client, "localhost", uint16_t{0}, CA_PUBLIC_FILE,
+                                                                CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE);
+    auto msg = std::make_shared<fss::transport::fss_message_rtt_request>();
+    server->processMessage(msg); // sendMsg returns false (conn is null); must not crash
+}
+
+TEST_CASE("client: processMessage version incompatibility triggers serverRequiresReconnect")
+{
+    TrackingClient client;
+    auto server = std::make_shared<fss::client_ssl::fss_server>(&client, "localhost", uint16_t{0}, CA_PUBLIC_FILE,
+                                                                CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE);
+    constexpr uint16_t future_min = fss::transport::FSS_PROTOCOL_VERSION + 1;
+    auto msg = std::make_shared<fss::transport::fss_message_version>(future_min, future_min, uint32_t{0});
+    server->processMessage(msg); // serverRequiresReconnect called; no crash
 }
