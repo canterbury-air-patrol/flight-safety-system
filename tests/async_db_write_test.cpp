@@ -234,6 +234,19 @@ TEST_CASE("db_write_queue: write_failure_count tracks sink exceptions")
     REQUIRE(q.write_failure_count() == task_count);
 }
 
+TEST_CASE("db_write_queue: catch-all handler counts non-exception throws")
+{
+    auto weird_sink = [](const fss::server::db_write_task &) -> void { throw 42; };
+
+    fss::server::db_write_queue q(100, weird_sink);
+    q.enqueue(fss::server::rtt_write{1, 0});
+
+    REQUIRE(fss_test::wait_for([&]() -> bool { return q.write_failure_count() == 1; }));
+    q.stop();
+
+    REQUIRE(q.write_failure_count() == 1);
+}
+
 TEST_CASE("db_write_queue: destructor without explicit stop drains pending work")
 {
     auto cap = std::make_shared<CapturingSink>();
