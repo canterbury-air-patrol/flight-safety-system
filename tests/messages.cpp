@@ -579,3 +579,58 @@ TEST_CASE("Version Message Defaults")
     REQUIRE(msg->getMinSupportedVersion() == flight_safety_system::transport::FSS_PROTOCOL_MIN_VERSION);
     REQUIRE(msg->getFeatureFlags() == 0);
 }
+
+TEST_CASE("messages: identity_required round-trip")
+{
+    auto msg_id = static_cast<uint64_t>(random());
+
+    auto msg = std::make_shared<flight_safety_system::transport::fss_message_identity_required>();
+    REQUIRE(msg->getType() == flight_safety_system::transport::message_type_identity_required);
+    msg->setId(msg_id);
+    auto bl = msg->getPacked();
+    REQUIRE(bl != nullptr);
+
+    auto decoded_direct = std::make_shared<flight_safety_system::transport::fss_message_identity_required>(msg_id, bl);
+    REQUIRE(decoded_direct->getType() == flight_safety_system::transport::message_type_identity_required);
+    REQUIRE(decoded_direct->getId() == msg_id);
+
+    auto decoded_generic = flight_safety_system::transport::fss_message::decode(bl);
+    REQUIRE(decoded_generic != nullptr);
+    REQUIRE(decoded_generic->getType() == flight_safety_system::transport::message_type_identity_required);
+    REQUIRE(decoded_generic->getId() == msg_id);
+}
+
+TEST_CASE("messages: rtt_response with truncated payload yields zero request_id")
+{
+    // Truncate an rtt_response to just the 12-byte header to trigger
+    // BufferReader::ensureAvailable() returning false on the readUint64 call.
+    constexpr size_t header_len = 12; // sizeof(uint16_t) + sizeof(uint16_t) + sizeof(uint64_t)
+    auto full = std::make_shared<flight_safety_system::transport::fss_message_rtt_response>(uint64_t{42});
+    full->setId(1);
+    auto full_bl = full->getPacked();
+    REQUIRE(full_bl != nullptr);
+    auto short_bl = std::make_shared<flight_safety_system::transport::buf_len>(full_bl->getData(),
+                                                                               static_cast<uint16_t>(header_len));
+    auto decoded = std::make_shared<flight_safety_system::transport::fss_message_rtt_response>(uint64_t{1}, short_bl);
+    REQUIRE(decoded->getRequestId() == 0);
+}
+
+TEST_CASE("messages: smm_settings with truncated string body returns empty fields")
+{
+    // Pack a valid smm_settings then truncate after header + the 2-byte string-length
+    // prefix so that unpackString encounters `len > remaining bytes` (the second guard
+    // at line 51 of unpackString, distinct from the offset/sizeof-uint16_t guard).
+    constexpr size_t header_len = 12; // sizeof(uint16_t) + sizeof(uint16_t) + sizeof(uint64_t)
+    auto src = std::make_shared<flight_safety_system::transport::fss_message_smm_settings>(
+        "https://localhost/", flight_safety_system::secure_string(std::string_view("asset")),
+        flight_safety_system::secure_string(std::string_view("pw")));
+    src->setId(1);
+    auto full_bl = src->getPacked();
+    REQUIRE(full_bl != nullptr);
+    // Keep only header + 2-byte length prefix; claimed string length > 0 bytes remaining.
+    constexpr size_t truncated = header_len + sizeof(uint16_t);
+    auto bl = std::make_shared<flight_safety_system::transport::buf_len>(full_bl->getData(),
+                                                                         static_cast<uint16_t>(truncated));
+    auto decoded = std::make_shared<flight_safety_system::transport::fss_message_smm_settings>(uint64_t{1}, bl);
+    REQUIRE(decoded->getServerURL().empty());
+}
