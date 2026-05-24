@@ -146,6 +146,50 @@ TEST_CASE("ssl: server surfaces wrong-CN-but-CA-signed cert via getClientNames",
     accepted = nullptr;
 }
 
+TEST_CASE("ssl: getSessionDesc on unconnected client returns empty string")
+{
+    auto conn = std::make_shared<flight_safety_system::transport_ssl::fss_connection_client>(
+        CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE);
+    REQUIRE(conn->getSessionDesc().empty());
+}
+
+TEST_CASE("ssl: sendMsg on unconnected client returns false")
+{
+    // usable == false before connectTo() — sendMsg must refuse immediately.
+    // Cast to base to call the public sendMsg(fss_message) overload (the SSL
+    // subclass's protected sendMsg(buf_len) would otherwise hide it).
+    std::shared_ptr<flight_safety_system::transport::fss_connection> conn =
+        std::make_shared<flight_safety_system::transport_ssl::fss_connection_client>(
+            CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE);
+    auto msg = std::make_shared<flight_safety_system::transport::fss_message_identity>("test");
+    REQUIRE_FALSE(conn->sendMsg(msg));
+}
+
+TEST_CASE("ssl: isPeerCertRevoked with non-existent CRL file returns false")
+{
+    const uint16_t port = fss_test::pick_port();
+    REQUIRE(port != 0);
+    std::shared_ptr<flight_safety_system::transport::fss_connection> server_conn;
+
+    auto listen = std::make_shared<flight_safety_system::transport_ssl::fss_listen>(
+        port,
+        [&server_conn](std::shared_ptr<flight_safety_system::transport::fss_connection> c) -> bool {
+            server_conn = std::move(c);
+            return true;
+        },
+        CA_PUBLIC_FILE, SERVER_PRIVATE_FILE, SERVER_PUBLIC_FILE);
+
+    auto client = std::make_shared<flight_safety_system::transport_ssl::fss_connection_client>(
+        CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE);
+    REQUIRE(client->connectTo("localhost", port));
+
+    REQUIRE(fss_test::wait_for([&] { return server_conn != nullptr; }));
+
+    REQUIRE_FALSE(server_conn->isPeerCertRevoked("/nonexistent/path/crl.pem"));
+
+    server_conn = nullptr;
+}
+
 /* Deliberately omitted: a "silent raw-TCP peer blocks the accept thread"
  * regression test. The current server architecture performs the TLS
  * handshake inline on the accept thread, which means a single silent
