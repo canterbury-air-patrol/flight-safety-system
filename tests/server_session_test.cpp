@@ -697,3 +697,211 @@ TEST_CASE("session: stale position report is discarded")
     session->processMessage(fresh);
     REQUIRE(handler.broadcasts.size() == 1);
 }
+
+TEST_CASE("smm_settings: ctor and accessors")
+{
+    fss::server::smm_settings s("https://smm.example", fss::secure_string{"user"}, fss::secure_string{"pass"});
+    REQUIRE(s.getAddress() == "https://smm.example");
+    REQUIRE(s.getUsername() == "user");
+    REQUIRE(s.getPassword() == "pass");
+}
+
+TEST_CASE("fss_server_details: ctor and accessors")
+{
+    fss::server::fss_server_details d("10.0.0.1", uint16_t{8080});
+    REQUIRE(d.getAddress() == "10.0.0.1");
+    REQUIRE(d.getPort() == 8080);
+}
+
+TEST_CASE("asset_command: all command-string branches and getAltitude")
+{
+    using fss::transport::asset_command_goto;
+    using fss::transport::asset_command_resume;
+    using fss::transport::asset_command_disarm;
+    using fss::transport::asset_command_altitude;
+    using fss::transport::asset_command_terminate;
+    using fss::transport::asset_command_manual;
+    using fss::transport::asset_command_unknown;
+
+    auto cmd_goto = fss::server::asset_command(1, 100, "GOTO", 1.0, 2.0, 0);
+    REQUIRE(cmd_goto.getCommand() == asset_command_goto);
+
+    auto cmd_ron = fss::server::asset_command(2, 100, "RON", 0.0, 0.0, 0);
+    REQUIRE(cmd_ron.getCommand() == asset_command_resume);
+
+    auto cmd_disarm = fss::server::asset_command(3, 100, "DISARM", 0.0, 0.0, 0);
+    REQUIRE(cmd_disarm.getCommand() == asset_command_disarm);
+
+    auto cmd_alt = fss::server::asset_command(4, 100, "ALT", 0.0, 0.0, uint16_t{150});
+    REQUIRE(cmd_alt.getCommand() == asset_command_altitude);
+    REQUIRE(cmd_alt.getAltitude() == 150);
+
+    auto cmd_term = fss::server::asset_command(5, 100, "TERM", 0.0, 0.0, 0);
+    REQUIRE(cmd_term.getCommand() == asset_command_terminate);
+
+    auto cmd_man = fss::server::asset_command(6, 100, "MAN", 0.0, 0.0, 0);
+    REQUIRE(cmd_man.getCommand() == asset_command_manual);
+
+    auto cmd_bad = fss::server::asset_command(7, 100, "BADCMD", 0.0, 0.0, 0);
+    REQUIRE(cmd_bad.getCommand() == asset_command_unknown);
+}
+
+TEST_CASE("session: sendCommand dispatches altitude message for ALT command")
+{
+    fss_test::MockDatabase mock;
+    constexpr uint64_t asset_id = 10;
+    mock.asset_ids["craft"] = asset_id;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+    conn->sent.clear();
+
+    auto alt_cmd = std::make_shared<fss::server::asset_command>(42, 1000, "ALT", 0.0, 0.0, uint16_t{300});
+    session->setPendingCommand(alt_cmd);
+    session->sendCommand();
+
+    bool found_command = false;
+    for (const auto &msg : conn->sent)
+    {
+        if (msg->getType() == fss::transport::message_type_command)
+        {
+            found_command = true;
+            auto cmd_msg = std::dynamic_pointer_cast<fss::transport::fss_message_asset_command>(msg);
+            REQUIRE(cmd_msg != nullptr);
+            REQUIRE(cmd_msg->getCommand() == fss::transport::asset_command_altitude);
+        }
+    }
+    REQUIRE(found_command);
+}
+
+TEST_CASE("session: sendCommand skips unknown command type")
+{
+    fss_test::MockDatabase mock;
+    constexpr uint64_t asset_id = 11;
+    mock.asset_ids["craft"] = asset_id;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+    conn->sent.clear();
+
+    auto bad_cmd = std::make_shared<fss::server::asset_command>(99, 2000, "BADCMD", 0.0, 0.0, 0);
+    session->setPendingCommand(bad_cmd);
+    session->sendCommand();
+
+    for (const auto &msg : conn->sent)
+    {
+        REQUIRE(msg->getType() != fss::transport::message_type_command);
+    }
+}
+
+TEST_CASE("session: sendSMMSettings sends smm_settings message when db returns settings")
+{
+    fss_test::MockDatabase mock;
+    constexpr uint64_t asset_id = 12;
+    mock.asset_ids["craft"] = asset_id;
+    mock.smm[asset_id] = std::make_shared<fss::server::smm_settings>("https://smm.test", fss::secure_string{"u"},
+                                                                     fss::secure_string{"p"});
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+
+    bool found_smm = false;
+    for (const auto &msg : conn->sent)
+    {
+        if (msg->getType() == fss::transport::message_type_smm_settings)
+        {
+            found_smm = true;
+        }
+    }
+    REQUIRE(found_smm);
+}
+
+TEST_CASE("session: system_status message is forwarded to db writer")
+{
+    fss_test::MockDatabase mock;
+    constexpr uint64_t asset_id = 13;
+    mock.asset_ids["craft"] = asset_id;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+
+    auto status =
+        std::make_shared<fss::transport::fss_message_system_status>(uint8_t{80}, uint32_t{1000}, double{12.5});
+    session->processMessage(status);
+
+    REQUIRE(fss_test::wait_for([&]() { return !mock.statuses.empty(); }));
+    REQUIRE(mock.statuses.front().asset_id == asset_id);
+    REQUIRE(mock.statuses.front().bat_percent == 80);
+}
+
+TEST_CASE("session: search_status message is forwarded to db writer")
+{
+    fss_test::MockDatabase mock;
+    constexpr uint64_t asset_id = 14;
+    mock.asset_ids["craft"] = asset_id;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+
+    auto search = std::make_shared<fss::transport::fss_message_search_status>(uint64_t{5}, uint64_t{3}, uint64_t{10});
+    session->processMessage(search);
+
+    REQUIRE(fss_test::wait_for([&]() { return !mock.searches.empty(); }));
+    REQUIRE(mock.searches.front().asset_id == asset_id);
+    REQUIRE(mock.searches.front().search_id == 5);
+    REQUIRE(mock.searches.front().completed == 3);
+    REQUIRE(mock.searches.front().total == 10);
+}
+
+TEST_CASE("session: rtt_request from client triggers rtt_response reply")
+{
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 1;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+    conn->sent.clear();
+
+    auto rtt_req = std::make_shared<fss::transport::fss_message_rtt_request>();
+    session->processMessage(rtt_req);
+
+    bool found_rtt_response = false;
+    for (const auto &msg : conn->sent)
+    {
+        if (msg->getType() == fss::transport::message_type_rtt_response)
+        {
+            found_rtt_response = true;
+        }
+    }
+    REQUIRE(found_rtt_response);
+}
