@@ -1,0 +1,42 @@
+# Run unit tests that require PostgreSQL+PostGIS in an isolated Docker network.
+# Neither postgres nor the test runner exposes ports to the host.
+#
+# Usage:
+#   docker compose -f docker-compose.db-unit-tests.yaml up --build --exit-code-from test-runner
+#
+# The exit code mirrors the test binary exit code (0 = all passed).
+# Add "--abort-on-container-exit" so the db service stops when tests finish.
+services:
+  db:
+    image: postgis/postgis:18-3.6-alpine
+    networks:
+      - test-net
+    environment:
+      POSTGRES_PASSWORD: password
+    volumes:
+      - ./e2e/schema:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready --username=postgres"]
+      interval: 2s
+      timeout: 5s
+      retries: 20
+
+  test-runner:
+    build:
+      context: .
+      dockerfile: docker/db-unit-test.Dockerfile
+    networks:
+      - test-net
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      TEST_DB_HOST: db
+      TEST_DB_PORT: "5432"
+      TEST_DB_USER: postgres
+      TEST_DB_PASS: password
+      TEST_DB_NAME: postgres
+
+networks:
+  test-net:
+    driver: bridge
