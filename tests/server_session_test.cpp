@@ -905,3 +905,68 @@ TEST_CASE("session: rtt_request from client triggers rtt_response reply")
     }
     REQUIRE(found_rtt_response);
 }
+
+TEST_CASE("session: unidentified client receives identity_required for non-identity message")
+{
+    fss_test::MockDatabase mock;
+
+    auto conn = std::make_shared<FakeConnection>();
+    NullClientHandler handler;
+
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+
+    /* Send any non-identity message before the client has identified.
+     * The server must reply with identity_required rather than crashing. */
+    session->processMessage(std::make_shared<fss::transport::fss_message_rtt_request>());
+
+    bool found = false;
+    for (const auto &msg : conn->sent)
+    {
+        if (msg->getType() == fss::transport::message_type_identity_required)
+        {
+            found = true;
+        }
+    }
+    REQUIRE(found);
+}
+
+TEST_CASE("rate limiter: sustained rate-limiting logs a warning after 1 s")
+{
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 1;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+
+    auto clock = std::make_shared<FakeClock>();
+    /* Start at non-zero time so the first rate-limited drop sets
+     * last_rate_limit_log_ms to a non-zero value (0 is the sentinel
+     * for "never dropped"). */
+    clock->advance(1000);
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    session->setClock(clock);
+    session->setRateLimits(1, 0); // 1-message burst, no refill
+
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+
+    auto pos = std::make_shared<fss::transport::fss_message_position_report>(
+        0.0, 0.0, 0U, 0U, 0U, int16_t{0}, 0U, std::string{}, 0U, uint8_t{0}, 0U, uint8_t{0}, uint8_t{0}, uint64_t{0});
+
+    /* Consume the single token. */
+    session->processMessage(pos);
+    /* First drop — sets last_rate_limit_log_ms = 1000 ms. */
+    session->processMessage(pos);
+
+    /* Advance past the 1-second warning threshold. */
+    clock->advance(1001);
+
+    fss_test::capture_cerr cap;
+    /* This drop is > 1 s after the first → warning fires. */
+    session->processMessage(pos);
+
+    REQUIRE(cap.str().find("Rate-limiting") != std::string::npos);
+    REQUIRE(handler.disconnects == 0);
+}
