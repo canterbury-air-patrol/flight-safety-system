@@ -155,4 +155,6 @@ TEST_CASE("log: level_str returns expected tag for each level")
     REQUIRE(std::string(fss_log::detail::level_str(fss_log::level::Warn)) == "WARN ");
     REQUIRE(std::string(fss_log::detail::level_str(fss_log::level::Info)) == "INFO ");
     REQUIRE(std::string(fss_log::detail::level_str(fss_log::level::Debug)) == "DEBUG");
+    /* Unreachable in normal usage but exercises the default return path. */
+    REQUIRE(std::string(fss_log::detail::level_str(static_cast<fss_log::level>(999))) == "?????");
 }

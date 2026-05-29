@@ -29,6 +29,12 @@ TEST_CASE("Connection Create (failure)")
     REQUIRE(!conn->connectTo("this.host.does.not.exist", 1));
 }
 
+TEST_CASE("transport: getClientNames returns empty list for base fss_connection")
+{
+    flight_safety_system::transport::fss_connection conn;
+    REQUIRE(conn.getClientNames().empty());
+}
+
 static std::shared_ptr<flight_safety_system::transport::fss_connection> client_conn = nullptr;
 static auto test_client_connect_cb(std::shared_ptr<flight_safety_system::transport::fss_connection> new_conn) -> bool
 {

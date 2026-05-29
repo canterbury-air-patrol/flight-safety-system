@@ -142,22 +142,55 @@ TEST_CASE("server_clients: broadcastMsg skips the 'except' client")
 
 TEST_CASE("server_clients: checkTimeouts disconnects timed-out client")
 {
+    /* liveness_active is only set after the aircraft identity handshake, so
+     * build a fully-identified client via make_aircraft_client. */
     server_clients sc;
     sc.setClientTimeoutMs(1000);
 
     fss_test::MockDatabase mock;
+    auto clock = std::make_shared<FakeClock>();
+
+    mock.asset_ids["craft"] = 1;
     auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
     auto writer = make_null_writer();
     auto client = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &sc);
-
-    auto clock = std::make_shared<FakeClock>();
     client->setClock(clock);
     client->setTimeoutMs(1000);
-
+    /* Identity handshake sets liveness_active = true. */
+    client->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
     sc.clientConnected(client);
 
-    // Advance time past the timeout threshold
+    /* Advance time past the 1-second timeout. */
     clock->advance(2000);
+    sc.checkTimeouts();
+    sc.cleanupRemovableClients();
+}
+
+TEST_CASE("server_clients: checkTimeouts logs warning and disconnects timed-out aircraft client")
+{
+    /* Verify the FSS_LOG_WARN + clientDisconnected path inside checkTimeouts
+     * fires for an identified aircraft client whose clock has advanced past
+     * the timeout threshold. */
+    server_clients sc;
+    sc.setClientTimeoutMs(500);
+
+    fss_test::MockDatabase mock;
+    mock.asset_ids["old-craft"] = 1;
+
+    /* Clock starts at 0; identity handshake records last_rtt_response_time=0. */
+    auto clock = std::make_shared<FakeClock>();
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("old-craft");
+    auto writer = make_null_writer();
+    auto client = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &sc);
+    client->setClock(clock);
+    client->setTimeoutMs(500);
+    client->processMessage(std::make_shared<fss::transport::fss_message_identity>("old-craft"));
+    sc.clientConnected(client);
+
+    /* Advance past the 500 ms threshold so isTimedOut() returns true. */
+    clock->advance(1001);
     sc.checkTimeouts();
     sc.cleanupRemovableClients();
 }

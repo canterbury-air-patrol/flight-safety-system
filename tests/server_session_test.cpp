@@ -970,3 +970,122 @@ TEST_CASE("rate limiter: sustained rate-limiting logs a warning after 1 s")
     REQUIRE(cap.str().find("Rate-limiting") != std::string::npos);
     REQUIRE(handler.disconnects == 0);
 }
+
+TEST_CASE("session: GOTO command dispatch sends lat/lon asset_command message")
+{
+    /* The asset_command_goto branch in sendCommand() constructs the message
+     * via getLatitude() / getLongitude() — these accessors are otherwise
+     * uncovered. */
+    fss_test::MockDatabase mock;
+    constexpr uint64_t asset_id = 20;
+    mock.asset_ids["craft"] = asset_id;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+
+    const std::size_t before = conn->sent.size();
+    auto cmd = std::make_shared<fss::server::asset_command>(/*dbid*/ 5, /*ts*/ 200, "GOTO", -43.5, 172.6, uint16_t{0});
+    mock.pushCommand(asset_id, cmd);
+    session->setPendingCommand(cmd);
+    session->sendCommand();
+
+    bool delivered = false;
+    for (std::size_t i = before; i < conn->sent.size(); ++i)
+    {
+        if (conn->sent[i]->getType() == fss::transport::message_type_command)
+        {
+            delivered = true;
+        }
+    }
+    REQUIRE(delivered);
+}
+
+TEST_CASE("session: rtt_request from identified client receives rtt_response")
+{
+    /* An identified aircraft client that receives an rtt_request must reply
+     * with an rtt_response carrying the same message id. */
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 1;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+
+    const std::size_t before = conn->sent.size();
+    auto req = std::make_shared<fss::transport::fss_message_rtt_request>();
+    req->setId(99);
+    session->processMessage(req);
+
+    bool found = false;
+    for (std::size_t i = before; i < conn->sent.size(); ++i)
+    {
+        if (conn->sent[i]->getType() == fss::transport::message_type_rtt_response)
+        {
+            found = true;
+        }
+    }
+    REQUIRE(found);
+    REQUIRE(handler.disconnects == 0);
+}
+
+TEST_CASE("session: sendSMMSettings returns early when asset_id is zero")
+{
+    /* sendSMMSettings() guards against asset_id==0 (unidentified client)
+     * and must return without calling getSmmSettings on the database. */
+    fss_test::MockDatabase mock;
+    /* Do NOT add an asset_id entry — the client will remain unidentified
+     * so cached_asset_id stays 0 after any processMessage call. */
+
+    auto conn = std::make_shared<FakeConnection>();
+    NullClientHandler handler;
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+
+    const std::size_t before = conn->sent.size();
+    session->sendSMMSettings(); /* asset_id == 0 → early return */
+    /* No smm_settings message should have been sent. */
+    REQUIRE(conn->sent.size() == before);
+}
+
+TEST_CASE("session: sendRTTRequest skips second request within retry interval")
+{
+    /* When two RTT requests are enqueued consecutively (clock not advanced),
+     * the second call must return early without sending a new request. */
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 1;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+    auto clock = std::make_shared<FakeClock>();
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    session->setClock(clock);
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+
+    auto rtt1 = std::make_shared<fss::transport::fss_message_rtt_request>();
+    auto rtt2 = std::make_shared<fss::transport::fss_message_rtt_request>();
+    session->sendRTTRequest(rtt1); /* queued at t=0 */
+
+    /* No clock advance — within the rtt_retry_interval → early return. */
+    session->sendRTTRequest(rtt2);
+
+    /* Only one rtt_request should appear on the wire. */
+    int rtt_count = 0;
+    for (const auto &msg : conn->sent)
+    {
+        if (msg->getType() == fss::transport::message_type_rtt_request)
+        {
+            ++rtt_count;
+        }
+    }
+    REQUIRE(rtt_count == 1);
+    REQUIRE(handler.disconnects == 0);
+}
