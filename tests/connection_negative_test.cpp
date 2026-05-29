@@ -164,3 +164,42 @@ TEST_CASE("negative: slow peer — one byte per 50ms still decodes full message"
 
     accepted = nullptr;
 }
+
+TEST_CASE("negative: zero-length message header is skipped and next message decoded")
+{
+    /* A 2-byte header with data_length==0 triggers the total_length < sizeof(uint16_t)
+     * guard in recvMsg(), returning nullptr. processMessages() must log the warning
+     * and continue, so the next valid message is still received. */
+    accepted = nullptr;
+    constexpr uint16_t port = 20513;
+    auto listen = std::make_shared<fss_listen>(port, accept_cb);
+    REQUIRE(listen != nullptr);
+
+    int fd = raw_connect(port);
+    REQUIRE(fd >= 0);
+
+    REQUIRE(fss_test::wait_for([]() { return accepted != nullptr; }));
+
+    /* Zero-length header: data_length = 0 in network byte order. */
+    const uint8_t zero_hdr[2] = {0x00, 0x00};
+    REQUIRE(::send(fd, zero_hdr, sizeof(zero_hdr), 0) == 2);
+
+    /* Follow immediately with a valid identity message. */
+    auto msg = std::make_shared<fss_message_identity>("after-zero");
+    msg->setId(77);
+    auto bl = msg->getPacked();
+    REQUIRE(::send(fd, bl->getData(), bl->getLength(), 0) == static_cast<ssize_t>(bl->getLength()));
+
+    std::shared_ptr<fss_message> received;
+    REQUIRE(fss_test::wait_for([&]() {
+        received = accepted->getMsg();
+        return received != nullptr && received->getType() == message_type_identity;
+    }));
+
+    auto ident = std::dynamic_pointer_cast<fss_message_identity>(received);
+    REQUIRE(ident != nullptr);
+    REQUIRE(ident->getName() == "after-zero");
+
+    ::close(fd);
+    accepted = nullptr;
+}
