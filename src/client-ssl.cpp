@@ -64,7 +64,10 @@ flight_safety_system::client_ssl::fss_client::~fss_client()
 
 void flight_safety_system::client_ssl::fss_client::disconnect()
 {
-    for (const auto &server : this->servers)
+    /* Snapshot the list so that serverRequiresReconnect callbacks fired by
+     * the recv thread during disconnect() cannot invalidate our iterator. */
+    auto snapshot = this->servers;
+    for (const auto &server : snapshot)
     {
         server->disconnect();
     }
