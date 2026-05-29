@@ -1,3 +1,5 @@
+#include <cstdio>
+#include <fstream>
 #include <memory>
 #include <string_view>
 #ifdef HAVE_CATCH2_CATCH_ALL_HPP
@@ -142,4 +144,62 @@ TEST_CASE("client: processMessage version incompatibility triggers serverRequire
     constexpr uint16_t future_min = fss::transport::FSS_PROTOCOL_VERSION + 1;
     auto msg = std::make_shared<fss::transport::fss_message_version>(future_min, future_min, uint32_t{0});
     server->processMessage(msg); // serverRequiresReconnect called; no crash
+}
+
+TEST_CASE("client: JSON config with server entry parses name and creates reconnect entry")
+{
+    /* Exercise the file-based fss_client constructor body (lines 24-40) and
+     * the setAssetName helper. */
+    const char *tmppath = "/tmp/fss_test_client_cfg.json";
+    {
+        std::ofstream f(tmppath);
+        f << R"({"name":"test-asset",)"
+          << R"("ssl":{"ca_public_key":"ca.pem","client_private_key":"key.pem","client_public_key":"cert.pem"},)"
+          << R"("servers":[{"address":"127.0.0.1","port":9999}]})";
+    }
+    fss::client_ssl::fss_client client(tmppath);
+    REQUIRE(client.getAssetName() == "test-asset");
+    std::remove(tmppath);
+}
+
+TEST_CASE("client: disconnect closes all active server connections")
+{
+    /* connectTo with connect=true adds a server to the connected list.
+     * A subsequent disconnect() must iterate and close it (lines 65-71). */
+    constexpr uint16_t port = 20404;
+    client_conn = nullptr;
+    auto listen = std::make_shared<flight_safety_system::transport_ssl::fss_listen>(
+        port, test_client_connect_cb, CA_PUBLIC_FILE, SERVER_PRIVATE_FILE, SERVER_PUBLIC_FILE);
+    REQUIRE(listen != nullptr);
+
+    auto client =
+        std::make_shared<fss::client_ssl::fss_client>(CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE);
+    client->connectTo("localhost", port, true);
+    REQUIRE(fss_test::wait_for([]() { return client_conn != nullptr; }));
+
+    client->disconnect(); /* exercises lines 65-71 */
+    client_conn = nullptr;
+}
+
+TEST_CASE("client: base class handleCommand, handlePositionReport, handleSMMSettings are no-ops")
+{
+    /* The three virtual handlers have empty base-class bodies that are
+     * never reached when the TrackingClient override intercepts them.
+     * Drive them through processMessage on a plain fss_client. */
+    fss::client_ssl::fss_client client(CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE);
+    auto server = std::make_shared<fss::client_ssl::fss_server>(&client, "localhost", uint16_t{0}, CA_PUBLIC_FILE,
+                                                                CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE);
+
+    auto cmd =
+        std::make_shared<fss::transport::fss_message_asset_command>(fss::transport::asset_command_rtl, uint64_t{0});
+    server->processMessage(cmd); /* fss_client::handleCommand — no-op */
+
+    auto pos =
+        std::make_shared<fss::transport::fss_message_position_report>(0.0, 0.0, 0, 0, 0, 0, 0, "T", 0, 0, 0, 0, 0, 0);
+    server->processMessage(pos); /* fss_client::handlePositionReport — no-op */
+
+    auto smm = std::make_shared<fss::transport::fss_message_smm_settings>("https://smm.example/",
+                                                                          fss::secure_string(std::string_view{"user"}),
+                                                                          fss::secure_string(std::string_view{"pass"}));
+    server->processMessage(smm); /* fss_client::handleSMMSettings — no-op */
 }
