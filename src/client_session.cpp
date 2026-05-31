@@ -344,6 +344,13 @@ void fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss
         }
         return;
     }
+    /* In-order / duplicate detection (v2+). Each peer numbers the messages it
+     * sends with a monotonic per-connection counter; we require the next id to
+     * match. This is an application-level integrity check that rejects
+     * reordered or duplicated messages within a session — it is NOT a security
+     * replay defence. TLS already provides cryptographic replay and reorder
+     * protection at the record layer; an attacker cannot inject a replayed
+     * message into the encrypted stream in the first place. */
     if (this->getConnection()->getNegotiatedVersion() >= 2)
     {
         uint64_t wanted = this->expected_seq.load();
@@ -352,7 +359,7 @@ void fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss
             if (msg->getSeq() != wanted)
             {
                 FSS_LOG_WARN("server",
-                             "Out-of-order or replayed message seq=" << msg->getSeq() << " expected=" << wanted);
+                             "Out-of-order or duplicate message seq=" << msg->getSeq() << " expected=" << wanted);
                 if (msg->getType() == fss::transport::message_type_identity ||
                     msg->getType() == fss::transport::message_type_identity_non_aircraft)
                 {

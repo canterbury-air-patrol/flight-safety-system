@@ -25,8 +25,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Per-client token-bucket rate limiting** — configurable `message_rate_capacity`
   and `message_rate_refill` protect the server from burst flooding by individual
   clients.
-- **Replay protection** — sequence numbers and timestamp staleness checks reject
-  replayed or heavily delayed messages.
+- **In-order delivery and staleness checks** — per-connection sequence numbers
+  reject out-of-order or duplicated messages within a session, and a timestamp
+  staleness check discards heavily delayed position reports. (TLS already
+  provides cryptographic replay/reorder protection at the record layer; these
+  are application-level integrity checks, not a security replay defence.)
 - **SMM credentials stored in `secure_string`** — SMM username and password are
   held in memory-locked, zero-on-free storage.
 - **TLS cipher priority hardened** — GnuTLS priority string tightened; minimum
