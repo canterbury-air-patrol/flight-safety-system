@@ -1,9 +1,11 @@
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <cstring>
+#include <thread>
 #include <vector>
 #include "fss-transport.hpp"
 #include "fss-log.hpp"
@@ -467,6 +469,17 @@ void flight_safety_system::transport::fss_listen::processMessages()
                 return;
             }
             FSS_PERROR("transport", "Failed to accept");
+            /* On resource exhaustion (out of file descriptors or memory) the
+             * pending connection is not consumed, so accept() would fail again
+             * immediately and spin the CPU at 100% while flooding the log.
+             * Back off briefly to give the system a chance to recover; other
+             * errno values (e.g. ECONNABORTED, EINTR) are transient and safe
+             * to retry without delay. */
+            if (errno == EMFILE || errno == ENFILE || errno == ENOBUFS || errno == ENOMEM)
+            {
+                constexpr auto accept_backoff = std::chrono::milliseconds(50);
+                std::this_thread::sleep_for(accept_backoff);
+            }
             continue;
         }
 #ifdef DEBUG
