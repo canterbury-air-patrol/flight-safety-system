@@ -510,6 +510,7 @@ void flight_safety_system::transport::fss_message_position_report::packData(std:
     bl->addData(&enc_flags, sizeof(uint16_t));
     bl->addData(&this->altitude_type, sizeof(uint8_t));
     bl->addData(&this->emitter_type, sizeof(uint8_t));
+    bl->addData(&this->tslc, sizeof(uint8_t));
 }
 
 void flight_safety_system::transport::fss_message_position_report::unpackData(const std::shared_ptr<buf_len> &bl)
@@ -525,6 +526,7 @@ void flight_safety_system::transport::fss_message_position_report::unpackData(co
     this->flags = 0;
     this->altitude_type = 0;
     this->emitter_type = 0;
+    this->tslc = 0;
     int32_t lat = 0;
     int32_t lng = 0;
     reader.readUint64(this->timestamp);
@@ -540,6 +542,7 @@ void flight_safety_system::transport::fss_message_position_report::unpackData(co
     reader.readUint16(this->flags);
     reader.readUint8(this->altitude_type);
     reader.readUint8(this->emitter_type);
+    reader.readUint8(this->tslc);
     this->latitude = static_cast<double>(lat) * FSS_COORD_SCALE;
     this->longitude = static_cast<double>(lng) * FSS_COORD_SCALE;
 }

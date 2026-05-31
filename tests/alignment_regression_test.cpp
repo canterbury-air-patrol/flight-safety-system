@@ -39,7 +39,7 @@ namespace {
  * appended after. All fixed pieces; callsign alone varies. */
 constexpr size_t header_bytes = 12;
 constexpr size_t fixed_before_cs = 8 + 4 + 4 + 4 + 4 + 2 + 2 + 2 + 2; /* = 32 */
-constexpr size_t fixed_after_cs = 2 + 1 + 1;                          /* = 4  */
+constexpr size_t fixed_after_cs = 2 + 1 + 1 + 1;                      /* = 5 (flags, alt_type, emitter, tslc) */
 constexpr size_t callsign_len_prefix = 2;
 constexpr size_t align = 8;
 
