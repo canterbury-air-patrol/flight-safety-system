@@ -17,6 +17,12 @@ namespace transport {
 
 static constexpr double FSS_COORD_SCALE = 0.0000001;
 
+/* Fixed-point scale for battery voltage on the wire (volts per LSB). Held
+ * separate from FSS_COORD_SCALE — they share a value today but are unrelated
+ * quantities; changing coordinate precision must not silently rescale
+ * voltages. */
+static constexpr double FSS_VOLTAGE_SCALE = 0.0000001;
+
 /* Wire-protocol version handshake.
  * - FSS_PROTOCOL_VERSION_LEGACY (0): unversioned protocol that pre-dates the
  *   handshake. Used as the negotiated value when the peer never sends a
