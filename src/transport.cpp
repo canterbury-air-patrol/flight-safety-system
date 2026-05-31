@@ -310,6 +310,15 @@ auto flight_safety_system::transport::fss_connection::sendMsg(const std::shared_
         ssize_t transfered = send(current_fd, &data[sent], to_send - sent, 0);
         if (transfered < 0)
         {
+            /* A signal can interrupt send() before any bytes are written;
+             * that is not a connection failure, so retry rather than dropping
+             * the peer. SIGPIPE is ignored process-wide, so a genuinely broken
+             * connection surfaces here as EPIPE (or similar) and falls through
+             * to return false. */
+            if (errno == EINTR)
+            {
+                continue;
+            }
             return false;
         }
         sent += transfered;
