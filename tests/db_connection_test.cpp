@@ -164,6 +164,40 @@ TEST_CASE("db_connection: tryReconnectIfNeeded reconnects after underlying disco
     REQUIRE(dbc->isConnected());
 }
 
+TEST_CASE("db_connection: tryReconnectIfNeeded restores a single dropped connection")
+{
+    /* The read and write paths use independent ECPG connections. If only one
+     * is lost, tryReconnectIfNeeded must restore it — and operations on that
+     * connection must work again — while the other is left untouched. */
+    auto dbc = live_db_or_skip();
+    auto asset_id = dbc->getAssetId("test-asset");
+    REQUIRE(asset_id != 0);
+
+    SECTION("only the read connection drops")
+    {
+        db_disconnect("fss_read");
+        dbc->tryReconnectIfNeeded();
+        REQUIRE(dbc->isConnected());
+        /* A read must succeed again on the reconnected connection. */
+        REQUIRE(dbc->getAssetId("test-asset") == asset_id);
+        /* The write connection was never touched, so a write still works. */
+        dbc->recordRtt(asset_id, uint64_t{7});
+        REQUIRE(dbc->isConnected());
+    }
+
+    SECTION("only the write connection drops")
+    {
+        db_disconnect("fss_write");
+        dbc->tryReconnectIfNeeded();
+        REQUIRE(dbc->isConnected());
+        /* A write must succeed again on the reconnected connection. */
+        dbc->recordRtt(asset_id, uint64_t{7});
+        REQUIRE(dbc->isConnected());
+        /* The read connection was never touched, so a read still works. */
+        REQUIRE(dbc->getAssetId("test-asset") == asset_id);
+    }
+}
+
 TEST_CASE("db_connection: getCommand returns non-null for asset with pending command")
 {
     /* The test fixture inserts an RTL command for test-asset before the test
