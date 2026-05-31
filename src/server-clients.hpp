@@ -53,11 +53,21 @@ public:
     }
     void clientConnected(std::shared_ptr<flight_safety_system::server::fss_client> client)
     {
+        /* Apply config before wiring the connection's message handler: the
+         * recv thread is already live, so activating the handler first would
+         * let a message reach the client (touching msg_rate) while the rate
+         * limiter is still being reconfigured. */
         client->setTimeoutMs(this->client_timeout_ms);
         client->setRateLimits(this->rate_capacity, this->rate_refill_per_s);
-        std::scoped_lock guard(this->lock);
-        this->total_clients++;
-        this->clients.push_back(std::move(client));
+        auto *raw = client.get();
+        {
+            std::scoped_lock guard(this->lock);
+            this->total_clients++;
+            this->clients.push_back(std::move(client));
+        }
+        /* Register only after the client is in the list, so a queued message
+         * flushed by activate() that triggers clientDisconnected can find it. */
+        raw->activate();
     };
     void clientDisconnected(flight_safety_system::server::fss_client *client) override
     {

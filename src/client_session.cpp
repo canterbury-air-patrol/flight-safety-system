@@ -136,6 +136,16 @@ fss::server::fss_client::fss_client(std::shared_ptr<fss::transport::fss_connecti
                                     std::shared_ptr<db_write_queue> t_writer, fss_client_handler *t_handler)
     : fss_message_cb(std::move(t_conn)), dbc(t_dbc), writer(std::move(t_writer)), client_handler(t_handler)
 {
+    /* The connection's recv thread may already be running (it is started by
+     * fss_connection_server::create before this client exists). The handler
+     * is wired separately, via activate(), only after per-client config
+     * (timeout, rate limits) has been applied — otherwise the recv thread
+     * could deliver a message and touch msg_rate while it is being
+     * reconfigured. Until then, inbound messages queue on the connection. */
+}
+
+void fss::server::fss_client::activate()
+{
     this->getConnection()->setHandler(this);
 }
 
