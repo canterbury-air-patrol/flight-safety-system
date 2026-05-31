@@ -89,20 +89,25 @@ private:
      * thread-safe usage pattern ECPG documents. read_lock covers getAssetId,
      * getCommand, getActiveServers and getSmmSettings; write_lock covers the
      * record* telemetry inserts. */
-    static constexpr const char *read_conn_name = "fss_read";
-    static constexpr const char *write_conn_name = "fss_write";
     std::mutex read_lock;
     std::mutex write_lock;
-    bool read_connected_{false};
-    bool write_connected_{false};
+    /* Read without holding either mutex by isConnected(), and written from
+     * reconnectOne() under the matching mutex, so they must be atomic to
+     * avoid a data race. */
+    std::atomic<bool> read_connected_{false};
+    std::atomic<bool> write_connected_{false};
     std::string host_;
     int port_{5432};
     std::string user_;
     std::string pass_;
     std::string db_;
     auto connectOne(const char *conn_name) -> bool;
-    void reconnectOne(const char *conn_name, bool &connected_flag);
+    void reconnectOne(const char *conn_name, std::atomic<bool> &connected_flag);
 public:
+    /* ECPG connection names, exposed so tests can target a specific
+     * connection (e.g. force one closed) without duplicating the literals. */
+    static constexpr const char *read_conn_name = "fss_read";
+    static constexpr const char *write_conn_name = "fss_write";
     db_connection(std::string host, int port, std::string user, std::string pass, std::string db);
     db_connection(db_connection &) = delete;
     db_connection(db_connection &&) = delete;
