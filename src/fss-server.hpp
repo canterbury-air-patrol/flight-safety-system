@@ -83,13 +83,25 @@ public:
 
 class db_connection : public IDatabase {
 private:
-    std::mutex db_lock;
-    bool connected_{false};
+    /* Two independent ECPG connections so a stalled telemetry write cannot
+     * block a command/config read. Each connection is guarded by its own
+     * mutex and therefore only ever used by one thread at a time — the
+     * thread-safe usage pattern ECPG documents. read_lock covers getAssetId,
+     * getCommand, getActiveServers and getSmmSettings; write_lock covers the
+     * record* telemetry inserts. */
+    static constexpr const char *read_conn_name = "fss_read";
+    static constexpr const char *write_conn_name = "fss_write";
+    std::mutex read_lock;
+    std::mutex write_lock;
+    bool read_connected_{false};
+    bool write_connected_{false};
     std::string host_;
     int port_{5432};
     std::string user_;
     std::string pass_;
     std::string db_;
+    auto connectOne(const char *conn_name) -> bool;
+    void reconnectOne(const char *conn_name, bool &connected_flag);
 public:
     db_connection(std::string host, int port, std::string user, std::string pass, std::string db);
     db_connection(db_connection &) = delete;
