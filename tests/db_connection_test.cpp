@@ -217,3 +217,19 @@ TEST_CASE("db_connection: tryReconnectIfNeeded reconnects after underlying disco
     dbc->tryReconnectIfNeeded();
     REQUIRE(dbc->isConnected());
 }
+
+TEST_CASE("db_connection: getCommand returns non-null for asset with pending command")
+{
+    /* The test fixture inserts an RTL command for test-asset before the test
+     * suite runs.  getCommand() must find it and return a non-null result. */
+    auto dbc = make_test_db();
+    if (!dbc)
+    {
+        SKIP("TEST_DB_HOST not set");
+    }
+    REQUIRE(dbc->isConnected());
+    auto asset_id = dbc->getAssetId("test-asset");
+    REQUIRE(asset_id != 0);
+    auto cmd = dbc->getCommand(asset_id);
+    REQUIRE(cmd != nullptr);
+}
