@@ -166,8 +166,9 @@ TEST_CASE("client: disconnect closes all active server connections")
 {
     /* connectTo with connect=true adds a server to the connected list.
      * A subsequent disconnect() must iterate and close it (lines 65-71). */
-    constexpr uint16_t port = 20404;
     client_conn = nullptr;
+    const uint16_t port = fss_test::pick_port();
+    REQUIRE(port != 0);
     auto listen = std::make_shared<flight_safety_system::transport_ssl::fss_listen>(
         port, test_client_connect_cb, CA_PUBLIC_FILE, SERVER_PRIVATE_FILE, SERVER_PUBLIC_FILE);
     REQUIRE(listen != nullptr);
@@ -175,7 +176,7 @@ TEST_CASE("client: disconnect closes all active server connections")
     auto client =
         std::make_shared<fss::client_ssl::fss_client>(CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE);
     client->connectTo("localhost", port, true);
-    REQUIRE(fss_test::wait_for([]() { return client_conn != nullptr; }));
+    REQUIRE(fss_test::wait_for([]() -> bool { return client_conn != nullptr; }));
 
     client->disconnect(); /* exercises lines 65-71 */
     client_conn = nullptr;
