@@ -1,5 +1,7 @@
 #include <cstdlib>
 #include <memory>
+#include <string>
+#include <utility>
 
 #ifdef HAVE_CATCH2_CATCH_ALL_HPP
 #include <catch2/catch_all.hpp>
@@ -16,6 +18,7 @@
 #include <cmath>
 
 #include "fss-transport.hpp"
+#include "test_helpers.hpp"
 
 TEST_CASE("Close Connection Check")
 {
@@ -633,4 +636,135 @@ TEST_CASE("messages: smm_settings with truncated string body returns empty field
                                                                          static_cast<uint16_t>(truncated));
     auto decoded = std::make_shared<flight_safety_system::transport::fss_message_smm_settings>(uint64_t{1}, bl);
     REQUIRE(decoded->getServerURL().empty());
+}
+
+// ---------------------------------------------------------------------------
+// buf_len copy/move construction (transport-messages.cpp lines 159, 160)
+// ---------------------------------------------------------------------------
+TEST_CASE("messages: buf_len copy and move construction")
+{
+    using flight_safety_system::transport::buf_len;
+    buf_len orig("hello", 5);
+    buf_len copy_constructed(orig); // copy ctor — line 159
+    REQUIRE(copy_constructed.getLength() == orig.getLength());
+    buf_len move_constructed(std::move(copy_constructed)); // move ctor — line 160
+    REQUIRE(move_constructed.getLength() == 5);
+}
+
+// ---------------------------------------------------------------------------
+// buf_len copy assignment (lines 172, 174, 176, 178)
+// ---------------------------------------------------------------------------
+TEST_CASE("messages: buf_len copy assignment operator")
+{
+    using flight_safety_system::transport::buf_len;
+    buf_len a("abc", 3);
+    buf_len b;
+    b = a; // copy assign — lines 172-178
+    REQUIRE(b.getLength() == 3);
+    REQUIRE(std::string(b.getData(), b.getLength()) == "abc");
+}
+
+// ---------------------------------------------------------------------------
+// buf_len::writeAt const char* overload (lines 198, 200, 201)
+// ---------------------------------------------------------------------------
+TEST_CASE("messages: buf_len writeAt const char* overload")
+{
+    using flight_safety_system::transport::buf_len;
+    buf_len bl("hello", 5);
+    bl.addData("world", 5); // "helloworld" (10 bytes)
+    const char *repl = "XY";
+    bl.writeAt(2, repl, 2); // const char* overload — lines 198-201
+    std::string result(bl.getData(), bl.getLength());
+    REQUIRE(result == "heXYoworld");
+}
+
+// ---------------------------------------------------------------------------
+// fss_message_cb copy ctor and assignment operator (lines 223, 235-242)
+// ---------------------------------------------------------------------------
+namespace {
+
+struct MinimalCb : flight_safety_system::transport::fss_message_cb {
+    explicit MinimalCb(std::shared_ptr<flight_safety_system::transport::fss_connection> t_conn = nullptr)
+        : fss_message_cb(std::move(t_conn))
+    {
+    }
+    void processMessage(std::shared_ptr<flight_safety_system::transport::fss_message>) override {}
+};
+
+} // namespace
+
+TEST_CASE("messages: fss_message_cb copy ctor and assignment operator")
+{
+    MinimalCb a;
+    MinimalCb b(a); // copy ctor — line 223
+    REQUIRE(b.connected() == a.connected());
+    MinimalCb c;
+    c = a; // copy assign — lines 235-242
+    REQUIRE(c.connected() == a.connected());
+}
+
+// ---------------------------------------------------------------------------
+// fss_message_position_report getTSLC accessor (lines 587, 589)
+// ---------------------------------------------------------------------------
+TEST_CASE("messages: fss_message_position_report getTSLC accessor")
+{
+    auto msg = std::make_shared<flight_safety_system::transport::fss_message_position_report>(
+        0.0, 0.0, uint32_t{0}, uint16_t{0}, uint16_t{0}, int16_t{0}, uint32_t{0}, std::string{"T"}, uint16_t{0},
+        uint8_t{42}, uint16_t{0}, uint8_t{0}, uint8_t{0}, uint64_t{0});
+    REQUIRE(msg->getTSLC() == uint8_t{42});
+}
+
+// ---------------------------------------------------------------------------
+// BufferReader short-read paths (lines 91, 99, 119, 129)
+// Each test crafts a buffer that is just long enough to reach the failing
+// field read, triggering the corresponding "return false" guard.
+// ---------------------------------------------------------------------------
+
+/* readUint8 failure (line 91): system_status with only the 12-byte header —
+ * the first field read (bat_percent : uint8_t) cannot be satisfied. */
+TEST_CASE("messages: BufferReader readUint8 short-read returns false")
+{
+    using flight_safety_system::transport::message_type_system_status;
+    auto bl = fss_test::make_framed_buffer(static_cast<uint16_t>(message_type_system_status), 1, "", 12);
+    auto decoded = flight_safety_system::transport::fss_message::decode(bl);
+    /* Decode produces a system_status object with all-zero fields (reads fail
+     * silently); the message type must still be correct. */
+    REQUIRE(decoded != nullptr);
+}
+
+/* readInt32 failure (line 119): position_report truncated after the uint64
+ * timestamp field, so the first int32_t (latitude) read fails. */
+TEST_CASE("messages: BufferReader readInt32 short-read returns false")
+{
+    using flight_safety_system::transport::message_type_position_report;
+    /* header(12) + uint64 timestamp(8) = 20 bytes; int32 lat needs 4 more. */
+    auto bl =
+        fss_test::make_framed_buffer(static_cast<uint16_t>(message_type_position_report), 1, std::string(8, '\0'), 20);
+    auto decoded = flight_safety_system::transport::fss_message::decode(bl);
+    REQUIRE(decoded != nullptr);
+}
+
+/* readInt16 failure (line 99): position_report truncated just before the
+ * int16_t vertical_velocity field (offset 40 from buffer start). */
+TEST_CASE("messages: BufferReader readInt16 short-read returns false")
+{
+    using flight_safety_system::transport::message_type_position_report;
+    /* header(12) + uint64(8) + int32(4) + int32(4) + uint32(4) + uint32(4)
+     *            + uint16(2) + uint16(2) = 40 bytes.
+     * vertical_velocity : int16_t needs 2 more bytes — not present. */
+    auto bl =
+        fss_test::make_framed_buffer(static_cast<uint16_t>(message_type_position_report), 1, std::string(28, '\0'), 40);
+    auto decoded = flight_safety_system::transport::fss_message::decode(bl);
+    REQUIRE(decoded != nullptr);
+}
+
+/* readUint32 failure (line 129): version message truncated after the two
+ * uint16 version fields, so the uint32_t feature_flags read fails. */
+TEST_CASE("messages: BufferReader readUint32 short-read returns false")
+{
+    using flight_safety_system::transport::message_type_version;
+    /* header(12) + uint16(2) + uint16(2) = 16 bytes; uint32 needs 4 more. */
+    auto bl = fss_test::make_framed_buffer(static_cast<uint16_t>(message_type_version), 1, std::string(4, '\0'), 16);
+    auto decoded = flight_safety_system::transport::fss_message::decode(bl);
+    REQUIRE(decoded != nullptr);
 }
