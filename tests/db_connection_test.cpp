@@ -156,10 +156,9 @@ TEST_CASE("db_connection: tryReconnectIfNeeded reconnects after underlying disco
 {
     auto dbc = live_db_or_skip();
     /* Force both underlying ECPG connections closed so db_ping() fails on
-     * each, triggering the reconnect branch in tryReconnectIfNeeded(). The
-     * names match db_connection's internal read/write connection names. */
-    db_disconnect("fss_read");
-    db_disconnect("fss_write");
+     * each, triggering the reconnect branch in tryReconnectIfNeeded(). */
+    db_disconnect(flight_safety_system::server::db_connection::read_conn_name);
+    db_disconnect(flight_safety_system::server::db_connection::write_conn_name);
     dbc->tryReconnectIfNeeded();
     REQUIRE(dbc->isConnected());
 }
@@ -175,7 +174,7 @@ TEST_CASE("db_connection: tryReconnectIfNeeded restores a single dropped connect
 
     SECTION("only the read connection drops")
     {
-        db_disconnect("fss_read");
+        db_disconnect(flight_safety_system::server::db_connection::read_conn_name);
         dbc->tryReconnectIfNeeded();
         REQUIRE(dbc->isConnected());
         /* A read must succeed again on the reconnected connection. */
@@ -187,7 +186,7 @@ TEST_CASE("db_connection: tryReconnectIfNeeded restores a single dropped connect
 
     SECTION("only the write connection drops")
     {
-        db_disconnect("fss_write");
+        db_disconnect(flight_safety_system::server::db_connection::write_conn_name);
         dbc->tryReconnectIfNeeded();
         REQUIRE(dbc->isConnected());
         /* A write must succeed again on the reconnected connection. */

@@ -30,24 +30,35 @@ auto flight_safety_system::server::db_connection::connectOne(const char *conn_na
 
 auto flight_safety_system::server::db_connection::isConnected() const -> bool
 {
-    return read_connected_ && write_connected_;
+    return read_connected_.load() && write_connected_.load();
 }
 
-void flight_safety_system::server::db_connection::reconnectOne(const char *conn_name, bool &connected_flag)
+void flight_safety_system::server::db_connection::reconnectOne(const char *conn_name, std::atomic<bool> &connected_flag)
 {
     if (db_ping(conn_name) != 0)
     {
-        connected_flag = true;
+        /* Healthy. Log only on the down->up transition. */
+        if (!connected_flag.exchange(true))
+        {
+            FSS_LOG_INFO("db", "Database connection '" << conn_name << "' recovered");
+        }
         return;
     }
-    FSS_LOG_WARN("db", "Database connection '" << conn_name << "' lost, attempting reconnect");
+    /* Lost. Log the loss (and a failed retry) only on first detection so a
+     * persistently-down connection does not flood the log on every tick. */
+    bool was_connected = connected_flag.exchange(false);
+    if (was_connected)
+    {
+        FSS_LOG_WARN("db", "Database connection '" << conn_name << "' lost, attempting reconnect");
+    }
     db_disconnect(conn_name);
-    connected_flag = connectOne(conn_name);
-    if (connected_flag)
+    bool reconnected = connectOne(conn_name);
+    connected_flag.store(reconnected);
+    if (reconnected)
     {
         FSS_LOG_INFO("db", "Database connection '" << conn_name << "' reconnected successfully");
     }
-    else
+    else if (was_connected)
     {
         FSS_LOG_ERROR("db", "Database connection '" << conn_name << "' reconnect failed");
     }
