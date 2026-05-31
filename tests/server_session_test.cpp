@@ -620,7 +620,9 @@ auto establish_v2_session(std::shared_ptr<fss::server::fss_client> &session, uin
 TEST_CASE("session: v2 replayed data message is dropped")
 {
     /* m7.1 phase 2: a position report whose seq matches a message the server
-     * already processed (replay) must be discarded. */
+     * already processed (a duplicate within the session) must be discarded.
+     * This is in-order/duplicate detection, not a security replay defence —
+     * TLS already prevents record-layer replay. */
     fss_test::MockDatabase mock;
     mock.asset_ids["craft"] = 1;
 
