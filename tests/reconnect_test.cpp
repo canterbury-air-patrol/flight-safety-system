@@ -238,6 +238,32 @@ TEST_CASE("reconnect: jitter keeps effective delay within 25% of base")
     REQUIRE(any_differ);
 }
 
+TEST_CASE("reconnect: backoff base delay never overshoots the cap")
+{
+    auto client = std::make_shared<flight_safety_system::client_ssl::fss_client>(CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE,
+                                                                                 CLIENT_PUBLIC_FILE);
+    auto server = std::make_shared<CountingServer>(client.get(), "127.0.0.1", static_cast<uint16_t>(20602),
+                                                   CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE);
+    auto fake = std::make_shared<FakeClock>();
+    server->setClock(fake);
+
+    constexpr uint64_t retry_delay_cap = 30000;
+    /* effective_delay = base (capped) + jitter, where jitter is at most
+     * base/4 (±25%). With the base clamped to the cap, effective_delay can
+     * never exceed cap * 1.25. The pre-fix code doubled the base past the cap
+     * (16000 -> 32000), pushing effective_delay above this bound. */
+    constexpr uint64_t effective_upper_bound = retry_delay_cap + retry_delay_cap / 4;
+
+    /* 1000ms -> 30000ms is five doublings; 20 iterations saturates the base.
+     * Advancing by more than the cap each time guarantees the throttle fires. */
+    for (int i = 0; i < 20; ++i)
+    {
+        fake->advance(retry_delay_cap * 2);
+        server->reconnect();
+        REQUIRE(server->getEffectiveDelay() <= effective_upper_bound);
+    }
+}
+
 TEST_CASE("reconnect: multi-server failover keeps secondary reachable")
 {
     constexpr uint16_t port_primary = 20507;

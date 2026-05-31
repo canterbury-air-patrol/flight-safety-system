@@ -303,7 +303,10 @@ auto flight_safety_system::client_ssl::fss_server::reconnect() -> bool
         this->retry_count++;
         if (this->retry_delay < retry_delay_cap)
         {
-            this->retry_delay += this->retry_delay;
+            /* Exponential backoff, clamped to the cap. Plain doubling would
+             * overshoot (e.g. 16000 -> 32000 with a 30000 cap) before the
+             * guard stops it on the next iteration. */
+            this->retry_delay = std::min(this->retry_delay * 2, retry_delay_cap);
         }
         int64_t jitter_range = static_cast<int64_t>(this->retry_delay) / 4;
         std::uniform_int_distribution<int64_t> dist(-jitter_range, jitter_range);
