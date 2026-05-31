@@ -57,6 +57,37 @@ protected:
     }
 };
 
+/* Return the first message in `sent` (at or after `from`) that decoded to a T,
+ * or nullptr if no such message is present. */
+template<typename T>
+auto find_sent(const std::vector<std::shared_ptr<fss::transport::fss_message>> &sent, std::size_t from = 0)
+    -> std::shared_ptr<T>
+{
+    for (std::size_t i = from; i < sent.size(); ++i)
+    {
+        if (auto cast = std::dynamic_pointer_cast<T>(sent[i]))
+        {
+            return cast;
+        }
+    }
+    return nullptr;
+}
+
+/* Count how many messages in `sent` decoded to a T. */
+template<typename T>
+auto count_sent(const std::vector<std::shared_ptr<fss::transport::fss_message>> &sent) -> std::size_t
+{
+    std::size_t count = 0;
+    for (const auto &m : sent)
+    {
+        if (std::dynamic_pointer_cast<T>(m))
+        {
+            ++count;
+        }
+    }
+    return count;
+}
+
 struct FakeClock : public fss::IClock {
     uint64_t t{0};
     auto now_ms() const -> uint64_t override { return t; }
@@ -256,16 +287,9 @@ TEST_CASE("session: getCommand returns newest-timestamp entry")
     /* Drive the session to identify + send initial command. */
     session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
 
-    bool saw_command = false;
-    for (const auto &msg : conn->sent)
-    {
-        if (msg->getType() == fss::transport::message_type_command)
-        {
-            saw_command = true;
-            REQUIRE(msg->getTimeStamp() == 500);
-        }
-    }
-    REQUIRE(saw_command);
+    auto cmd = find_sent<fss::transport::fss_message_asset_command>(conn->sent);
+    REQUIRE(cmd != nullptr);
+    REQUIRE(cmd->getTimeStamp() == 500);
 }
 
 TEST_CASE("session: server list sent on identify contains seeded servers")
@@ -283,14 +307,7 @@ TEST_CASE("session: server list sent on identify contains seeded servers")
     auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
     session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
 
-    std::shared_ptr<fss::transport::fss_message_server_list> server_list_msg;
-    for (const auto &msg : conn->sent)
-    {
-        if (msg->getType() == fss::transport::message_type_server_list)
-        {
-            server_list_msg = std::dynamic_pointer_cast<fss::transport::fss_message_server_list>(msg);
-        }
-    }
+    auto server_list_msg = find_sent<fss::transport::fss_message_server_list>(conn->sent);
     REQUIRE(server_list_msg != nullptr);
     auto servers = server_list_msg->getServers();
     REQUIRE(servers.size() == 2);
@@ -327,15 +344,7 @@ TEST_CASE("session: rapid sendCommand does not duplicate a single pending comman
         session->sendCommand();
     }
 
-    int command_count = 0;
-    for (const auto &msg : conn->sent)
-    {
-        if (msg->getType() == fss::transport::message_type_command)
-        {
-            ++command_count;
-        }
-    }
-    REQUIRE(command_count == 1);
+    REQUIRE(count_sent<fss::transport::fss_message_asset_command>(conn->sent) == 1);
 }
 
 TEST_CASE("session: a freshly queued command is delivered after the poller updates the cache")
@@ -765,18 +774,9 @@ TEST_CASE("session: sendCommand dispatches altitude message for ALT command")
     session->setPendingCommand(alt_cmd);
     session->sendCommand();
 
-    bool found_command = false;
-    for (const auto &msg : conn->sent)
-    {
-        if (msg->getType() == fss::transport::message_type_command)
-        {
-            found_command = true;
-            auto cmd_msg = std::dynamic_pointer_cast<fss::transport::fss_message_asset_command>(msg);
-            REQUIRE(cmd_msg != nullptr);
-            REQUIRE(cmd_msg->getCommand() == fss::transport::asset_command_altitude);
-        }
-    }
-    REQUIRE(found_command);
+    auto cmd_msg = find_sent<fss::transport::fss_message_asset_command>(conn->sent);
+    REQUIRE(cmd_msg != nullptr);
+    REQUIRE(cmd_msg->getCommand() == fss::transport::asset_command_altitude);
 }
 
 TEST_CASE("session: sendCommand skips unknown command type")
@@ -798,10 +798,7 @@ TEST_CASE("session: sendCommand skips unknown command type")
     session->setPendingCommand(bad_cmd);
     session->sendCommand();
 
-    for (const auto &msg : conn->sent)
-    {
-        REQUIRE(msg->getType() != fss::transport::message_type_command);
-    }
+    REQUIRE(find_sent<fss::transport::fss_message_asset_command>(conn->sent) == nullptr);
 }
 
 TEST_CASE("session: sendSMMSettings sends smm_settings message when db returns settings")
@@ -820,15 +817,7 @@ TEST_CASE("session: sendSMMSettings sends smm_settings message when db returns s
     auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
     session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
 
-    bool found_smm = false;
-    for (const auto &msg : conn->sent)
-    {
-        if (msg->getType() == fss::transport::message_type_smm_settings)
-        {
-            found_smm = true;
-        }
-    }
-    REQUIRE(found_smm);
+    REQUIRE(find_sent<fss::transport::fss_message_smm_settings>(conn->sent) != nullptr);
 }
 
 TEST_CASE("session: system_status message is forwarded to db writer")
@@ -895,15 +884,7 @@ TEST_CASE("session: rtt_request from client triggers rtt_response reply")
     auto rtt_req = std::make_shared<fss::transport::fss_message_rtt_request>();
     session->processMessage(rtt_req);
 
-    bool found_rtt_response = false;
-    for (const auto &msg : conn->sent)
-    {
-        if (msg->getType() == fss::transport::message_type_rtt_response)
-        {
-            found_rtt_response = true;
-        }
-    }
-    REQUIRE(found_rtt_response);
+    REQUIRE(find_sent<fss::transport::fss_message_rtt_response>(conn->sent) != nullptr);
 }
 
 TEST_CASE("session: unidentified client receives identity_required for non-identity message")
@@ -920,15 +901,7 @@ TEST_CASE("session: unidentified client receives identity_required for non-ident
      * The server must reply with identity_required rather than crashing. */
     session->processMessage(std::make_shared<fss::transport::fss_message_rtt_request>());
 
-    bool found = false;
-    for (const auto &msg : conn->sent)
-    {
-        if (msg->getType() == fss::transport::message_type_identity_required)
-        {
-            found = true;
-        }
-    }
-    REQUIRE(found);
+    REQUIRE(find_sent<fss::transport::fss_message_identity_required>(conn->sent) != nullptr);
 }
 
 TEST_CASE("rate limiter: sustained rate-limiting logs a warning after 1 s")
@@ -993,15 +966,7 @@ TEST_CASE("session: GOTO command dispatch sends lat/lon asset_command message")
     session->setPendingCommand(cmd);
     session->sendCommand();
 
-    bool delivered = false;
-    for (std::size_t i = before; i < conn->sent.size(); ++i)
-    {
-        if (conn->sent[i]->getType() == fss::transport::message_type_command)
-        {
-            delivered = true;
-        }
-    }
-    REQUIRE(delivered);
+    REQUIRE(find_sent<fss::transport::fss_message_asset_command>(conn->sent, before) != nullptr);
 }
 
 TEST_CASE("session: rtt_request from identified client receives rtt_response")
@@ -1023,15 +988,7 @@ TEST_CASE("session: rtt_request from identified client receives rtt_response")
     req->setId(99);
     session->processMessage(req);
 
-    bool found = false;
-    for (std::size_t i = before; i < conn->sent.size(); ++i)
-    {
-        if (conn->sent[i]->getType() == fss::transport::message_type_rtt_response)
-        {
-            found = true;
-        }
-    }
-    REQUIRE(found);
+    REQUIRE(find_sent<fss::transport::fss_message_rtt_response>(conn->sent, before) != nullptr);
     REQUIRE(handler.disconnects == 0);
 }
 
@@ -1078,14 +1035,6 @@ TEST_CASE("session: sendRTTRequest skips second request within retry interval")
     session->sendRTTRequest(rtt2);
 
     /* Only one rtt_request should appear on the wire. */
-    int rtt_count = 0;
-    for (const auto &msg : conn->sent)
-    {
-        if (msg->getType() == fss::transport::message_type_rtt_request)
-        {
-            ++rtt_count;
-        }
-    }
-    REQUIRE(rtt_count == 1);
+    REQUIRE(count_sent<fss::transport::fss_message_rtt_request>(conn->sent) == 1);
     REQUIRE(handler.disconnects == 0);
 }
