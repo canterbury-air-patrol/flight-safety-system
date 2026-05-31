@@ -230,6 +230,38 @@ TEST_CASE("session: accepts non-aircraft identify when cert CN is not a known ai
     REQUIRE(cap.str().find("Non-aircraft client identified: ground-station-1") != std::string::npos);
 }
 
+TEST_CASE("session: identified non-aircraft client times out on liveness loss")
+{
+    /* A non-aircraft client must be reaped on RTT timeout just like an
+     * aircraft; before liveness tracking was enabled for non-aircraft
+     * identify, isTimedOut() always returned false for them. */
+    fss_test::MockDatabase mock;
+    auto clock = std::make_shared<FakeClock>();
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("ground-station-1");
+    NullClientHandler handler;
+
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    session->setClock(clock);
+    session->setTimeoutMs(1000);
+
+    /* Not timed out before identify (liveness inactive). */
+    REQUIRE_FALSE(session->isTimedOut());
+
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity_non_aircraft>());
+    REQUIRE_FALSE(session->isAircraft());
+
+    /* Just under the threshold: still alive. */
+    clock->advance(999);
+    REQUIRE_FALSE(session->isTimedOut());
+
+    /* Past the threshold with no RTT response: timed out. */
+    clock->advance(2);
+    REQUIRE(session->isTimedOut());
+}
+
 TEST_CASE("session: logs when an identified non-aircraft client disconnects")
 {
     fss_test::MockDatabase mock;
