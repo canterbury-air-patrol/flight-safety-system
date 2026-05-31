@@ -160,6 +160,9 @@ public:
     auto operator=(fss_client &) -> fss_client & = delete;
     auto operator=(fss_client &&) -> fss_client & = delete;
     ~fss_client() override;
+    /* Wire this client as the connection's message handler. Call only after
+     * per-client config (timeout, rate limits) is set; see the constructor. */
+    void activate();
     void processMessage(std::shared_ptr<transport::fss_message> message) override;
     void sendRTTRequest(const std::shared_ptr<transport::fss_message_rtt_request> &rtt_req);
     void sendSMMSettings();
