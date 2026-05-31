@@ -1,6 +1,8 @@
 #include "fss-transport.hpp"
 #include "fss-endian.hpp"
+#include "fss-log.hpp"
 
+#include <limits>
 #include <memory>
 
 using flight_safety_system::fss_htobe16;
@@ -15,7 +17,17 @@ using flight_safety_system::transport::FSS_VOLTAGE_SCALE;
 static void packStringRaw(const std::shared_ptr<flight_safety_system::transport::buf_len> &bl, const char *data,
                           size_t str_len)
 {
-    uint16_t len = fss_htobe16(str_len);
+    /* The on-wire length prefix is 16-bit. Clamp so the prefix can never
+     * disagree with the bytes actually written; a mismatch would desync the
+     * decoder. Legitimate strings are far below this (the receive path caps
+     * whole messages at FSS_MAX_MESSAGE_BYTES), so clamping only guards
+     * against an upstream programming error. */
+    if (str_len > std::numeric_limits<uint16_t>::max())
+    {
+        FSS_LOG_ERROR("transport", "String of " << str_len << " bytes exceeds 16-bit length prefix; truncating");
+        str_len = std::numeric_limits<uint16_t>::max();
+    }
+    uint16_t len = fss_htobe16(static_cast<uint16_t>(str_len));
     bl->addData(&len, sizeof(uint16_t));
     bl->addData(data, str_len);
     /* align to 8-byte boundary */
@@ -330,16 +342,26 @@ void flight_safety_system::transport::fss_message::createHeader(const std::share
 
 void flight_safety_system::transport::fss_message::updateSize(const std::shared_ptr<buf_len> &bl)
 {
-    uint16_t length = bl->getLength();
+    size_t length = bl->getLength();
     if (length > sizeof(uint16_t))
     {
-        /* Set the length */
+        /* The header length field is 16-bit. A message larger than that cannot
+         * be framed; emitting a truncated length would corrupt the stream, so
+         * log and leave the placeholder rather than writing a bogus value. The
+         * receive side independently rejects anything over FSS_MAX_MESSAGE_BYTES. */
+        if (length > std::numeric_limits<uint16_t>::max())
+        {
+            FSS_LOG_ERROR("transport", "Message of " << length << " bytes exceeds 16-bit length field; not framing");
+            return;
+        }
+        /* Set the length (the unpadded content length; the receiver re-derives
+         * the padded size). */
         if (length % sizeof(uint64_t) != 0)
         {
             uint64_t blank = 0;
             bl->addData(&blank, sizeof(uint64_t) - (length % sizeof(uint64_t)));
         }
-        uint16_t length_n = fss_htobe16(length);
+        uint16_t length_n = fss_htobe16(static_cast<uint16_t>(length));
         bl->writeAt(0, &length_n, sizeof(uint16_t));
     }
 }
