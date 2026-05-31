@@ -8,7 +8,14 @@
 #define SMM_SERVER_LEN 256
 #define SMM_PASSWORD_LEN 256
 
-int db_connect(const char *host, int port, const char *user, const char *pass, const char *db)
+/* Every statement is qualified with `AT :conn` so the caller chooses which
+ * named connection it runs on. The server opens two connections — one for
+ * telemetry writes, one for command/config reads — so a stalled write cannot
+ * block a command read (see db.cpp). Each connection is used by at most one
+ * thread at a time (the C++ layer guards each with its own mutex), which is
+ * the thread-safe usage pattern ECPG documents. */
+
+int db_connect(const char *conn_arg, const char *host, int port, const char *user, const char *pass, const char *db)
 {
     /* Set connect_timeout and TCP keepalives via environment variables.
      * overwrite=0 so this is a no-op on reconnects; the first call happens
@@ -30,12 +37,13 @@ int db_connect(const char *host, int port, const char *user, const char *pass, c
     }
 
     EXEC SQL BEGIN DECLARE SECTION;
+    const char *conn     = conn_arg;
     const char *db_target = target;
     const char *db_user   = user;
     const char *db_pass   = pass;
     EXEC SQL END DECLARE SECTION;
 
-    EXEC SQL CONNECT TO :db_target AS conn USER :db_user USING :db_pass;
+    EXEC SQL CONNECT TO :db_target AS :conn USER :db_user USING :db_pass;
 
     free(target);
 
@@ -45,7 +53,7 @@ int db_connect(const char *host, int port, const char *user, const char *pass, c
         return 0;
     }
 
-    EXEC SQL SET AUTOCOMMIT TO ON;
+    EXEC SQL AT :conn SET AUTOCOMMIT TO ON;
 
     if (sqlca.sqlcode < 0)
     {
@@ -56,68 +64,74 @@ int db_connect(const char *host, int port, const char *user, const char *pass, c
     return 1;
 }
 
-unsigned long long db_get_asset_id(const char *asset_name_arg)
+unsigned long long db_get_asset_id(const char *conn_arg, const char *asset_name_arg)
 {
     EXEC SQL BEGIN DECLARE SECTION;
+    const char *conn = conn_arg;
     const char *asset_name = asset_name_arg;
     unsigned long long asset_id = 0;
     EXEC SQL END DECLARE SECTION;
 
-    EXEC SQL SELECT id INTO :asset_id FROM assets_asset WHERE name = :asset_name;
-    
+    EXEC SQL AT :conn SELECT id INTO :asset_id FROM assets_asset WHERE name = :asset_name;
+
     return asset_id;
 }
 
-void db_rtt_create_entry(unsigned long long asset_id_arg, unsigned long long delta)
+void db_rtt_create_entry(const char *conn_arg, unsigned long long asset_id_arg, unsigned long long delta)
 {
     EXEC SQL BEGIN DECLARE SECTION;
+    const char *conn = conn_arg;
     unsigned long long asset_id = asset_id_arg;
     unsigned long long rtt = delta;
     EXEC SQL END DECLARE SECTION;
-    
-    EXEC SQL INSERT INTO assets_assetrtt (asset_id, rtt, timestamp) VALUES (:asset_id, :rtt, NOW());
+
+    EXEC SQL AT :conn INSERT INTO assets_assetrtt (asset_id, rtt, timestamp) VALUES (:asset_id, :rtt, NOW());
 }
 
-void db_status_create_entry(unsigned long long asset_id_arg, unsigned short bat_percent, unsigned int bat_mah_used, double bat_voltage)
+void db_status_create_entry(const char *conn_arg, unsigned long long asset_id_arg, unsigned short bat_percent, unsigned int bat_mah_used, double bat_voltage)
 {
     EXEC SQL BEGIN DECLARE SECTION;
+    const char *conn = conn_arg;
     unsigned long long asset_id = asset_id_arg;
     unsigned short bp = bat_percent;
     unsigned long bu = bat_mah_used;
     double voltage = bat_voltage;
     EXEC SQL END DECLARE SECTION;
-    
-    EXEC SQL INSERT INTO assets_assetstatus (asset_id, bat_percent, bat_used_mah, bat_volt, timestamp) VALUES (:asset_id, :bp, :bu, :voltage, NOW());
+
+    EXEC SQL AT :conn INSERT INTO assets_assetstatus (asset_id, bat_percent, bat_used_mah, bat_volt, timestamp) VALUES (:asset_id, :bp, :bu, :voltage, NOW());
 }
 
-void db_search_status_create_entry(unsigned long long asset_id_arg, unsigned long long search_id, unsigned long long search_completed, unsigned long long search_total)
+void db_search_status_create_entry(const char *conn_arg, unsigned long long asset_id_arg, unsigned long long search_id, unsigned long long search_completed, unsigned long long search_total)
 {
     EXEC SQL BEGIN DECLARE SECTION;
+    const char *conn = conn_arg;
     unsigned long long asset_id = asset_id_arg;
     unsigned long long s = search_id;
     unsigned long long sp = search_completed;
     unsigned long long spo = search_total;
     EXEC SQL END DECLARE SECTION;
-    
-    EXEC SQL INSERT INTO assets_assetsearchprogress (asset_id, search, search_progress, search_progress_of, timestamp) VALUES (:asset_id, :s, :sp, :spo, NOW());
+
+    EXEC SQL AT :conn INSERT INTO assets_assetsearchprogress (asset_id, search, search_progress, search_progress_of, timestamp) VALUES (:asset_id, :s, :sp, :spo, NOW());
 }
 
-void db_position_create_entry(unsigned long long asset_id_arg, double latitude, double longitude, int altitude)
+void db_position_create_entry(const char *conn_arg, unsigned long long asset_id_arg, double latitude, double longitude, int altitude)
 {
     EXEC SQL BEGIN DECLARE SECTION;
+    const char *conn = conn_arg;
     unsigned long long asset_id = asset_id_arg;
     double lat = latitude;
     double lng = longitude;
     int alt = altitude;
     EXEC SQL END DECLARE SECTION;
 
-    EXEC SQL INSERT INTO assets_assetposition (asset_id, position, altitude, timestamp) VALUES (:asset_id, ST_SetSRID(ST_MakePoint(:lng, :lat), 4326), :alt, NOW());
+    EXEC SQL AT :conn INSERT INTO assets_assetposition (asset_id, position, altitude, timestamp) VALUES (:asset_id, ST_SetSRID(ST_MakePoint(:lng, :lat), 4326), :alt, NOW());
 }
 
 struct asset_command_s *
-db_asset_command_get(unsigned long long asset_id_arg)
+db_asset_command_get(const char *conn_arg, unsigned long long asset_id_arg)
 {
     EXEC SQL BEGIN DECLARE SECTION;
+    const char *conn = conn_arg;
     unsigned long long asset_id = asset_id_arg;
     unsigned long long id = 0;
     unsigned long long ts = 0;
@@ -131,7 +145,7 @@ db_asset_command_get(unsigned long long asset_id_arg)
     int alt_ind = 0;
     EXEC SQL END DECLARE SECTION;
 
-    EXEC SQL SELECT 1, AC.id, (extract(epoch from AC.timestamp) * 1000)::bigint, AC.command, ST_Y(AC.position::geometry), ST_X(AC.position::geometry), AC.altitude INTO :success, :id, :ts, :command, :lat :lat_ind, :lng :lng_ind, :alt :alt_ind FROM assets_assetcommand AS AC WHERE AC.asset_id = :asset_id ORDER BY AC.timestamp DESC LIMIT 1;
+    EXEC SQL AT :conn SELECT 1, AC.id, (extract(epoch from AC.timestamp) * 1000)::bigint, AC.command, ST_Y(AC.position::geometry), ST_X(AC.position::geometry), AC.altitude INTO :success, :id, :ts, :command, :lat :lat_ind, :lng :lng_ind, :alt :alt_ind FROM assets_assetcommand AS AC WHERE AC.asset_id = :asset_id ORDER BY AC.timestamp DESC LIMIT 1;
 
 
     struct asset_command_s *res = NULL;
@@ -190,9 +204,10 @@ convert_to_http(const char *address, int port, bool https)
 }
 
 struct smm_settings_s *
-db_asset_smm_settings_get(unsigned long long asset_id_arg)
+db_asset_smm_settings_get(const char *conn_arg, unsigned long long asset_id_arg)
 {
     EXEC SQL BEGIN DECLARE SECTION;
+    const char *conn = conn_arg;
     unsigned long long asset_id = asset_id_arg;
     char server_address[SMM_SERVER_LEN];
     int server_port = 0;
@@ -202,7 +217,7 @@ db_asset_smm_settings_get(unsigned long long asset_id_arg)
     int success = 0;
     EXEC SQL END DECLARE SECTION;
 
-    EXEC SQL SELECT 1, SMM.address, SMM.port, SMM.https, A.smm_login, A.smm_password A INTO :success, :server_address, :server_port, :server_https, :smm_login, :smm_password FROM config_assetconfig AS A, config_smmconfig AS SMM WHERE A.asset_id = :asset_id AND A.smm_id = SMM.id;
+    EXEC SQL AT :conn SELECT 1, SMM.address, SMM.port, SMM.https, A.smm_login, A.smm_password A INTO :success, :server_address, :server_port, :server_https, :smm_login, :smm_password FROM config_assetconfig AS A, config_smmconfig AS SMM WHERE A.asset_id = :asset_id AND A.smm_id = SMM.id;
 
 
     struct smm_settings_s *settings = NULL;
@@ -232,7 +247,7 @@ db_asset_smm_settings_get(unsigned long long asset_id_arg)
 }
 
 struct fss_server_s **
-db_active_fss_servers_get(void)
+db_active_fss_servers_get(const char *conn_arg)
 {
     size_t len = 0;
     struct fss_server_s **res = (struct fss_server_s **)malloc(sizeof(struct fss_server_s *) * (len + 1));
@@ -242,20 +257,21 @@ db_active_fss_servers_get(void)
     }
 
     EXEC SQL BEGIN DECLARE SECTION;
+    const char *conn = conn_arg;
     char server_address[SMM_SERVER_LEN];
     int server_port = 0;
     EXEC SQL END DECLARE SECTION;
 
-    EXEC SQL SET AUTOCOMMIT TO OFF;
-    EXEC SQL DECLARE cur1 CURSOR FOR SELECT address, client_port FROM config_serverconfig WHERE active = TRUE;
-    EXEC SQL OPEN cur1;
+    EXEC SQL AT :conn SET AUTOCOMMIT TO OFF;
+    EXEC SQL AT :conn DECLARE cur1 CURSOR FOR SELECT address, client_port FROM config_serverconfig WHERE active = TRUE;
+    EXEC SQL AT :conn OPEN cur1;
 
     EXEC SQL WHENEVER NOT FOUND DO BREAK;
     EXEC SQL WHENEVER SQLERROR DO BREAK;
     EXEC SQL WHENEVER SQLWARNING DO BREAK;
     while (1)
     {
-        EXEC SQL FETCH FROM cur1 INTO :server_address, :server_port;
+        EXEC SQL AT :conn FETCH FROM cur1 INTO :server_address, :server_port;
         struct fss_server_s *s = (struct fss_server_s *)malloc(sizeof(struct fss_server_s));
         if (s != NULL)
         {
@@ -291,23 +307,27 @@ db_active_fss_servers_get(void)
     EXEC SQL WHENEVER SQLERROR CONTINUE;
     EXEC SQL WHENEVER SQLWARNING CONTINUE;
 
-    EXEC SQL CLOSE cur1;
-    EXEC SQL SET AUTOCOMMIT TO ON;
+    EXEC SQL AT :conn CLOSE cur1;
+    EXEC SQL AT :conn SET AUTOCOMMIT TO ON;
 
     return res;
 }
 
-void db_disconnect(void)
-{
-    EXEC SQL DISCONNECT ALL;
-}
-
-int db_ping(void)
+void db_disconnect(const char *conn_arg)
 {
     EXEC SQL BEGIN DECLARE SECTION;
+    const char *conn = conn_arg;
+    EXEC SQL END DECLARE SECTION;
+    EXEC SQL DISCONNECT :conn;
+}
+
+int db_ping(const char *conn_arg)
+{
+    EXEC SQL BEGIN DECLARE SECTION;
+    const char *conn = conn_arg;
     int x = 0;
     EXEC SQL END DECLARE SECTION;
-    EXEC SQL SELECT 1 INTO :x;
+    EXEC SQL AT :conn SELECT 1 INTO :x;
     return (sqlca.sqlcode >= 0) ? 1 : 0;
 }
 
