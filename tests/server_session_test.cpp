@@ -988,7 +988,9 @@ TEST_CASE("session: rtt_request from identified client receives rtt_response")
     req->setId(99);
     session->processMessage(req);
 
-    REQUIRE(find_sent<fss::transport::fss_message_rtt_response>(conn->sent, before) != nullptr);
+    auto resp = find_sent<fss::transport::fss_message_rtt_response>(conn->sent, before);
+    REQUIRE(resp != nullptr);
+    REQUIRE(resp->getRequestId() == 99);
     REQUIRE(handler.disconnects == 0);
 }
 

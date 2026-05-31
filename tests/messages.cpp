@@ -603,17 +603,19 @@ TEST_CASE("messages: identity_required round-trip")
     REQUIRE(decoded_generic->getId() == msg_id);
 }
 
+/* Framed message header: declared_length (uint16_t) + type (uint16_t) + msg_id (uint64_t). */
+constexpr size_t framed_header_len = sizeof(uint16_t) + sizeof(uint16_t) + sizeof(uint64_t);
+
 TEST_CASE("messages: rtt_response with truncated payload yields zero request_id")
 {
-    // Truncate an rtt_response to just the 12-byte header to trigger
+    // Truncate an rtt_response to just the framed header to trigger
     // BufferReader::ensureAvailable() returning false on the readUint64 call.
-    constexpr size_t header_len = 12; // sizeof(uint16_t) + sizeof(uint16_t) + sizeof(uint64_t)
     auto full = std::make_shared<flight_safety_system::transport::fss_message_rtt_response>(uint64_t{42});
     full->setId(1);
     auto full_bl = full->getPacked();
     REQUIRE(full_bl != nullptr);
-    auto short_bl = std::make_shared<flight_safety_system::transport::buf_len>(full_bl->getData(),
-                                                                               static_cast<uint16_t>(header_len));
+    auto short_bl = std::make_shared<flight_safety_system::transport::buf_len>(
+        full_bl->getData(), static_cast<uint16_t>(framed_header_len));
     auto decoded = std::make_shared<flight_safety_system::transport::fss_message_rtt_response>(uint64_t{1}, short_bl);
     REQUIRE(decoded->getRequestId() == 0);
 }
@@ -623,7 +625,6 @@ TEST_CASE("messages: smm_settings with truncated string body returns empty field
     // Pack a valid smm_settings then truncate after header + the 2-byte string-length
     // prefix so that unpackString encounters `len > remaining bytes` (the second guard
     // at line 51 of unpackString, distinct from the offset/sizeof-uint16_t guard).
-    constexpr size_t header_len = 12; // sizeof(uint16_t) + sizeof(uint16_t) + sizeof(uint64_t)
     auto src = std::make_shared<flight_safety_system::transport::fss_message_smm_settings>(
         "https://localhost/", flight_safety_system::secure_string(std::string_view("asset")),
         flight_safety_system::secure_string(std::string_view("pw")));
@@ -631,7 +632,7 @@ TEST_CASE("messages: smm_settings with truncated string body returns empty field
     auto full_bl = src->getPacked();
     REQUIRE(full_bl != nullptr);
     // Keep only header + 2-byte length prefix; claimed string length > 0 bytes remaining.
-    constexpr size_t truncated = header_len + sizeof(uint16_t);
+    constexpr size_t truncated = framed_header_len + sizeof(uint16_t);
     auto bl = std::make_shared<flight_safety_system::transport::buf_len>(full_bl->getData(),
                                                                          static_cast<uint16_t>(truncated));
     auto decoded = std::make_shared<flight_safety_system::transport::fss_message_smm_settings>(uint64_t{1}, bl);
@@ -693,14 +694,23 @@ struct MinimalCb : flight_safety_system::transport::fss_message_cb {
 
 } // namespace
 
-TEST_CASE("messages: fss_message_cb copy ctor and assignment operator")
+TEST_CASE("messages: fss_message_cb copy ctor and assignment operator preserve connection")
 {
-    MinimalCb a;
+    /* Construct with a real fss_connection so connected() is meaningful and
+     * the underlying shared_ptr identity can be compared after copy/assign. */
+    auto conn = std::make_shared<flight_safety_system::transport::fss_connection>();
+    MinimalCb a(conn);
+    REQUIRE(a.connected());
+
     MinimalCb b(a); // copy ctor — line 223
-    REQUIRE(b.connected() == a.connected());
+    REQUIRE(b.connected());
+    REQUIRE(b.getConnection().get() == a.getConnection().get());
+
     MinimalCb c;
+    REQUIRE_FALSE(c.connected());
     c = a; // copy assign — lines 235-242
-    REQUIRE(c.connected() == a.connected());
+    REQUIRE(c.connected());
+    REQUIRE(c.getConnection().get() == a.getConnection().get());
 }
 
 // ---------------------------------------------------------------------------
@@ -720,12 +730,13 @@ TEST_CASE("messages: fss_message_position_report getTSLC accessor")
 // field read, triggering the corresponding "return false" guard.
 // ---------------------------------------------------------------------------
 
-/* readUint8 failure (line 91): system_status with only the 12-byte header —
+/* readUint8 failure (line 91): system_status with only the framed header —
  * the first field read (bat_percent : uint8_t) cannot be satisfied. */
 TEST_CASE("messages: BufferReader readUint8 short-read returns false")
 {
     using flight_safety_system::transport::message_type_system_status;
-    auto bl = fss_test::make_framed_buffer(static_cast<uint16_t>(message_type_system_status), 1, "", 12);
+    constexpr size_t total = framed_header_len;
+    auto bl = fss_test::make_framed_buffer(static_cast<uint16_t>(message_type_system_status), 1, "", total);
     auto decoded = flight_safety_system::transport::fss_message::decode(bl);
     /* Decode produces a system_status object with all-zero fields (reads fail
      * silently); the message type must still be correct. */
@@ -737,23 +748,27 @@ TEST_CASE("messages: BufferReader readUint8 short-read returns false")
 TEST_CASE("messages: BufferReader readInt32 short-read returns false")
 {
     using flight_safety_system::transport::message_type_position_report;
-    /* header(12) + uint64 timestamp(8) = 20 bytes; int32 lat needs 4 more. */
-    auto bl =
-        fss_test::make_framed_buffer(static_cast<uint16_t>(message_type_position_report), 1, std::string(8, '\0'), 20);
+    /* Header + uint64 timestamp; the int32_t latitude that follows is absent. */
+    constexpr size_t payload = sizeof(uint64_t);
+    constexpr size_t total = framed_header_len + payload;
+    auto bl = fss_test::make_framed_buffer(static_cast<uint16_t>(message_type_position_report), 1,
+                                           std::string(payload, '\0'), total);
     auto decoded = flight_safety_system::transport::fss_message::decode(bl);
     REQUIRE(decoded != nullptr);
 }
 
 /* readInt16 failure (line 99): position_report truncated just before the
- * int16_t vertical_velocity field (offset 40 from buffer start). */
+ * int16_t vertical_velocity field. */
 TEST_CASE("messages: BufferReader readInt16 short-read returns false")
 {
     using flight_safety_system::transport::message_type_position_report;
-    /* header(12) + uint64(8) + int32(4) + int32(4) + uint32(4) + uint32(4)
-     *            + uint16(2) + uint16(2) = 40 bytes.
-     * vertical_velocity : int16_t needs 2 more bytes — not present. */
-    auto bl =
-        fss_test::make_framed_buffer(static_cast<uint16_t>(message_type_position_report), 1, std::string(28, '\0'), 40);
+    /* Fields consumed before vertical_velocity:
+     * timestamp(uint64) + latitude(int32) + longitude(int32) + altitude(uint32)
+     *   + altitude_msl(uint32) + ground_speed(uint16) + course_over_ground(uint16). */
+    constexpr size_t payload = sizeof(uint64_t) + sizeof(int32_t) * 2 + sizeof(uint32_t) * 2 + sizeof(uint16_t) * 2;
+    constexpr size_t total = framed_header_len + payload;
+    auto bl = fss_test::make_framed_buffer(static_cast<uint16_t>(message_type_position_report), 1,
+                                           std::string(payload, '\0'), total);
     auto decoded = flight_safety_system::transport::fss_message::decode(bl);
     REQUIRE(decoded != nullptr);
 }
@@ -763,8 +778,11 @@ TEST_CASE("messages: BufferReader readInt16 short-read returns false")
 TEST_CASE("messages: BufferReader readUint32 short-read returns false")
 {
     using flight_safety_system::transport::message_type_version;
-    /* header(12) + uint16(2) + uint16(2) = 16 bytes; uint32 needs 4 more. */
-    auto bl = fss_test::make_framed_buffer(static_cast<uint16_t>(message_type_version), 1, std::string(4, '\0'), 16);
+    /* Two uint16 version fields; uint32 feature_flags is absent. */
+    constexpr size_t payload = sizeof(uint16_t) * 2;
+    constexpr size_t total = framed_header_len + payload;
+    auto bl =
+        fss_test::make_framed_buffer(static_cast<uint16_t>(message_type_version), 1, std::string(payload, '\0'), total);
     auto decoded = flight_safety_system::transport::fss_message::decode(bl);
     REQUIRE(decoded != nullptr);
 }

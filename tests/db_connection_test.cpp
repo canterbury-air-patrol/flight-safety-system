@@ -40,7 +40,6 @@ auto live_db_or_skip() -> std::unique_ptr<flight_safety_system::server::db_conne
     if (host == nullptr)
     {
         SKIP("TEST_DB_HOST not set");
-        return nullptr; /* unreachable — SKIP throws */
     }
     int port = 5432;
     if (const char *p = std::getenv("TEST_DB_PORT"))
@@ -61,8 +60,8 @@ auto live_db_or_skip() -> std::unique_ptr<flight_safety_system::server::db_conne
 
 TEST_CASE("db_connection: connects to live database")
 {
-    auto dbc = live_db_or_skip();
-    REQUIRE(dbc->isConnected());
+    /* live_db_or_skip() asserts isConnected before returning. */
+    (void)live_db_or_skip();
 }
 
 TEST_CASE("db_connection: getAssetId returns non-zero for pre-inserted asset")
