@@ -10,6 +10,7 @@ using flight_safety_system::fss_be32toh;
 using flight_safety_system::fss_htobe64;
 using flight_safety_system::fss_be64toh;
 using flight_safety_system::transport::FSS_COORD_SCALE;
+using flight_safety_system::transport::FSS_VOLTAGE_SCALE;
 
 static void packStringRaw(const std::shared_ptr<flight_safety_system::transport::buf_len> &bl, const char *data,
                           size_t str_len)
@@ -626,7 +627,7 @@ void flight_safety_system::transport::fss_message_system_status::packData(std::s
     uint8_t bat_percent_n = this->getBatRemaining();
     uint32_t mah_used_n = fss_htobe32(this->getBatMAHUsed());
     uint32_t voltage_n =
-        fss_htobe32(static_cast<uint32_t>(static_cast<int32_t>(this->getBatVoltage() / FSS_COORD_SCALE)));
+        fss_htobe32(static_cast<uint32_t>(static_cast<int32_t>(this->getBatVoltage() / FSS_VOLTAGE_SCALE)));
 
     bl->addData(&bat_percent_n, sizeof(uint8_t));
     bl->addData(&mah_used_n, sizeof(uint32_t));
@@ -644,7 +645,7 @@ void flight_safety_system::transport::fss_message_system_status::unpackData(cons
     uint32_t voltage_n = 0;
     if (reader.readUint32(voltage_n))
     {
-        this->voltage = static_cast<double>(voltage_n) * FSS_COORD_SCALE;
+        this->voltage = static_cast<double>(voltage_n) * FSS_VOLTAGE_SCALE;
     }
 }
 
