@@ -144,10 +144,11 @@ TEST_CASE("Position Report Message Check")
     constexpr int vfr_squawk = 01200;
     constexpr int flags = 0xAA55;
     constexpr int emitter_type = 14;
+    constexpr uint8_t tslc = 7;
 
     /* Create a test position report */
     auto msg = std::make_shared<flight_safety_system::transport::fss_message_position_report>(
-        pos_lat, pos_lng, altitude, heading, hor_vel, vert_vel, icao_address, "ZK-ABC", vfr_squawk, 0, flags, 1,
+        pos_lat, pos_lng, altitude, heading, hor_vel, vert_vel, icao_address, "ZK-ABC", vfr_squawk, tslc, flags, 1,
         emitter_type, timestamp);
     /* Check the type */
     REQUIRE(msg->getType() == flight_safety_system::transport::message_type_position_report);
@@ -165,6 +166,7 @@ TEST_CASE("Position Report Message Check")
     REQUIRE(msg->getFlags() == flags);
     REQUIRE(msg->getAltitudeType() == 1);
     REQUIRE(msg->getEmitterType() == emitter_type);
+    REQUIRE(msg->getTSLC() == tslc);
     /* Convert to bl and back */
     msg->setId(msg_id);
     auto bl = msg->getPacked();
@@ -188,6 +190,7 @@ TEST_CASE("Position Report Message Check")
     REQUIRE(decoded->getFlags() == flags);
     REQUIRE(decoded->getAltitudeType() == 1);
     REQUIRE(decoded->getEmitterType() == emitter_type);
+    REQUIRE(decoded->getTSLC() == tslc);
     auto decoded_generic = flight_safety_system::transport::fss_message::decode(bl);
     /* Check the type */
     REQUIRE(decoded_generic->getType() == flight_safety_system::transport::message_type_position_report);
