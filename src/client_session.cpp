@@ -438,6 +438,12 @@ void fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss
             {
                 std::scoped_lock guard(this->client_lock);
                 this->name = client_name;
+                /* Enable liveness tracking so a dead non-aircraft client is
+                 * reaped on RTT timeout, the same as an aircraft. RTT requests
+                 * already go to every client and responses update
+                 * last_rtt_response_time regardless of type. */
+                this->liveness_active = true;
+                this->last_rtt_response_time = this->clock->now_ms();
             }
             this->aircraft = false;
             this->identified = true;
