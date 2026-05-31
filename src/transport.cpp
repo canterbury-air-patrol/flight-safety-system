@@ -314,7 +314,13 @@ auto flight_safety_system::transport::fss_connection::sendMsg(const std::shared_
              * that is not a connection failure, so retry rather than dropping
              * the peer. SIGPIPE is ignored process-wide, so a genuinely broken
              * connection surfaces here as EPIPE (or similar) and falls through
-             * to return false. */
+             * to return false.
+             *
+             * These sockets are always blocking — O_NONBLOCK is never set —
+             * so send() does not return EAGAIN/EWOULDBLOCK here; it blocks
+             * until buffer space is available. If a socket is ever made
+             * non-blocking, this loop must also retry (with backoff) on
+             * EAGAIN/EWOULDBLOCK to avoid dropping the connection. */
             if (errno == EINTR)
             {
                 continue;
