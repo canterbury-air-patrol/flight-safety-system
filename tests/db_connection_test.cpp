@@ -172,28 +172,26 @@ TEST_CASE("db_connection: tryReconnectIfNeeded restores a single dropped connect
     auto asset_id = dbc->getAssetId("test-asset");
     REQUIRE(asset_id != 0);
 
-    SECTION("only the read connection drops")
-    {
-        db_disconnect(flight_safety_system::server::db_connection::read_conn_name);
+    /* Drop one connection by name, recover it, then exercise both a read
+     * (getAssetId) and a write (recordRtt): whichever connection was dropped
+     * must be restored, and the untouched one must keep working. */
+    auto recovers_after_dropping = [&](const char *conn_name) {
+        db_disconnect(conn_name);
         dbc->tryReconnectIfNeeded();
         REQUIRE(dbc->isConnected());
-        /* A read must succeed again on the reconnected connection. */
         REQUIRE(dbc->getAssetId("test-asset") == asset_id);
-        /* The write connection was never touched, so a write still works. */
         dbc->recordRtt(asset_id, uint64_t{7});
         REQUIRE(dbc->isConnected());
+    };
+
+    SECTION("only the read connection drops")
+    {
+        recovers_after_dropping(flight_safety_system::server::db_connection::read_conn_name);
     }
 
     SECTION("only the write connection drops")
     {
-        db_disconnect(flight_safety_system::server::db_connection::write_conn_name);
-        dbc->tryReconnectIfNeeded();
-        REQUIRE(dbc->isConnected());
-        /* A write must succeed again on the reconnected connection. */
-        dbc->recordRtt(asset_id, uint64_t{7});
-        REQUIRE(dbc->isConnected());
-        /* The read connection was never touched, so a read still works. */
-        REQUIRE(dbc->getAssetId("test-asset") == asset_id);
+        recovers_after_dropping(flight_safety_system::server::db_connection::write_conn_name);
     }
 }
 
