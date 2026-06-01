@@ -99,9 +99,13 @@ if ENABLE_TSAN
 check_PROGRAMS += concurrency_tsan_test
 concurrency_tsan_test_SOURCES = main.cpp \
 	concurrency_connection_test.cpp \
+	concurrency_client_test.cpp \
 	../src/transport.cpp \
 	../src/transport-helpers.cpp \
-	../src/transport-messages.cpp
+	../src/transport-messages.cpp \
+	../src/client_session.cpp \
+	../src/db-write-queue.cpp \
+	../src/fss-main.cpp
 concurrency_tsan_test_CXXFLAGS = $(AM_CXXFLAGS) $(TSAN_CXXFLAGS)
 concurrency_tsan_test_LDFLAGS = $(TSAN_LDFLAGS)
 concurrency_tsan_test_LDADD = $(CATCH2_LIBS) $(pthread_LIBS)
