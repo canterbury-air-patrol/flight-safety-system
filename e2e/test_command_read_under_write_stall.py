@@ -18,6 +18,7 @@ duplicating the EXCLUSIVE-lock plumbing.
 from __future__ import annotations
 
 import time
+from pathlib import Path
 
 import pytest
 
@@ -51,7 +52,7 @@ def test_command_read_not_blocked_by_write_stall(db_conn, fake_client, migrated_
         asset_id = cur.fetchone()[0]
 
     client = fake_client(asset_name)
-    log_path = client["log"]
+    log_path = Path(client["log"])
 
     # Poll until the client has connected, identified, and landed at least one
     # position row — proof it is up and the writer has telemetry to stall on.
@@ -87,10 +88,17 @@ def test_command_read_not_blocked_by_write_stall(db_conn, fake_client, migrated_
                 break
             time.sleep(0.2)
 
-        assert found, (
-            "command was not delivered while a telemetry write was stalled — "
-            "the command read path appears blocked behind writes"
-        )
+        if not found:
+            # Capture log context to make timing-sensitive CI flakes diagnosable.
+            tail = 2000
+            client_log = log_path.read_text(errors="replace")
+            server_log = Path(server_proc["log"]).read_text(errors="replace")
+            pytest.fail(
+                "command was not delivered while a telemetry write was stalled — "
+                "the command read path appears blocked behind writes.\n"
+                f"--- client log (last {tail} chars) ---\n{client_log[-tail:]}\n"
+                f"--- server log (last {tail} chars) ---\n{server_log[-tail:]}"
+            )
 
         # Both processes must still be alive during the stall.
         assert server_proc["proc"].poll() is None, "server died during the write stall"
