@@ -21,7 +21,21 @@ import time
 
 import pytest
 
+from conftest import wait_for_row
 from test_slow_db_does_not_stall import hold_table_lock
+
+# The asset command to inject; the fake client logs the command name on
+# receipt, so the same string drives the SQL INSERT and the log assertion.
+COMMAND = "RTL"
+
+# Time budgets (seconds), kept generous so the test is not brittle on slower
+# CI. WARMUP and COMMAND_DELIVERY are polled, not slept; WRITER_SETTLE is the
+# one short fixed wait — long enough for a position INSERT to reach the locked
+# table so a write is genuinely in flight (the write path being blocked cannot
+# be observed precisely from the test side).
+CLIENT_WARMUP_TIMEOUT_S = 15.0
+WRITER_SETTLE_S = 2.0
+COMMAND_DELIVERY_TIMEOUT_S = 8.0
 
 
 @pytest.mark.requires_docker
@@ -39,35 +53,38 @@ def test_command_read_not_blocked_by_write_stall(db_conn, fake_client, migrated_
     client = fake_client(asset_name)
     log_path = client["log"]
 
-    # Let the client connect, identify, and start sending position reports so
-    # the writer has telemetry to flush (and thus a write to stall on).
-    time.sleep(3.0)
+    # Poll until the client has connected, identified, and landed at least one
+    # position row — proof it is up and the writer has telemetry to stall on.
+    baseline = wait_for_row(
+        db_conn,
+        "SELECT id FROM assets_assetposition WHERE asset_id = %s LIMIT 1",
+        params=(asset_id,),
+        timeout=CLIENT_WARMUP_TIMEOUT_S,
+    )
+    assert baseline is not None, "client never produced a baseline position row"
     assert client["proc"].poll() is None, "client exited before the stall test"
 
-    cmd_marker = "RTL"
     with hold_table_lock(migrated_db, "assets_assetposition"):
-        # Give the writer time to dequeue a position report and block on the
-        # EXCLUSIVE lock — the telemetry write is now stalled and holding the
-        # write connection.
-        time.sleep(2.0)
+        # Let a position INSERT reach the now-locked table so a telemetry write
+        # is genuinely stalled (holding the write connection).
+        time.sleep(WRITER_SETTLE_S)
 
         # Queue a command while the write is stalled.
         with db_conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO assets_assetcommand (asset_id, command, timestamp, position, altitude) "
-                "VALUES (%s, 'RTL', NOW(), ST_SetSRID(ST_MakePoint(0,0),4326), 0)",
-                (asset_id,),
+                "VALUES (%s, %s, NOW(), ST_SetSRID(ST_MakePoint(0,0),4326), 0)",
+                (asset_id, COMMAND),
             )
 
         # The command must reach the client *while the write lock is still
         # held*. The poll budget stays inside the lock's hold window.
+        deadline = time.monotonic() + COMMAND_DELIVERY_TIMEOUT_S
         found = False
-        deadline = time.monotonic() + 8.0
         while time.monotonic() < deadline:
-            with open(log_path, "r", encoding="utf-8") as fh:
-                if cmd_marker in fh.read():
-                    found = True
-                    break
+            if COMMAND in log_path.read_text(errors="replace"):
+                found = True
+                break
             time.sleep(0.2)
 
         assert found, (
