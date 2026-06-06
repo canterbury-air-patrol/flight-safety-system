@@ -2,6 +2,7 @@
 #include "fss-endian.hpp"
 #include "fss-log.hpp"
 
+#include <cmath>
 #include <limits>
 #include <memory>
 
@@ -13,6 +14,28 @@ using flight_safety_system::fss_htobe64;
 using flight_safety_system::fss_be64toh;
 using flight_safety_system::transport::FSS_COORD_SCALE;
 using flight_safety_system::transport::FSS_VOLTAGE_SCALE;
+
+/* Guard a double->int32_t conversion against NaN, Inf, and out-of-range values.
+ * NaN maps to 0 (the defined sentinel — decodes back to 0.0 degrees/volts).
+ * Finite values outside [INT32_MIN, INT32_MAX] are clamped rather than
+ * allowing undefined behaviour in the cast. */
+static auto pack_scaled_coord(double value, double scale) -> int32_t
+{
+    if (!std::isfinite(value))
+    {
+        return 0;
+    }
+    const double scaled = value / scale;
+    if (scaled <= static_cast<double>(std::numeric_limits<int32_t>::min()))
+    {
+        return std::numeric_limits<int32_t>::min();
+    }
+    if (scaled >= static_cast<double>(std::numeric_limits<int32_t>::max()))
+    {
+        return std::numeric_limits<int32_t>::max();
+    }
+    return static_cast<int32_t>(scaled);
+}
 
 static void packStringRaw(const std::shared_ptr<flight_safety_system::transport::buf_len> &bl, const char *data,
                           size_t str_len)
@@ -507,8 +530,8 @@ void flight_safety_system::transport::fss_message_position_report::packData(std:
 {
     uint64_t ts = fss_htobe64(this->getTimeStamp());
     /* Convert the lat/long to fixed decimal for transport */
-    const auto lat_host = static_cast<int32_t>(this->getLatitude() / FSS_COORD_SCALE);
-    const auto lng_host = static_cast<int32_t>(this->getLongitude() / FSS_COORD_SCALE);
+    const auto lat_host = pack_scaled_coord(this->getLatitude(), FSS_COORD_SCALE);
+    const auto lng_host = pack_scaled_coord(this->getLongitude(), FSS_COORD_SCALE);
     const auto lat = static_cast<int32_t>(fss_htobe32(static_cast<uint32_t>(lat_host)));
     const auto lng = static_cast<int32_t>(fss_htobe32(static_cast<uint32_t>(lng_host)));
     uint32_t alt = fss_htobe32(this->getAltitude());
@@ -649,7 +672,7 @@ void flight_safety_system::transport::fss_message_system_status::packData(std::s
     uint8_t bat_percent_n = this->getBatRemaining();
     uint32_t mah_used_n = fss_htobe32(this->getBatMAHUsed());
     uint32_t voltage_n =
-        fss_htobe32(static_cast<uint32_t>(static_cast<int32_t>(this->getBatVoltage() / FSS_VOLTAGE_SCALE)));
+        fss_htobe32(static_cast<uint32_t>(pack_scaled_coord(this->getBatVoltage(), FSS_VOLTAGE_SCALE)));
 
     bl->addData(&bat_percent_n, sizeof(uint8_t));
     bl->addData(&mah_used_n, sizeof(uint32_t));
@@ -773,8 +796,8 @@ void flight_safety_system::transport::fss_message_asset_command::packData(std::s
 {
     uint64_t ts = fss_htobe64(this->getTimeStamp());
     /* Convert the lat/long to fixed decimal for transport */
-    const auto lat_host = static_cast<int32_t>(this->getLatitude() / FSS_COORD_SCALE);
-    const auto lng_host = static_cast<int32_t>(this->getLongitude() / FSS_COORD_SCALE);
+    const auto lat_host = pack_scaled_coord(this->getLatitude(), FSS_COORD_SCALE);
+    const auto lng_host = pack_scaled_coord(this->getLongitude(), FSS_COORD_SCALE);
     const auto lat = static_cast<int32_t>(fss_htobe32(static_cast<uint32_t>(lat_host)));
     const auto lng = static_cast<int32_t>(fss_htobe32(static_cast<uint32_t>(lng_host)));
     uint32_t alt = fss_htobe32(this->getAltitude());
