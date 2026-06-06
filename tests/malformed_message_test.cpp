@@ -30,6 +30,7 @@ using flight_safety_system::transport::fss_message_server_list;
 using flight_safety_system::transport::fss_message_smm_settings;
 using flight_safety_system::transport::fss_message_system_status;
 using flight_safety_system::transport::asset_command_rtl;
+using flight_safety_system::transport::asset_command_unknown;
 using flight_safety_system::transport::message_type_command;
 using flight_safety_system::transport::message_type_identity;
 using flight_safety_system::transport::message_type_identity_non_aircraft;
@@ -213,6 +214,38 @@ TEST_CASE("decode type consistency: identity_required")
     REQUIRE(decoded != nullptr);
     REQUIRE(decoded->getType() == message_type_identity_required);
     REQUIRE(std::dynamic_pointer_cast<fss_message_identity_required>(decoded) != nullptr);
+}
+
+/* Regression for UB in fss_message_asset_command::unpackData: casting an
+ * out-of-range wire byte to fss_asset_command was undefined behaviour.
+ * After the fix decode_asset_command() validates the byte first and maps
+ * any unrecognised value to asset_command_unknown. */
+TEST_CASE("malformed: out-of-range asset command byte decodes to asset_command_unknown")
+{
+    /* Build a valid asset_command message via getPacked(), then replace the
+     * last byte (the command byte on the wire) with an out-of-range value.
+     * Copy the buffer into a mutable std::string first so the modification
+     * is well-defined (getData() returns const char *). */
+    auto orig = std::make_shared<fss_message_asset_command>(asset_command_rtl, 0ULL);
+    orig->setId(1);
+    auto packed = orig->getPacked();
+
+    std::string wire(packed->getData(), packed->getLength());
+    /* The asset_command payload layout (after the 12-byte header) is:
+     *   8 bytes timestamp + 4 bytes lat + 4 bytes lng + 4 bytes alt + 1 byte cmd
+     * The command byte is therefore at offset 12 + 8 + 4 + 4 + 4 = 32.
+     * (The buffer is padded to a multiple of 8 bytes, so it is 40 bytes total;
+     * the trailing 7 bytes are zero-padding and must not be confused with cmd.)
+     * Overwrite the command byte with 200, which is not a defined
+     * fss_asset_command enumerator. */
+    static constexpr size_t cmd_offset = 12U + 8U + 4U + 4U + 4U;
+    REQUIRE(wire.size() > cmd_offset);
+    wire[cmd_offset] = static_cast<char>(200);
+
+    auto bl = std::make_shared<buf_len>(wire.data(), static_cast<uint16_t>(wire.size()));
+    auto decoded = std::dynamic_pointer_cast<fss_message_asset_command>(fss_message::decode(bl));
+    REQUIRE(decoded != nullptr);
+    REQUIRE(decoded->getCommand() == asset_command_unknown);
 }
 
 /* Regression for todo/13: a cast to the wrong subclass must yield nullptr,
