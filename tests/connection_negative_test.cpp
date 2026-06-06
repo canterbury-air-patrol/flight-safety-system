@@ -33,6 +33,19 @@ using flight_safety_system::transport::fss_message_identity;
 using flight_safety_system::transport::message_type_closed;
 using flight_safety_system::transport::message_type_identity;
 
+/* Thin wrapper that promotes the protected sendMsg(buf_len) overload and
+ * setFd() to public so unit tests can exercise the base-class send path
+ * without a real socket. */
+class SendTestConnection : public fss_connection {
+public:
+    SendTestConnection() = default;
+    auto callSendMsg(const std::shared_ptr<flight_safety_system::transport::buf_len> &bl) -> bool
+    {
+        return sendMsg(bl);
+    }
+    void callSetFd(int t_fd) { setFd(t_fd); }
+};
+
 namespace {
 
 std::shared_ptr<fss_connection> accepted;
@@ -202,4 +215,17 @@ TEST_CASE("negative: zero-length message header is skipped and next message deco
 
     ::close(fd);
     accepted = nullptr;
+}
+
+TEST_CASE("sendMsg(buf_len): returns false immediately when fd is -1")
+{
+    /* Deterministic check for the stale-fd guard: the base-class
+     * sendMsg(buf_len) must return false when fd == -1 without touching
+     * any socket.  The default ctor leaves fd at -1, so no real fd is
+     * needed. */
+    SendTestConnection conn;
+    auto msg = std::make_shared<fss_message_identity>("probe");
+    auto bl = msg->getPacked();
+    REQUIRE(bl != nullptr);
+    REQUIRE(!conn.callSendMsg(bl));
 }
