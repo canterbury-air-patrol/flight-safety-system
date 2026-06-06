@@ -162,8 +162,10 @@ private:
     bool liveness_active{false};
     uint64_t last_rtt_response_time{0};
     uint64_t client_timeout_ms{30000};
+    bool activated{false};
     uint64_t activated_ms{0};
     uint64_t identify_timeout_ms{30000};
+    bool identify_timeout_logged{false};
     IDatabase *dbc;
     std::shared_ptr<db_write_queue> writer;
     fss_client_handler *client_handler;
