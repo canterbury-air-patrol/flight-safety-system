@@ -50,12 +50,17 @@ flight_safety_system::client_ssl::fss_client::fss_client(std::string t_ca, std::
 
 flight_safety_system::client_ssl::fss_client::~fss_client()
 {
-    // Drain both lists before disconnecting so that any concurrent
+    // Drain both lists under the lock so that any concurrent
     // serverRequiresReconnect call sees empty lists and cannot push_back
-    // into a list that is already being destroyed.
+    // into a list that is already being destroyed.  Disconnect outside the
+    // lock: server->disconnect() joins the recv thread, which can call
+    // serverRequiresReconnect (which tries to acquire servers_lock).
     std::list<std::shared_ptr<fss_server>> all;
-    all.splice(all.end(), this->servers);
-    all.splice(all.end(), this->reconnect_servers);
+    {
+        std::scoped_lock lock(this->servers_lock);
+        all.splice(all.end(), this->servers);
+        all.splice(all.end(), this->reconnect_servers);
+    }
     for (const auto &server : all)
     {
         server->disconnect();
@@ -64,9 +69,15 @@ flight_safety_system::client_ssl::fss_client::~fss_client()
 
 void flight_safety_system::client_ssl::fss_client::disconnect()
 {
-    /* Snapshot the list so that serverRequiresReconnect callbacks fired by
-     * the recv thread during disconnect() cannot invalidate our iterator. */
-    auto snapshot = this->servers;
+    /* Snapshot the list under the lock so that concurrent serverRequiresReconnect
+     * calls cannot mutate servers while we iterate.  Disconnect outside the
+     * lock: server->disconnect() joins the recv thread, which can call
+     * serverRequiresReconnect (which tries to acquire servers_lock). */
+    std::list<std::shared_ptr<fss_server>> snapshot;
+    {
+        std::scoped_lock lock(this->servers_lock);
+        snapshot = this->servers;
+    }
     for (const auto &server : snapshot)
     {
         server->disconnect();
@@ -92,23 +103,42 @@ void flight_safety_system::client_ssl::fss_client::connectTo(const std::string &
 
 void flight_safety_system::client_ssl::fss_client::attemptReconnect()
 {
+    /* Phase (a): snapshot servers under the lock to find timed-out entries.
+     * isServerTimedOut() reads server-local atomics — no list access needed. */
+    std::list<std::shared_ptr<fss_server>> servers_snapshot;
+    {
+        std::scoped_lock lock(this->servers_lock);
+        servers_snapshot = this->servers;
+    }
     std::list<fss_server *> timed_out;
-    for (const auto &server : this->servers)
+    for (const auto &server : servers_snapshot)
     {
         if (server->isServerTimedOut())
         {
             timed_out.push_back(server.get());
         }
     }
+
+    /* Phase (b): schedule reconnection for timed-out servers.
+     * serverRequiresReconnect() acquires servers_lock internally; we must NOT
+     * hold it here to avoid a self-deadlock (plain std::mutex). */
     for (auto *server : timed_out)
     {
         FSS_LOG_WARN("client", "Server connection timed out, scheduling reconnect");
         this->serverRequiresReconnect(server);
     }
 
+    /* Phase (c): snapshot reconnect_servers under the lock, then try to
+     * reconnect each entry outside the lock (reconnect() does a blocking
+     * SSL connect — must never hold the lock across it). */
+    std::list<std::shared_ptr<fss_server>> reconnect_snapshot;
+    {
+        std::scoped_lock lock(this->servers_lock);
+        reconnect_snapshot = this->reconnect_servers;
+    }
     std::list<std::shared_ptr<fss_server>> reconnected;
     bool any_connected = false;
-    for (auto const &server : this->reconnect_servers)
+    for (auto const &server : reconnect_snapshot)
     {
         if (server->reconnect())
         {
@@ -116,13 +146,22 @@ void flight_safety_system::client_ssl::fss_client::attemptReconnect()
             any_connected = true;
         }
     }
-    while (!reconnected.empty())
+
+    /* Phase (d): move the newly connected servers from reconnect_servers to
+     * servers under the lock. */
     {
-        auto server = reconnected.front();
-        reconnected.pop_front();
-        reconnect_servers.remove(server);
-        servers.push_back(server);
+        std::scoped_lock lock(this->servers_lock);
+        while (!reconnected.empty())
+        {
+            auto server = reconnected.front();
+            reconnected.pop_front();
+            this->reconnect_servers.remove(server);
+            this->servers.push_back(server);
+        }
     }
+
+    /* Phase (e): notify outside the lock — connectionStatusChange() is a
+     * virtual user callback that may re-enter the client. */
     if (any_connected)
     {
         this->notifyConnectionStatus();
@@ -132,7 +171,14 @@ void flight_safety_system::client_ssl::fss_client::attemptReconnect()
 void flight_safety_system::client_ssl::fss_client::sendMsgAll(
     const std::shared_ptr<flight_safety_system::transport::fss_message> &msg)
 {
-    for (auto const &server : this->servers)
+    /* Copy the list under the lock so that concurrent serverRequiresReconnect
+     * calls cannot invalidate the iterator mid-send. */
+    std::list<std::shared_ptr<fss_server>> snapshot;
+    {
+        std::scoped_lock lock(this->servers_lock);
+        snapshot = this->servers;
+    }
+    for (auto const &server : snapshot)
     {
         server->sendMsg(msg);
     }
@@ -146,7 +192,12 @@ auto flight_safety_system::client_ssl::fss_client::getAssetName() -> std::string
 void flight_safety_system::client_ssl::fss_client::addServer(
     const std::shared_ptr<flight_safety_system::client_ssl::fss_server> &server)
 {
-    if (server->connected())
+    /* Read connected() before acquiring the lock: it reads server-local state
+     * (whether the server's own connection pointer is set) and does not touch
+     * the shared lists. */
+    bool is_connected = server->connected();
+    std::scoped_lock lock(this->servers_lock);
+    if (is_connected)
     {
         this->servers.push_back(server);
     }
@@ -167,13 +218,22 @@ static auto server_list_matches(const std::list<std::shared_ptr<flight_safety_sy
 void flight_safety_system::client_ssl::fss_client::updateServers(
     const std::shared_ptr<flight_safety_system::transport::fss_message_server_list> &msg)
 {
+    /* Snapshot both lists under the lock so that the existence checks below
+     * see a consistent view.  connectTo() -> addServer() will re-acquire
+     * servers_lock for the push_back, so we must not hold it here. */
+    std::list<std::shared_ptr<fss_server>> servers_snap;
+    std::list<std::shared_ptr<fss_server>> reconnect_snap;
+    {
+        std::scoped_lock lock(this->servers_lock);
+        servers_snap = this->servers;
+        reconnect_snap = this->reconnect_servers;
+    }
     for (auto const &server_entry : msg->getServers())
     {
-        bool exists = false;
-        exists = server_list_matches(this->servers, server_entry.first, server_entry.second);
+        bool exists = server_list_matches(servers_snap, server_entry.first, server_entry.second);
         if (!exists)
         {
-            exists = server_list_matches(this->reconnect_servers, server_entry.first, server_entry.second);
+            exists = server_list_matches(reconnect_snap, server_entry.first, server_entry.second);
         }
         if (!exists)
         {
@@ -185,21 +245,44 @@ void flight_safety_system::client_ssl::fss_client::updateServers(
 void flight_safety_system::client_ssl::fss_client::serverRequiresReconnect(
     flight_safety_system::client_ssl::fss_server *server)
 {
-    for (auto s : this->servers)
+    /* Perform the list mutation under the lock, then derive the connection
+     * status from the resulting server count and invoke the virtual callback
+     * outside the lock.  connectionStatusChange() may re-enter the client
+     * (e.g. call sendMsgAll or attemptReconnect), so the lock must not be
+     * held when it is called. */
+    size_t count = 0;
     {
-        if (s.get() == server)
+        std::scoped_lock lock(this->servers_lock);
+        for (auto s : this->servers)
         {
-            this->servers.remove(s);
-            this->reconnect_servers.push_back(std::move(s));
-            break;
+            if (s.get() == server)
+            {
+                this->servers.remove(s);
+                this->reconnect_servers.push_back(std::move(s));
+                break;
+            }
         }
+        count = this->servers.size();
     }
-    this->notifyConnectionStatus();
+    switch (count)
+    {
+        case 0: this->connectionStatusChange(CLIENT_CONNECTION_STATUS_DISCONNECTED); break;
+        case 1: this->connectionStatusChange(CLIENT_CONNECTION_STATUS_CONNECTED_1_SERVER); break;
+        default: this->connectionStatusChange(CLIENT_CONNECTION_STATUS_CONNECTED_2_OR_MORE); break;
+    }
 }
 
 void flight_safety_system::client_ssl::fss_client::notifyConnectionStatus()
 {
-    switch (this->servers.size())
+    /* Read the server count under the lock, then release before invoking the
+     * virtual user callback: connectionStatusChange() may re-enter the client
+     * (e.g. call sendMsgAll), so holding the lock across it would deadlock. */
+    size_t count = 0;
+    {
+        std::scoped_lock lock(this->servers_lock);
+        count = this->servers.size();
+    }
+    switch (count)
     {
         case 0: this->connectionStatusChange(CLIENT_CONNECTION_STATUS_DISCONNECTED); break;
         case 1: this->connectionStatusChange(CLIENT_CONNECTION_STATUS_CONNECTED_1_SERVER); break;

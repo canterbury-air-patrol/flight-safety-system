@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <list>
 #include <memory>
+#include <mutex>
 #include <random>
 
 namespace flight_safety_system {
@@ -28,6 +29,7 @@ private:
     std::string public_key_file{""};
     std::list<std::shared_ptr<flight_safety_system::client_ssl::fss_server>> servers{};
     std::list<std::shared_ptr<flight_safety_system::client_ssl::fss_server>> reconnect_servers{};
+    std::mutex servers_lock{};
     void notifyConnectionStatus();
     virtual void connectionStatusChange(flight_safety_system::client_ssl::connection_status status);
 protected:
