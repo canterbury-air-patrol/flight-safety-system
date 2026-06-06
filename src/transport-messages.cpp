@@ -37,6 +37,35 @@ static auto pack_scaled_coord(double value, double scale) -> int32_t
     return static_cast<int32_t>(scaled);
 }
 
+/* Validate an untrusted wire byte and map it to the matching fss_asset_command
+ * enumerator.  Any value that is not a defined enumerator maps to
+ * asset_command_unknown so that out-of-range bytes from a peer can never
+ * produce undefined behaviour via an out-of-range enum cast. */
+static auto decode_asset_command(uint8_t cmd) -> flight_safety_system::transport::fss_asset_command
+{
+    using flight_safety_system::transport::fss_asset_command;
+    switch (cmd)
+    {
+        case static_cast<uint8_t>(flight_safety_system::transport::asset_command_rtl):
+            return flight_safety_system::transport::asset_command_rtl;
+        case static_cast<uint8_t>(flight_safety_system::transport::asset_command_hold):
+            return flight_safety_system::transport::asset_command_hold;
+        case static_cast<uint8_t>(flight_safety_system::transport::asset_command_goto):
+            return flight_safety_system::transport::asset_command_goto;
+        case static_cast<uint8_t>(flight_safety_system::transport::asset_command_resume):
+            return flight_safety_system::transport::asset_command_resume;
+        case static_cast<uint8_t>(flight_safety_system::transport::asset_command_terminate):
+            return flight_safety_system::transport::asset_command_terminate;
+        case static_cast<uint8_t>(flight_safety_system::transport::asset_command_disarm):
+            return flight_safety_system::transport::asset_command_disarm;
+        case static_cast<uint8_t>(flight_safety_system::transport::asset_command_altitude):
+            return flight_safety_system::transport::asset_command_altitude;
+        case static_cast<uint8_t>(flight_safety_system::transport::asset_command_manual):
+            return flight_safety_system::transport::asset_command_manual;
+        default: return flight_safety_system::transport::asset_command_unknown;
+    }
+}
+
 static void packStringRaw(const std::shared_ptr<flight_safety_system::transport::buf_len> &bl, const char *data,
                           size_t str_len)
 {
@@ -823,7 +852,7 @@ void flight_safety_system::transport::fss_message_asset_command::unpackData(cons
     uint8_t cmd = 0;
     if (reader.readUint8(cmd))
     {
-        this->command = static_cast<fss_asset_command>(cmd);
+        this->command = decode_asset_command(cmd);
     }
     this->latitude = lat * FSS_COORD_SCALE;
     this->longitude = lng * FSS_COORD_SCALE;
