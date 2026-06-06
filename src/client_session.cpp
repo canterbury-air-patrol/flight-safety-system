@@ -196,6 +196,14 @@ void fss::server::fss_client::sendCommand()
                                         << this->name << " (dbid=" << ac->getDBId() << ")");
             return;
         }
+        if (command == fss::transport::asset_command_goto &&
+            !is_valid_coordinate(ac->getLatitude(), ac->getLongitude()))
+        {
+            FSS_LOG_ERROR("server", "Refusing to dispatch GOTO command with invalid coordinates to "
+                                        << this->name << " (dbid=" << ac->getDBId() << ", lat=" << ac->getLatitude()
+                                        << ", lon=" << ac->getLongitude() << ")");
+            return;
+        }
         std::shared_ptr<fss::transport::fss_message_asset_command> msg = nullptr;
         switch (command)
         {

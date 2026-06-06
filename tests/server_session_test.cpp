@@ -1048,6 +1048,63 @@ TEST_CASE("session: GOTO command dispatch sends lat/lon asset_command message")
     REQUIRE(find_sent<fss::transport::fss_message_asset_command>(conn->sent, before) != nullptr);
 }
 
+TEST_CASE("session: GOTO command with out-of-range latitude is not dispatched")
+{
+    /* sendCommand() must validate GOTO coordinates via is_valid_coordinate
+     * before constructing or sending the message.  A latitude of 200.0 is
+     * outside [-90, 90] and must be rejected: no asset_command message must
+     * appear on the wire and an error must be logged.
+     *
+     * The command's dbid is recorded before the guard returns, so an
+     * unchanged rejected command is deduplicated on subsequent ticks (no log
+     * flooding, since sendCommand runs every command_poll_ms), while a
+     * replacement command with a different dbid dispatches immediately. */
+    fss_test::MockDatabase mock;
+    constexpr uint64_t asset_id = 21;
+    mock.asset_ids["craft"] = asset_id;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+
+    const std::size_t before = conn->sent.size();
+
+    /* Latitude 200.0 is well outside [-90, 90]. */
+    auto bad_cmd =
+        std::make_shared<fss::server::asset_command>(/*dbid*/ 6, /*ts*/ 300, "GOTO", 200.0, 172.6, uint32_t{0});
+    session->setPendingCommand(bad_cmd);
+
+    {
+        fss_test::capture_cerr cap;
+        session->sendCommand();
+        /* No asset_command must have been sent, and an error must be logged. */
+        REQUIRE(find_sent<fss::transport::fss_message_asset_command>(conn->sent, before) == nullptr);
+        REQUIRE(cap.str().find("Refusing to dispatch GOTO command with invalid coordinates") != std::string::npos);
+    }
+
+    /* Re-issuing the same rejected command immediately must be deduplicated:
+     * the dbid was recorded, so within the retry window sendCommand() neither
+     * dispatches nor re-logs. This guards against per-tick log flooding. */
+    {
+        fss_test::capture_cerr cap;
+        session->sendCommand();
+        REQUIRE(find_sent<fss::transport::fss_message_asset_command>(conn->sent, before) == nullptr);
+        REQUIRE(cap.str().find("Refusing to dispatch GOTO") == std::string::npos);
+    }
+
+    /* A follow-up with valid coordinates (different dbid) must still dispatch
+     * immediately, without waiting for the 10-second retry window. */
+    auto good_cmd =
+        std::make_shared<fss::server::asset_command>(/*dbid*/ 7, /*ts*/ 400, "GOTO", -43.5, 172.6, uint32_t{0});
+    session->setPendingCommand(good_cmd);
+    session->sendCommand();
+
+    REQUIRE(find_sent<fss::transport::fss_message_asset_command>(conn->sent, before) != nullptr);
+}
+
 TEST_CASE("session: rtt_request from identified client receives rtt_response")
 {
     /* An identified aircraft client that receives an rtt_request must reply
