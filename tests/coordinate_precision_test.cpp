@@ -22,8 +22,10 @@
 using flight_safety_system::transport::fss_message;
 using flight_safety_system::transport::fss_message_asset_command;
 using flight_safety_system::transport::fss_message_position_report;
+using flight_safety_system::transport::fss_message_system_status;
 using flight_safety_system::transport::asset_command_hold;
 using flight_safety_system::transport::asset_command_rtl;
+using flight_safety_system::transport::FSS_VOLTAGE_SCALE;
 
 /* Regression for todo/11-coordinate-constant.md
  *
@@ -50,6 +52,15 @@ auto round_trip(double lat, double lng) -> std::pair<double, double>
     auto decoded = std::dynamic_pointer_cast<fss_message_position_report>(fss_message::decode(bl));
     REQUIRE(decoded != nullptr);
     return {decoded->getLatitude(), decoded->getLongitude()};
+}
+
+auto round_trip_voltage(double voltage) -> double
+{
+    auto original = std::make_shared<fss_message_system_status>(uint8_t{80}, uint32_t{1000}, voltage);
+    original->setId(1);
+    auto decoded = std::dynamic_pointer_cast<fss_message_system_status>(fss_message::decode(original->getPacked()));
+    REQUIRE(decoded != nullptr);
+    return decoded->getBatVoltage();
 }
 
 } // namespace
@@ -223,4 +234,28 @@ TEST_CASE("coord: large negative out-of-range latitude clamps rather than wrappi
     REQUIRE(std::isfinite(lat));
     REQUIRE(lat >= -215.0);
     REQUIRE(lat < 0.0);
+}
+
+/* The system-status battery voltage is packed through the same scaled-int
+ * helper, so it needs the same NaN/Inf/out-of-range guarding. */
+
+TEST_CASE("voltage: NaN and Inf battery voltage pack to zero")
+{
+    REQUIRE(round_trip_voltage(std::numeric_limits<double>::quiet_NaN()) == 0.0);
+    REQUIRE(round_trip_voltage(std::numeric_limits<double>::infinity()) == 0.0);
+    REQUIRE(round_trip_voltage(-std::numeric_limits<double>::infinity()) == 0.0);
+}
+
+TEST_CASE("voltage: negative battery voltage clamps to zero")
+{
+    REQUIRE(round_trip_voltage(-5.0) == 0.0);
+}
+
+TEST_CASE("voltage: out-of-range battery voltage clamps rather than wrapping")
+{
+    const double voltage = round_trip_voltage(1e12);
+    REQUIRE(std::isfinite(voltage));
+    REQUIRE(voltage > 0.0);
+    /* Clamped to INT32_MAX * FSS_VOLTAGE_SCALE rather than wrapping. */
+    REQUIRE(voltage <= static_cast<double>(std::numeric_limits<int32_t>::max()) * FSS_VOLTAGE_SCALE);
 }
