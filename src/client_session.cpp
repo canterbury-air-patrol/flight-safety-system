@@ -156,6 +156,7 @@ void fss::server::fss_client::activate()
     {
         std::scoped_lock guard(this->client_lock);
         this->activated_ms = this->clock->now_ms();
+        this->activated = true;
     }
     this->getConnection()->setHandler(this);
 }
@@ -259,9 +260,17 @@ auto fss::server::fss_client::isTimedOut() -> bool
     std::scoped_lock guard(this->client_lock);
     if (!this->identified)
     {
-        bool timed_out = (this->clock->now_ms() - this->activated_ms) > this->identify_timeout_ms;
-        if (timed_out)
+        /* Only meaningful once the client has been activated: before that
+         * activated_ms is unset, so a caller invoking isTimedOut() early must
+         * not see a spurious timeout against an epoch-zero activation time. */
+        if (!this->activated)
         {
+            return false;
+        }
+        bool timed_out = (this->clock->now_ms() - this->activated_ms) > this->identify_timeout_ms;
+        if (timed_out && !this->identify_timeout_logged)
+        {
+            this->identify_timeout_logged = true;
             FSS_LOG_WARN("server", "Client did not identify within deadline; pruning");
         }
         return timed_out;
