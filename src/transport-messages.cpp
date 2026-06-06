@@ -51,26 +51,18 @@ static auto pack_scaled_nonneg(double value, double scale) -> int32_t
  * produce undefined behaviour via an out-of-range enum cast. */
 static auto decode_asset_command(uint8_t cmd) -> flight_safety_system::transport::fss_asset_command
 {
-    using flight_safety_system::transport::fss_asset_command;
+    using namespace flight_safety_system::transport;
     switch (cmd)
     {
-        case static_cast<uint8_t>(flight_safety_system::transport::asset_command_rtl):
-            return flight_safety_system::transport::asset_command_rtl;
-        case static_cast<uint8_t>(flight_safety_system::transport::asset_command_hold):
-            return flight_safety_system::transport::asset_command_hold;
-        case static_cast<uint8_t>(flight_safety_system::transport::asset_command_goto):
-            return flight_safety_system::transport::asset_command_goto;
-        case static_cast<uint8_t>(flight_safety_system::transport::asset_command_resume):
-            return flight_safety_system::transport::asset_command_resume;
-        case static_cast<uint8_t>(flight_safety_system::transport::asset_command_terminate):
-            return flight_safety_system::transport::asset_command_terminate;
-        case static_cast<uint8_t>(flight_safety_system::transport::asset_command_disarm):
-            return flight_safety_system::transport::asset_command_disarm;
-        case static_cast<uint8_t>(flight_safety_system::transport::asset_command_altitude):
-            return flight_safety_system::transport::asset_command_altitude;
-        case static_cast<uint8_t>(flight_safety_system::transport::asset_command_manual):
-            return flight_safety_system::transport::asset_command_manual;
-        default: return flight_safety_system::transport::asset_command_unknown;
+        case static_cast<uint8_t>(asset_command_rtl): return asset_command_rtl;
+        case static_cast<uint8_t>(asset_command_hold): return asset_command_hold;
+        case static_cast<uint8_t>(asset_command_goto): return asset_command_goto;
+        case static_cast<uint8_t>(asset_command_resume): return asset_command_resume;
+        case static_cast<uint8_t>(asset_command_terminate): return asset_command_terminate;
+        case static_cast<uint8_t>(asset_command_disarm): return asset_command_disarm;
+        case static_cast<uint8_t>(asset_command_altitude): return asset_command_altitude;
+        case static_cast<uint8_t>(asset_command_manual): return asset_command_manual;
+        default: return asset_command_unknown;
     }
 }
 
