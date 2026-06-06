@@ -231,15 +231,16 @@ TEST_CASE("malformed: out-of-range asset command byte decodes to asset_command_u
     auto packed = orig->getPacked();
 
     std::string wire(packed->getData(), packed->getLength());
-    /* The asset_command payload layout (after the 12-byte header) is:
-     *   8 bytes timestamp + 4 bytes lat + 4 bytes lng + 4 bytes alt + 1 byte cmd
-     * The command byte is therefore at offset 12 + 8 + 4 + 4 + 4 = 32.
-     * (The buffer is padded to a multiple of 8 bytes, so it is 40 bytes total;
-     * the trailing 7 bytes are zero-padding and must not be confused with cmd.)
-     * Overwrite the command byte with 200, which is not a defined
-     * fss_asset_command enumerator. */
-    static constexpr size_t cmd_offset = 12U + 8U + 4U + 4U + 4U;
+    /* The command byte follows the framing header and the fixed asset_command
+     * payload (timestamp, lat, lng, altitude). Derive its offset from the wire
+     * field widths via sizeof so this stays correct if a field width changes;
+     * the buffer is padded to a multiple of 8 bytes, so the trailing padding
+     * must not be confused with the command byte. */
+    static constexpr size_t header_len = 12U;
+    static constexpr size_t cmd_offset =
+        header_len + sizeof(uint64_t) + sizeof(int32_t) + sizeof(int32_t) + sizeof(uint32_t);
     REQUIRE(wire.size() > cmd_offset);
+    /* 200 is not a defined fss_asset_command enumerator. */
     wire[cmd_offset] = static_cast<char>(200);
 
     auto bl = std::make_shared<buf_len>(wire.data(), static_cast<uint16_t>(wire.size()));
