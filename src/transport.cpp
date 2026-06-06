@@ -128,7 +128,14 @@ void flight_safety_system::transport::fss_connection::disconnect()
         }
         else
         {
-            this->recv_thread.join();
+            try
+            {
+                this->recv_thread.join();
+            }
+            catch (const std::exception &e)
+            {
+                FSS_LOG_ERROR("transport", "recv_thread.join() failed: " << e.what());
+            }
         }
     }
 }

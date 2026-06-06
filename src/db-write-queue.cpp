@@ -63,7 +63,14 @@ void db_write_queue::stop()
     this->cv.notify_all();
     if (this->worker.joinable())
     {
-        this->worker.join();
+        try
+        {
+            this->worker.join();
+        }
+        catch (const std::exception &e)
+        {
+            FSS_LOG_ERROR("db-writer", "worker.join() failed: " << e.what());
+        }
     }
 }
 
