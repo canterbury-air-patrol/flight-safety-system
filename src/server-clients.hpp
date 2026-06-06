@@ -35,15 +35,41 @@ public:
     server_clients(server_clients &&) = delete;
     auto operator=(server_clients &) -> server_clients & = delete;
     auto operator=(server_clients &&) -> server_clients & = delete;
-    void cleanupRemovableClients()
+    auto getTotalClients() -> uint32_t
     {
         std::scoped_lock guard(this->lock);
-        while (!this->disconnected.empty())
+        return this->total_clients;
+    }
+    void cleanupRemovableClients()
+    {
+        /* Drain the disconnected queue under the lock, then call disconnect()
+         * outside the lock.  This avoids a deadlock: the recv thread's
+         * processMessage can call clientDisconnected / broadcastMsg, both of
+         * which also take this->lock.  If we held this->lock while joining the
+         * recv thread, and that thread was blocked waiting for this->lock, we
+         * would deadlock.  By releasing the lock before joining we break the
+         * cycle.
+         *
+         * disconnect() joins the recv thread while the fss_client object is
+         * still fully alive (the shared_ptr keeps it alive until removable goes
+         * out of scope), so processMessage can never execute after any member
+         * of fss_client has been destroyed. */
+        std::vector<std::shared_ptr<flight_safety_system::server::fss_client>> removable;
         {
-            auto client = this->disconnected.front();
-            this->disconnected.pop();
-            total_clients--;
+            std::scoped_lock guard(this->lock);
+            while (!this->disconnected.empty())
+            {
+                removable.push_back(this->disconnected.front());
+                this->disconnected.pop();
+                total_clients--;
+            }
         }
+        for (auto &client : removable)
+        {
+            client->disconnect();
+        }
+        /* removable goes out of scope here; clients are destroyed with the
+         * recv thread already stopped. */
     };
     void setClientTimeoutMs(uint64_t ms) { this->client_timeout_ms = ms; }
     void setClientRateLimits(uint64_t capacity, uint64_t refill_per_s)

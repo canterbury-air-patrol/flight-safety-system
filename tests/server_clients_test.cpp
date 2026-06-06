@@ -81,6 +81,38 @@ TEST_CASE("server_clients: clientConnected increments client count")
     sc.cleanupRemovableClients();
 }
 
+TEST_CASE("server_clients: cleanupRemovableClients decrements total count and is idempotent")
+{
+    server_clients sc;
+    fss_test::MockDatabase mock;
+
+    auto conn1 = std::make_shared<FakeConnection>();
+    auto writer1 = make_null_writer();
+    auto client1 = std::make_shared<fss::server::fss_client>(conn1, &mock, writer1, &sc);
+
+    auto conn2 = std::make_shared<FakeConnection>();
+    auto writer2 = make_null_writer();
+    auto client2 = std::make_shared<fss::server::fss_client>(conn2, &mock, writer2, &sc);
+
+    sc.clientConnected(client1);
+    sc.clientConnected(client2);
+    REQUIRE(sc.getTotalClients() == 2);
+
+    sc.clientDisconnected(client1.get());
+    REQUIRE(sc.getTotalClients() == 2); // still 2 until cleanup runs
+
+    sc.cleanupRemovableClients();
+    REQUIRE(sc.getTotalClients() == 1); // one removed
+
+    sc.clientDisconnected(client2.get());
+    sc.cleanupRemovableClients();
+    REQUIRE(sc.getTotalClients() == 0); // both removed
+
+    // Second cleanup on empty queue must be a no-op
+    sc.cleanupRemovableClients();
+    REQUIRE(sc.getTotalClients() == 0);
+}
+
 TEST_CASE("server_clients: clientDisconnected moves client to removable queue")
 {
     server_clients sc;
