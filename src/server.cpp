@@ -147,6 +147,11 @@ auto main(int argc, char *argv[]) -> int
         config.isMember("client_timeout") ? config["client_timeout"].asUInt64() : default_client_timeout_sec;
     clients->setClientTimeoutMs(client_timeout_sec * msec_per_sec);
 
+    constexpr int default_identify_timeout_sec = 30;
+    uint64_t identify_timeout_sec =
+        config.isMember("identify_timeout") ? config["identify_timeout"].asUInt64() : default_identify_timeout_sec;
+    clients->setClientIdentifyTimeoutMs(identify_timeout_sec * msec_per_sec);
+
     constexpr uint64_t default_rate_capacity = 100;
     constexpr uint64_t default_rate_refill_per_s = 20;
     uint64_t rate_capacity =

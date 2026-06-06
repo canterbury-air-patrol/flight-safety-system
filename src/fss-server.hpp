@@ -162,6 +162,8 @@ private:
     bool liveness_active{false};
     uint64_t last_rtt_response_time{0};
     uint64_t client_timeout_ms{30000};
+    uint64_t activated_ms{0};
+    uint64_t identify_timeout_ms{30000};
     IDatabase *dbc;
     std::shared_ptr<db_write_queue> writer;
     fss_client_handler *client_handler;
@@ -189,6 +191,7 @@ public:
     void setPendingCommand(std::shared_ptr<asset_command> cmd);
     void setClock(std::shared_ptr<IClock> t_clock);
     void setTimeoutMs(uint64_t ms);
+    void setIdentifyTimeoutMs(uint64_t ms);
     void setRateLimits(uint64_t capacity, uint64_t refill_per_s); // must be called before any messages are processed
     auto isTimedOut() -> bool;
 };
