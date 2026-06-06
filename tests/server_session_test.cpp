@@ -921,6 +921,51 @@ TEST_CASE("session: rtt_request from client triggers rtt_response reply")
     REQUIRE(find_sent<fss::transport::fss_message_rtt_response>(conn->sent) != nullptr);
 }
 
+TEST_CASE("session: position report with out-of-range latitude is rejected")
+{
+    /* A position report whose latitude is outside [-90, 90] must be silently
+     * dropped: it must neither be written to the database nor broadcast to
+     * other connected clients. The connection itself stays up. */
+    fss_test::MockDatabase mock;
+    constexpr uint64_t asset_id = 20;
+    mock.asset_ids["craft"] = asset_id;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+    REQUIRE(handler.disconnects == 0);
+
+    /* Send a position report with latitude=200.0 (well outside [-90,90]). */
+    auto bad_pos = std::make_shared<fss::transport::fss_message_position_report>(
+        200.0, 0.0, 0U, 0U, 0U, int16_t{0}, 0U, std::string{}, 0U, uint8_t{0}, 0U, uint8_t{0}, uint8_t{0},
+        fss::fss_current_timestamp());
+    fss_test::capture_cerr cap;
+    session->processMessage(bad_pos);
+
+    /* Must not be broadcast. */
+    REQUIRE(handler.broadcasts.empty());
+    /* Must not be written to the database. */
+    REQUIRE(mock.positions.empty());
+    /* Connection must stay up. */
+    REQUIRE(handler.disconnects == 0);
+    /* A warning must be logged. */
+    REQUIRE(cap.str().find("Invalid position report coordinates") != std::string::npos);
+
+    /* A follow-up report with valid coordinates must be accepted. */
+    auto good_pos = std::make_shared<fss::transport::fss_message_position_report>(
+        -43.5, 172.6, 100U, 0U, 0U, int16_t{0}, 0U, std::string{}, 0U, uint8_t{0}, 0U, uint8_t{0}, uint8_t{0},
+        fss::fss_current_timestamp());
+    session->processMessage(good_pos);
+
+    REQUIRE(handler.broadcasts.size() == 1);
+    REQUIRE(fss_test::wait_for([&]() { return !mock.positions.empty(); }));
+    REQUIRE(mock.positions.front().asset_id == asset_id);
+}
+
 TEST_CASE("session: unidentified client receives identity_required for non-identity message")
 {
     fss_test::MockDatabase mock;

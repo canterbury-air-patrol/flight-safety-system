@@ -4,12 +4,19 @@
 #include "fss-server.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <iostream>
 #include <memory>
 #include <mutex>
 #include <utility>
 
 namespace fss = flight_safety_system;
+
+static auto is_valid_coordinate(double latitude, double longitude) -> bool
+{
+    return std::isfinite(latitude) && std::isfinite(longitude) && latitude >= -90.0 && latitude <= 90.0 &&
+           longitude >= -180.0 && longitude <= 180.0;
+}
 
 constexpr uint64_t sec_to_msec = 1000;
 constexpr uint64_t rtt_retry_interval = 10 * sec_to_msec;
@@ -538,6 +545,13 @@ void fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss
                         FSS_LOG_WARN("server", "Stale position report (age=" << (now - report_ts) << "ms), discarding");
                         return;
                     }
+                }
+                if (!is_valid_coordinate(msg->getLatitude(), msg->getLongitude()))
+                {
+                    FSS_LOG_WARN("server", "Invalid position report coordinates (lat=" << msg->getLatitude()
+                                                                                       << " lon=" << msg->getLongitude()
+                                                                                       << "), discarding");
+                    return;
                 }
                 if (this->aircraft && asset_id != 0)
                 {
