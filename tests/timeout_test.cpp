@@ -67,7 +67,7 @@ public:
 
 } // namespace
 
-TEST_CASE("timeout: isTimedOut false before identification")
+TEST_CASE("timeout: isTimedOut false for unidentified client within identify deadline")
 {
     fss_test::MockDatabase mock;
     auto conn = std::make_shared<FakeConnection>();
@@ -76,8 +76,50 @@ TEST_CASE("timeout: isTimedOut false before identification")
     auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
     auto clock = std::make_shared<FakeClock>();
     session->setClock(clock);
+    session->setIdentifyTimeoutMs(30000);
+    session->activate();
 
-    clock->advance(100000);
+    clock->advance(29999);
+    REQUIRE_FALSE(session->isTimedOut());
+}
+
+TEST_CASE("timeout: isTimedOut true for unidentified client past identify deadline")
+{
+    fss_test::MockDatabase mock;
+    auto conn = std::make_shared<FakeConnection>();
+    NullClientHandler handler;
+    auto writer = make_null_writer();
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    auto clock = std::make_shared<FakeClock>();
+    session->setClock(clock);
+    session->setIdentifyTimeoutMs(30000);
+    session->activate();
+
+    clock->advance(30001);
+    REQUIRE(session->isTimedOut());
+}
+
+TEST_CASE("timeout: identified client not pruned by identify deadline")
+{
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 1;
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+    auto writer = make_null_writer();
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    auto clock = std::make_shared<FakeClock>();
+    session->setClock(clock);
+    /* Use a very short identify deadline so advancing past it is easy. */
+    session->setIdentifyTimeoutMs(5000);
+    session->activate();
+
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+
+    /* Advance past the identify deadline but stay within the liveness window.
+     * Identification resets last_rtt_response_time, so the liveness clock
+     * starts here; the session must NOT be pruned by the identify deadline. */
+    clock->advance(10000);
     REQUIRE_FALSE(session->isTimedOut());
 }
 

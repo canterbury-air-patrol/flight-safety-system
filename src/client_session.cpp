@@ -153,6 +153,10 @@ fss::server::fss_client::fss_client(std::shared_ptr<fss::transport::fss_connecti
 
 void fss::server::fss_client::activate()
 {
+    {
+        std::scoped_lock guard(this->client_lock);
+        this->activated_ms = this->clock->now_ms();
+    }
     this->getConnection()->setHandler(this);
 }
 
@@ -239,6 +243,12 @@ void fss::server::fss_client::setTimeoutMs(uint64_t ms)
     this->client_timeout_ms = ms;
 }
 
+void fss::server::fss_client::setIdentifyTimeoutMs(uint64_t ms)
+{
+    std::scoped_lock guard(this->client_lock);
+    this->identify_timeout_ms = ms;
+}
+
 void fss::server::fss_client::setRateLimits(uint64_t capacity, uint64_t refill_per_s)
 {
     this->msg_rate = rate_limiter(capacity, refill_per_s);
@@ -247,6 +257,15 @@ void fss::server::fss_client::setRateLimits(uint64_t capacity, uint64_t refill_p
 auto fss::server::fss_client::isTimedOut() -> bool
 {
     std::scoped_lock guard(this->client_lock);
+    if (!this->identified)
+    {
+        bool timed_out = (this->clock->now_ms() - this->activated_ms) > this->identify_timeout_ms;
+        if (timed_out)
+        {
+            FSS_LOG_WARN("server", "Client did not identify within deadline; pruning");
+        }
+        return timed_out;
+    }
     if (!this->liveness_active)
     {
         return false;
