@@ -263,12 +263,12 @@ void flight_safety_system::client_ssl::fss_client::serverRequiresReconnect(
     size_t count = 0;
     {
         std::scoped_lock lock(this->servers_lock);
-        for (auto s : this->servers)
+        for (auto it = this->servers.begin(); it != this->servers.end(); ++it)
         {
-            if (s.get() == server)
+            if (it->get() == server)
             {
-                this->servers.remove(s);
-                this->reconnect_servers.push_back(std::move(s));
+                this->reconnect_servers.push_back(std::move(*it));
+                this->servers.erase(it);
                 break;
             }
         }
