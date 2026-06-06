@@ -49,7 +49,7 @@ auto fss::server::fss_server_details::getPort() -> uint16_t
 
 // NOLINTBEGIN(bugprone-easily-swappable-parameters)
 fss::server::asset_command::asset_command(uint64_t t_dbid, uint64_t t_timestamp, const std::string &t_cmd,
-                                          double t_latitude, double t_longitude, uint16_t t_altitude)
+                                          double t_latitude, double t_longitude, uint32_t t_altitude)
     : dbid(t_dbid), timestamp(t_timestamp), latitude(t_latitude), longitude(t_longitude), altitude(t_altitude)
 // NOLINTEND(bugprone-easily-swappable-parameters)
 {
@@ -111,7 +111,7 @@ auto fss::server::asset_command::getLongitude() -> double
 {
     return this->longitude;
 }
-auto fss::server::asset_command::getAltitude() -> uint16_t
+auto fss::server::asset_command::getAltitude() -> uint32_t
 {
     return this->altitude;
 }

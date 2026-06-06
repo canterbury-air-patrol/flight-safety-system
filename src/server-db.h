@@ -20,7 +20,7 @@ struct asset_command_s {
     unsigned long long dbid;
     double latitude;
     double longitude;
-    unsigned short altitude;
+    unsigned int altitude;
 };
 
 struct asset_command_s *db_asset_command_get(const char *conn, unsigned long long asset_id_arg);

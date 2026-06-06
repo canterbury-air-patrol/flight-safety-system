@@ -775,7 +775,7 @@ TEST_CASE("asset_command: all command-string branches and getAltitude")
     auto cmd_disarm = fss::server::asset_command(3, 100, "DISARM", 0.0, 0.0, 0);
     REQUIRE(cmd_disarm.getCommand() == asset_command_disarm);
 
-    auto cmd_alt = fss::server::asset_command(4, 100, "ALT", 0.0, 0.0, uint16_t{150});
+    auto cmd_alt = fss::server::asset_command(4, 100, "ALT", 0.0, 0.0, uint32_t{150});
     REQUIRE(cmd_alt.getCommand() == asset_command_altitude);
     REQUIRE(cmd_alt.getAltitude() == 150);
 
@@ -804,7 +804,7 @@ TEST_CASE("session: sendCommand dispatches altitude message for ALT command")
     session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
     conn->sent.clear();
 
-    auto alt_cmd = std::make_shared<fss::server::asset_command>(42, 1000, "ALT", 0.0, 0.0, uint16_t{300});
+    auto alt_cmd = std::make_shared<fss::server::asset_command>(42, 1000, "ALT", 0.0, 0.0, uint32_t{300});
     session->setPendingCommand(alt_cmd);
     session->sendCommand();
 
@@ -995,7 +995,7 @@ TEST_CASE("session: GOTO command dispatch sends lat/lon asset_command message")
     session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
 
     const std::size_t before = conn->sent.size();
-    auto cmd = std::make_shared<fss::server::asset_command>(/*dbid*/ 5, /*ts*/ 200, "GOTO", -43.5, 172.6, uint16_t{0});
+    auto cmd = std::make_shared<fss::server::asset_command>(/*dbid*/ 5, /*ts*/ 200, "GOTO", -43.5, 172.6, uint32_t{0});
     mock.pushCommand(asset_id, cmd);
     session->setPendingCommand(cmd);
     session->sendCommand();
@@ -1073,4 +1073,53 @@ TEST_CASE("session: sendRTTRequest skips second request within retry interval")
     /* Only one rtt_request should appear on the wire. */
     REQUIRE(count_sent<fss::transport::fss_message_rtt_request>(conn->sent) == 1);
     REQUIRE(handler.disconnects == 0);
+}
+
+TEST_CASE("asset_command: altitude above uint16_t max survives pack/decode round-trip")
+{
+    /* Regression: altitude was stored as uint16_t, silently truncating any
+     * value above 65535 before it reached the wire. Verify that a value of
+     * 100000 (well above 65535) flows through asset_command -> getAltitude()
+     * -> fss_message_asset_command (pack) -> decode without truncation. */
+    constexpr uint32_t high_alt = 100000U;
+
+    /* 1. asset_command stores and returns the full 32-bit value. */
+    fss::server::asset_command ac(/*dbid*/ 1, /*ts*/ 1000, "ALT", 0.0, 0.0, high_alt);
+    REQUIRE(ac.getAltitude() == high_alt);
+
+    /* 2. The wire message is constructed from the getter and survives a
+     *    pack -> decode round-trip without truncation. */
+    auto msg_out = std::make_shared<fss::transport::fss_message_asset_command>(fss::transport::asset_command_altitude,
+                                                                               ac.getTimeStamp(), ac.getAltitude());
+
+    auto bl = msg_out->getPacked();
+    auto msg_in = fss::transport::fss_message::decode(bl);
+
+    auto cmd_in = std::dynamic_pointer_cast<fss::transport::fss_message_asset_command>(msg_in);
+    REQUIRE(cmd_in != nullptr);
+    REQUIRE(cmd_in->getCommand() == fss::transport::asset_command_altitude);
+    REQUIRE(cmd_in->getAltitude() == high_alt);
+
+    /* 3. Full dispatch path: session delivers the command with the correct
+     *    altitude on the wire. */
+    fss_test::MockDatabase mock;
+    constexpr uint64_t asset_id = 50;
+    mock.asset_ids["craft"] = asset_id;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+    conn->sent.clear();
+
+    auto alt_cmd = std::make_shared<fss::server::asset_command>(/*dbid*/ 7, /*ts*/ 2000, "ALT", 0.0, 0.0, high_alt);
+    session->setPendingCommand(alt_cmd);
+    session->sendCommand();
+
+    auto dispatched = find_sent<fss::transport::fss_message_asset_command>(conn->sent);
+    REQUIRE(dispatched != nullptr);
+    REQUIRE(dispatched->getCommand() == fss::transport::asset_command_altitude);
+    REQUIRE(dispatched->getAltitude() == high_alt);
 }

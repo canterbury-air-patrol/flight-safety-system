@@ -138,7 +138,7 @@ db_asset_command_get(const char *conn_arg, unsigned long long asset_id_arg)
     char command[COMMAND_LEN];
     double lat = 0.0;
     double lng = 0.0;
-    int alt = 0;
+    unsigned int alt = 0;
     int success = 0;
     int lat_ind = 0;
     int lng_ind = 0;
