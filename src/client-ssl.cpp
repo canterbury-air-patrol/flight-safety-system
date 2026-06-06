@@ -242,6 +242,16 @@ void flight_safety_system::client_ssl::fss_client::updateServers(
     }
 }
 
+static auto status_for_server_count(size_t count) -> flight_safety_system::client_ssl::connection_status
+{
+    switch (count)
+    {
+        case 0: return flight_safety_system::client_ssl::CLIENT_CONNECTION_STATUS_DISCONNECTED;
+        case 1: return flight_safety_system::client_ssl::CLIENT_CONNECTION_STATUS_CONNECTED_1_SERVER;
+        default: return flight_safety_system::client_ssl::CLIENT_CONNECTION_STATUS_CONNECTED_2_OR_MORE;
+    }
+}
+
 void flight_safety_system::client_ssl::fss_client::serverRequiresReconnect(
     flight_safety_system::client_ssl::fss_server *server)
 {
@@ -264,12 +274,7 @@ void flight_safety_system::client_ssl::fss_client::serverRequiresReconnect(
         }
         count = this->servers.size();
     }
-    switch (count)
-    {
-        case 0: this->connectionStatusChange(CLIENT_CONNECTION_STATUS_DISCONNECTED); break;
-        case 1: this->connectionStatusChange(CLIENT_CONNECTION_STATUS_CONNECTED_1_SERVER); break;
-        default: this->connectionStatusChange(CLIENT_CONNECTION_STATUS_CONNECTED_2_OR_MORE); break;
-    }
+    this->connectionStatusChange(status_for_server_count(count));
 }
 
 void flight_safety_system::client_ssl::fss_client::notifyConnectionStatus()
@@ -282,12 +287,7 @@ void flight_safety_system::client_ssl::fss_client::notifyConnectionStatus()
         std::scoped_lock lock(this->servers_lock);
         count = this->servers.size();
     }
-    switch (count)
-    {
-        case 0: this->connectionStatusChange(CLIENT_CONNECTION_STATUS_DISCONNECTED); break;
-        case 1: this->connectionStatusChange(CLIENT_CONNECTION_STATUS_CONNECTED_1_SERVER); break;
-        default: this->connectionStatusChange(CLIENT_CONNECTION_STATUS_CONNECTED_2_OR_MORE); break;
-    }
+    this->connectionStatusChange(status_for_server_count(count));
 }
 
 void flight_safety_system::client_ssl::fss_client::connectionStatusChange(
