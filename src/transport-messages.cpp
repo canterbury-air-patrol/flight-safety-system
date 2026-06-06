@@ -37,6 +37,14 @@ static auto pack_scaled_coord(double value, double scale) -> int32_t
     return static_cast<int32_t>(scaled);
 }
 
+/* Like pack_scaled_coord but clamps the low side at 0, for non-negative
+ * quantities such as battery voltage so a stray negative never wraps. */
+static auto pack_scaled_nonneg(double value, double scale) -> int32_t
+{
+    const int32_t packed = pack_scaled_coord(value, scale);
+    return packed < 0 ? 0 : packed;
+}
+
 /* Validate an untrusted wire byte and map it to the matching fss_asset_command
  * enumerator.  Any value that is not a defined enumerator maps to
  * asset_command_unknown so that out-of-range bytes from a peer can never
@@ -701,7 +709,7 @@ void flight_safety_system::transport::fss_message_system_status::packData(std::s
     uint8_t bat_percent_n = this->getBatRemaining();
     uint32_t mah_used_n = fss_htobe32(this->getBatMAHUsed());
     uint32_t voltage_n =
-        fss_htobe32(static_cast<uint32_t>(pack_scaled_coord(this->getBatVoltage(), FSS_VOLTAGE_SCALE)));
+        fss_htobe32(static_cast<uint32_t>(pack_scaled_nonneg(this->getBatVoltage(), FSS_VOLTAGE_SCALE)));
 
     bl->addData(&bat_percent_n, sizeof(uint8_t));
     bl->addData(&mah_used_n, sizeof(uint32_t));
