@@ -314,6 +314,15 @@ auto flight_safety_system::transport::fss_connection::sendMsg(const std::shared_
 #endif
     while (sent < to_send)
     {
+        /* Re-load fd every iteration: a concurrent disconnect() does
+         * fd.exchange(-1) then closes the descriptor.  If that races with
+         * a multi-iteration send we must stop rather than write into a
+         * stale (possibly reused) descriptor. */
+        current_fd = this->fd.load();
+        if (current_fd == -1)
+        {
+            return false;
+        }
         ssize_t transfered = send(current_fd, &data[sent], to_send - sent, 0);
         if (transfered < 0)
         {
