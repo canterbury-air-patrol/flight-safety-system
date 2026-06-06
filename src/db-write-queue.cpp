@@ -3,6 +3,8 @@
 
 #include <algorithm>
 #include <exception>
+#include <system_error>
+#include <thread>
 #include <utility>
 
 namespace flight_safety_system::server {
@@ -67,9 +69,14 @@ void db_write_queue::stop()
         {
             this->worker.join();
         }
-        catch (const std::exception &e)
+        catch (const std::system_error &e)
         {
-            FSS_LOG_ERROR("db-writer", "worker.join() failed: " << e.what());
+            /* join() failed, so the thread is still joinable; leaving it would
+             * make ~std::thread call std::terminate. Detach to avoid that
+             * (leaking the thread) — we cannot recover the worker here. */
+            FSS_LOG_ERROR("db-writer", "worker.join() failed, detaching: " << e.what());
+            this->worker.detach();
+            this->worker = std::thread();
         }
     }
 }

@@ -5,6 +5,7 @@
 #include <mutex>
 #include <string>
 #include <cstring>
+#include <system_error>
 #include <thread>
 #include <vector>
 #include "fss-transport.hpp"
@@ -132,9 +133,15 @@ void flight_safety_system::transport::fss_connection::disconnect()
             {
                 this->recv_thread.join();
             }
-            catch (const std::exception &e)
+            catch (const std::system_error &e)
             {
-                FSS_LOG_ERROR("transport", "recv_thread.join() failed: " << e.what());
+                /* join() failed, so the thread is still joinable; leaving it
+                 * would make ~std::thread call std::terminate. Detach to avoid
+                 * that (leaking the thread) — we are already in a degenerate
+                 * state where the thread could not be joined. */
+                FSS_LOG_ERROR("transport", "recv_thread.join() failed, detaching: " << e.what());
+                this->recv_thread.detach();
+                this->recv_thread = std::thread();
             }
         }
     }
