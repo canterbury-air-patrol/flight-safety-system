@@ -10,6 +10,7 @@
 #error No catch header
 #endif
 
+#include <limits>
 #include <list>
 #include <memory>
 #include <string>
@@ -964,6 +965,42 @@ TEST_CASE("session: position report with out-of-range latitude is rejected")
     REQUIRE(handler.broadcasts.size() == 1);
     REQUIRE(fss_test::wait_for([&]() { return !mock.positions.empty(); }));
     REQUIRE(mock.positions.front().asset_id == asset_id);
+}
+
+TEST_CASE("session: position report with invalid longitude or non-finite coords is rejected")
+{
+    /* is_valid_coordinate also rejects out-of-range longitude and non-finite
+     * lat/long; each such report must be neither stored nor broadcast. */
+    fss_test::MockDatabase mock;
+    constexpr uint64_t asset_id = 22;
+    mock.asset_ids["craft"] = asset_id;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+
+    auto make_pos = [](double lat, double lng) -> std::shared_ptr<fss::transport::fss_message_position_report> {
+        return std::make_shared<fss::transport::fss_message_position_report>(
+            lat, lng, 0U, 0U, 0U, int16_t{0}, 0U, std::string{}, 0U, uint8_t{0}, 0U, uint8_t{0}, uint8_t{0},
+            fss::fss_current_timestamp());
+    };
+
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const double inf = std::numeric_limits<double>::infinity();
+    for (const auto &bad : {make_pos(0.0, 200.0),  // longitude > 180
+                            make_pos(0.0, -181.0), // longitude < -180
+                            make_pos(nan, 0.0),    // non-finite latitude
+                            make_pos(0.0, inf)})   // non-finite longitude
+    {
+        session->processMessage(bad);
+    }
+
+    REQUIRE(handler.broadcasts.empty());
+    REQUIRE(mock.positions.empty());
+    REQUIRE(handler.disconnects == 0);
 }
 
 TEST_CASE("session: unidentified client receives identity_required for non-identity message")
