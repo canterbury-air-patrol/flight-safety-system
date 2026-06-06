@@ -12,7 +12,7 @@
 
 class server_clients : public flight_safety_system::server::fss_client_handler {
 private:
-    std::mutex lock{};
+    mutable std::mutex lock{};
     std::list<std::shared_ptr<flight_safety_system::server::fss_client>> clients{};
     std::queue<std::shared_ptr<flight_safety_system::server::fss_client>> disconnected{};
     uint32_t total_clients{0};
@@ -36,7 +36,7 @@ public:
     server_clients(server_clients &&) = delete;
     auto operator=(server_clients &) -> server_clients & = delete;
     auto operator=(server_clients &&) -> server_clients & = delete;
-    auto getTotalClients() -> uint32_t
+    auto getTotalClients() const -> uint32_t
     {
         std::scoped_lock guard(this->lock);
         return this->total_clients;
