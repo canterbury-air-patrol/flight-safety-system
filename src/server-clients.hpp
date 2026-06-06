@@ -8,6 +8,7 @@
 #include <list>
 #include <mutex>
 #include <queue>
+#include <utility>
 #include <vector>
 
 class server_clients : public flight_safety_system::server::fss_client_handler {
@@ -60,7 +61,7 @@ public:
             std::scoped_lock guard(this->lock);
             while (!this->disconnected.empty())
             {
-                removable.push_back(this->disconnected.front());
+                removable.push_back(std::move(this->disconnected.front()));
                 this->disconnected.pop();
                 total_clients--;
             }
