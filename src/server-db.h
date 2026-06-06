@@ -1,3 +1,5 @@
+#include <stdint.h>
+
 /* Every entry point takes the name of the ECPG connection to run on, so the
  * caller can keep telemetry writes and command/config reads on separate
  * connections (see db.cpp). */
@@ -20,7 +22,7 @@ struct asset_command_s {
     unsigned long long dbid;
     double latitude;
     double longitude;
-    unsigned int altitude;
+    uint32_t altitude;
 };
 
 struct asset_command_s *db_asset_command_get(const char *conn, unsigned long long asset_id_arg);
