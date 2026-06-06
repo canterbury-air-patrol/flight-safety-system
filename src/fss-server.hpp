@@ -46,16 +46,16 @@ private:
     transport::fss_asset_command command{transport::fss_asset_command::asset_command_unknown};
     double latitude;
     double longitude;
-    uint16_t altitude;
+    uint32_t altitude;
 public:
     asset_command(uint64_t t_dbid, uint64_t t_timestamp, const std::string &t_cmd, double t_latitude,
-                  double t_longitude, uint16_t t_altitude);
+                  double t_longitude, uint32_t t_altitude);
     auto getDBId() -> uint64_t;
     auto getTimeStamp() -> uint64_t;
     auto getCommand() -> transport::fss_asset_command;
     auto getLatitude() -> double;
     auto getLongitude() -> double;
-    auto getAltitude() -> uint16_t;
+    auto getAltitude() -> uint32_t;
 };
 
 /* Pure-virtual database seam: lets ClientSession be unit-tested against
