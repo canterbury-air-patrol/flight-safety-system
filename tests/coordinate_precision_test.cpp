@@ -25,6 +25,7 @@ using flight_safety_system::transport::fss_message_position_report;
 using flight_safety_system::transport::fss_message_system_status;
 using flight_safety_system::transport::asset_command_hold;
 using flight_safety_system::transport::asset_command_rtl;
+using flight_safety_system::transport::FSS_COORD_SCALE;
 using flight_safety_system::transport::FSS_VOLTAGE_SCALE;
 
 /* Regression for todo/11-coordinate-constant.md
@@ -221,8 +222,8 @@ TEST_CASE("coord: out-of-range latitude clamps rather than wrapping")
     std::tie(lat, lng) = round_trip(large, 0.0);
     /* Must be finite and bounded by the valid coordinate space. */
     REQUIRE(std::isfinite(lat));
-    /* Clamped to INT32_MAX * FSS_COORD_SCALE ≈ 214.748 degrees. */
-    REQUIRE(lat <= 215.0);
+    /* Clamped to INT32_MAX * FSS_COORD_SCALE rather than wrapping. */
+    REQUIRE(lat <= static_cast<double>(std::numeric_limits<int32_t>::max()) * FSS_COORD_SCALE);
     REQUIRE(lat > 0.0);
 }
 
@@ -232,7 +233,7 @@ TEST_CASE("coord: large negative out-of-range latitude clamps rather than wrappi
     double lat = 0.0, lng = 0.0;
     std::tie(lat, lng) = round_trip(neg_large, 0.0);
     REQUIRE(std::isfinite(lat));
-    REQUIRE(lat >= -215.0);
+    REQUIRE(lat >= static_cast<double>(std::numeric_limits<int32_t>::min()) * FSS_COORD_SCALE);
     REQUIRE(lat < 0.0);
 }
 
