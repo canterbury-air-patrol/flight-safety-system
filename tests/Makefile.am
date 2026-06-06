@@ -30,7 +30,10 @@ all_test_SOURCES = main.cpp messages.cpp connection.cpp client.cpp \
 	../src/db-write-queue.cpp \
 	../src/db.cpp \
 	../src/server-db.c
-all_test_CFLAGS = $(ECPG_CFLAGS) -I$(top_srcdir)/src
+# Header search path belongs at the preprocessor layer so it applies to both
+# the C (server-db.c) and C++ sources, independent of CFLAGS/CXXFLAGS.
+all_test_CPPFLAGS = -I$(top_srcdir)/src
+all_test_CFLAGS = $(ECPG_CFLAGS)
 all_test_LDADD = ../src/libfss-transport.la ../src/libfss-client-ssl.la ../src/libfss.la $(JSONCPP_LIBS) $(ECPG_LIBS)
 
 all_test_SOURCES += connection-ssl.cpp
