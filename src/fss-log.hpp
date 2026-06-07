@@ -3,13 +3,16 @@
 #include <atomic>
 #include <cerrno>
 #include <chrono>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <exception>
 #include <iostream>
 #include <mutex>
 #include <sstream>
 #include <string>
+#include <utility>
 
 namespace flight_safety_system {
 namespace log {
@@ -136,3 +139,58 @@ inline void write(level lvl, const char *component, const std::string &msg)
         std::string _fss_perror_msg = (msg);                                                                           \
         FSS_LOG_ERROR((comp), _fss_perror_msg << ": " << std::strerror(_fss_saved_errno));                             \
     } while (false)
+
+namespace flight_safety_system {
+
+/* Runs a unit of work and isolates exceptions so a long-running loop is not
+ * torn down by one failure. Consecutive failures are logged with throttling
+ * (the first, then every log_interval-th) so a persistent fault does not flood
+ * the log, and a single recovery line is logged once work succeeds again. The
+ * loop is never stopped — the caller keeps running. */
+class exception_guard {
+    const char *category;
+    const char *label;
+    uint64_t consecutive_failures{0};
+    static constexpr uint64_t log_interval = 100;
+
+    void note_failure(const std::string &what)
+    {
+        this->consecutive_failures++;
+        if (this->consecutive_failures == 1 || (this->consecutive_failures % log_interval) == 0)
+        {
+            FSS_LOG_ERROR(this->category, "Exception in " << this->label << " (" << this->consecutive_failures
+                                                          << " consecutive): " << what);
+        }
+    }
+public:
+    // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
+    exception_guard(const char *t_category, const char *t_label) : category(t_category), label(t_label) {}
+    exception_guard(const exception_guard &) = delete;
+    exception_guard(exception_guard &&) = delete;
+    auto operator=(const exception_guard &) -> exception_guard & = delete;
+    auto operator=(exception_guard &&) -> exception_guard & = delete;
+
+    template<typename F> void run(F &&work)
+    {
+        try
+        {
+            std::forward<F>(work)();
+            if (this->consecutive_failures > 0)
+            {
+                FSS_LOG_INFO(this->category, this->label << " recovered after " << this->consecutive_failures
+                                                         << " consecutive failure(s)");
+                this->consecutive_failures = 0;
+            }
+        }
+        catch (const std::exception &e)
+        {
+            this->note_failure(e.what());
+        }
+        catch (...)
+        {
+            this->note_failure("unknown exception");
+        }
+    }
+};
+
+} // namespace flight_safety_system
