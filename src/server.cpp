@@ -204,7 +204,18 @@ auto main(int argc, char *argv[]) -> int
     std::thread command_poller([&clients, &dbc, &poll_running, command_poll_ms]() -> void {
         while (poll_running.load())
         {
-            clients->pollCommands(dbc.get());
+            try
+            {
+                clients->pollCommands(dbc.get());
+            }
+            catch (const std::exception &e)
+            {
+                FSS_LOG_ERROR("server", "Exception in pollCommands: " << e.what());
+            }
+            catch (...)
+            {
+                FSS_LOG_ERROR("server", "Unknown exception in pollCommands");
+            }
             std::this_thread::sleep_for(std::chrono::milliseconds(command_poll_ms));
         }
     });
@@ -225,26 +236,37 @@ auto main(int argc, char *argv[]) -> int
             }
         }
         usleep(command_poll_ms * usec_per_msec);
-        clients->sendCommand();
-        if ((tick_counter % ticks_per_sec) == 0)
+        try
         {
-            clients->cleanupRemovableClients();
-            clients->checkTimeouts();
-            auto rtt_req = std::make_shared<flight_safety_system::transport::fss_message_rtt_request>();
-            clients->sendRTTRequest(rtt_req);
-            static uint64_t last_failure_count = 0;
-            uint64_t current_failures = writer->write_failure_count();
-            if (current_failures != last_failure_count)
+            clients->sendCommand();
+            if ((tick_counter % ticks_per_sec) == 0)
             {
-                FSS_LOG_ERROR("server", "DB write failures since start: " << current_failures);
-                last_failure_count = current_failures;
+                clients->cleanupRemovableClients();
+                clients->checkTimeouts();
+                auto rtt_req = std::make_shared<flight_safety_system::transport::fss_message_rtt_request>();
+                clients->sendRTTRequest(rtt_req);
+                static uint64_t last_failure_count = 0;
+                uint64_t current_failures = writer->write_failure_count();
+                if (current_failures != last_failure_count)
+                {
+                    FSS_LOG_ERROR("server", "DB write failures since start: " << current_failures);
+                    last_failure_count = current_failures;
+                }
+                dbc->tryReconnectIfNeeded();
             }
-            dbc->tryReconnectIfNeeded();
+            if ((tick_counter % send_config_period_ticks) == 0)
+            {
+                clients->broadcastMsg(flight_safety_system::server::build_server_list_msg(dbc.get()));
+                clients->sendSMMSettings();
+            }
         }
-        if ((tick_counter % send_config_period_ticks) == 0)
+        catch (const std::exception &e)
         {
-            clients->broadcastMsg(flight_safety_system::server::build_server_list_msg(dbc.get()));
-            clients->sendSMMSettings();
+            FSS_LOG_ERROR("server", "Exception in main loop tick: " << e.what());
+        }
+        catch (...)
+        {
+            FSS_LOG_ERROR("server", "Unknown exception in main loop tick");
         }
         tick_counter++;
     }
