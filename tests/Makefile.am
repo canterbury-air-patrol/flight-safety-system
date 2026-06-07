@@ -26,6 +26,7 @@ all_test_SOURCES = main.cpp messages.cpp connection.cpp client.cpp \
 	secure_string_test.cpp \
 	rate_limiter_test.cpp \
 	server_clients_test.cpp \
+	exception_isolation_test.cpp \
 	../src/client_session.cpp \
 	../src/db-write-queue.cpp \
 	../src/db.cpp \

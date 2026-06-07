@@ -181,7 +181,18 @@ void flight_safety_system::transport::fss_connection::processMessages()
                 std::scoped_lock lock_holder(this->msg_lock);
                 if (this->handler != nullptr)
                 {
-                    this->handler->processMessage(msg);
+                    try
+                    {
+                        this->handler->processMessage(msg);
+                    }
+                    catch (const std::exception &e)
+                    {
+                        FSS_LOG_ERROR("transport", "Exception in processMessage (closed): " << e.what());
+                    }
+                    catch (...)
+                    {
+                        FSS_LOG_ERROR("transport", "Unknown exception in processMessage (closed)");
+                    }
                 }
                 else
                 {
@@ -194,7 +205,18 @@ void flight_safety_system::transport::fss_connection::processMessages()
             std::scoped_lock lock_holder(this->msg_lock);
             if (this->handler != nullptr)
             {
-                this->handler->processMessage(msg);
+                try
+                {
+                    this->handler->processMessage(msg);
+                }
+                catch (const std::exception &e)
+                {
+                    FSS_LOG_ERROR("transport", "Exception in processMessage: " << e.what());
+                }
+                catch (...)
+                {
+                    FSS_LOG_ERROR("transport", "Unknown exception in processMessage");
+                }
             }
             else
             {
@@ -529,8 +551,19 @@ void flight_safety_system::transport::fss_listen::processMessages()
         set_tcp_keepalive(newfd);
         if (this->cb != nullptr)
         {
-            auto conn = this->newConnection(newfd);
-            this->cb(conn);
+            try
+            {
+                auto conn = this->newConnection(newfd);
+                this->cb(conn);
+            }
+            catch (const std::exception &e)
+            {
+                FSS_LOG_ERROR("transport", "Exception handling new connection: " << e.what());
+            }
+            catch (...)
+            {
+                FSS_LOG_ERROR("transport", "Unknown exception handling new connection");
+            }
         }
         else
         {
