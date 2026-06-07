@@ -226,7 +226,12 @@ auto main(int argc, char *argv[]) -> int
              * already-established sessions whose certs are now revoked. */
             if (!crl_file.empty())
             {
-                clients->disconnectRevokedClients(crl_file);
+                auto disconnected = clients->disconnectRevokedClients(crl_file);
+                FSS_LOG_INFO("server", "CRL reload complete: disconnected " << disconnected << " revoked session(s)");
+            }
+            else
+            {
+                FSS_LOG_INFO("server", "CRL reload: no CRL file configured; nothing to do");
             }
         }
         usleep(command_poll_ms * usec_per_msec);
