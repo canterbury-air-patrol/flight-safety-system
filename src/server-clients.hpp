@@ -187,13 +187,14 @@ public:
             client->sendCommand();
         }
     };
-    void disconnectRevokedClients(const std::string &crl_file)
+    auto disconnectRevokedClients(const std::string &crl_file) -> std::size_t
     {
         std::vector<std::shared_ptr<flight_safety_system::server::fss_client>> snapshot;
         {
             std::scoped_lock guard(this->lock);
             std::copy(this->clients.begin(), this->clients.end(), std::back_inserter(snapshot));
         }
+        std::size_t disconnected_count = 0;
         for (const auto &client : snapshot)
         {
             auto conn = client->getConnection();
@@ -202,7 +203,9 @@ public:
                 FSS_LOG_WARN("server", "Disconnecting client with revoked certificate after CRL reload");
                 client->disconnect();
                 this->clientDisconnected(client.get());
+                disconnected_count++;
             }
         }
+        return disconnected_count;
     };
 };
