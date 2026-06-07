@@ -187,7 +187,7 @@ void fss::server::fss_client::sendCommand()
     {
         return;
     }
-    uint64_t ts = fss_current_timestamp();
+    uint64_t ts = this->clock->now_ms();
     auto ac = this->pending_command;
     constexpr int timeout_time = 10 * sec_to_msec;
     if (ac != nullptr && (ac->getDBId() != this->last_command_dbid || ts > (this->last_command_send_ts + timeout_time)))
@@ -542,7 +542,7 @@ void fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss
             break;
             case fss::transport::message_type_rtt_response: {
                 std::shared_ptr<fss_client_rtt> rtt_req = nullptr;
-                uint64_t current_ts = fss_current_timestamp();
+                uint64_t current_ts = this->clock->now_ms();
                 auto rtt_resp_msg = std::dynamic_pointer_cast<fss::transport::fss_message_rtt_response>(msg);
                 if (rtt_resp_msg != nullptr)
                 {
@@ -575,7 +575,7 @@ void fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss
                 uint64_t report_ts = msg->getTimeStamp();
                 if (report_ts > 0)
                 {
-                    uint64_t now = this->clock->now_ms();
+                    uint64_t now = fss::fss_current_timestamp();
                     if (now > report_ts + staleness_limit_ms)
                     {
                         FSS_LOG_WARN("server", "Stale position report (age=" << (now - report_ts) << "ms), discarding");

@@ -169,7 +169,7 @@ private:
     IDatabase *dbc;
     std::shared_ptr<db_write_queue> writer;
     fss_client_handler *client_handler;
-    std::shared_ptr<IClock> clock{std::make_shared<WallClock>()};
+    std::shared_ptr<IClock> clock{std::make_shared<MonotonicClock>()};
     rate_limiter msg_rate{100, 20};
     uint64_t rate_limit_rejects{0};
     uint64_t last_rate_limit_log_ms{0};

@@ -711,7 +711,8 @@ TEST_CASE("session: v1 client skips seq checking")
 TEST_CASE("session: stale position report is discarded")
 {
     /* m7.1 phase 3: position reports with a timestamp older than 30 s must
-     * be discarded. The test uses a controllable clock so no real time passes. */
+     * be discarded. Staleness compares against real wall-clock time
+     * (fss_current_timestamp), so timestamps are built from wall time here. */
     fss_test::MockDatabase mock;
     mock.asset_ids["craft"] = 1;
 
@@ -720,7 +721,7 @@ TEST_CASE("session: stale position report is discarded")
     NullClientHandler handler;
 
     auto clock = std::make_shared<FakeClock>();
-    clock->t = 100000; // arbitrary "now" in ms
+    clock->t = 100000; // arbitrary "now" in ms — still injected (harmless)
 
     auto writer = make_mock_writer(mock);
     auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
@@ -732,12 +733,12 @@ TEST_CASE("session: stale position report is discarded")
 
     /* Position with a timestamp 60 s in the past — stale. */
     constexpr uint64_t sixty_seconds_ms = 60000;
-    auto stale = make_position_msg(clock->t - sixty_seconds_ms);
+    auto stale = make_position_msg(fss::fss_current_timestamp() - sixty_seconds_ms);
     session->processMessage(stale);
     REQUIRE(handler.broadcasts.empty());
 
     /* Position with a current timestamp — fresh. */
-    auto fresh = make_position_msg(clock->t);
+    auto fresh = make_position_msg(fss::fss_current_timestamp());
     session->processMessage(fresh);
     REQUIRE(handler.broadcasts.size() == 1);
 }
@@ -853,6 +854,16 @@ TEST_CASE("session: sendSMMSettings sends smm_settings message when db returns s
     session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
 
     REQUIRE(find_sent<fss::transport::fss_message_smm_settings>(conn->sent) != nullptr);
+}
+
+TEST_CASE("MonotonicClock: now_ms is non-decreasing")
+{
+    /* Sanity check: two back-to-back calls must return a non-decreasing
+     * value — CLOCK_MONOTONIC never goes backward. */
+    fss::MonotonicClock mc;
+    uint64_t t1 = mc.now_ms();
+    uint64_t t2 = mc.now_ms();
+    REQUIRE(t2 >= t1);
 }
 
 TEST_CASE("session: system_status message is forwarded to db writer")

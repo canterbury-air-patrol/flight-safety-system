@@ -1,5 +1,6 @@
 #include "fss.hpp"
 
+#include <ctime>
 #include <sys/time.h>
 
 auto flight_safety_system::fss_current_timestamp() -> uint64_t
@@ -14,4 +15,13 @@ auto flight_safety_system::fss_current_timestamp() -> uint64_t
 auto flight_safety_system::WallClock::now_ms() const -> uint64_t
 {
     return flight_safety_system::fss_current_timestamp();
+}
+
+auto flight_safety_system::MonotonicClock::now_ms() const -> uint64_t
+{
+    struct timespec ts = {};
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    constexpr uint64_t sec_to_msec = 1000;
+    constexpr uint64_t nsec_to_msec = 1000000;
+    return static_cast<uint64_t>(ts.tv_sec) * sec_to_msec + static_cast<uint64_t>(ts.tv_nsec) / nsec_to_msec;
 }
