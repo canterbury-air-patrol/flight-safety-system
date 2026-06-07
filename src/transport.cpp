@@ -165,6 +165,7 @@ auto flight_safety_system::transport::fss_connection::getMessageId() -> uint64_t
 void flight_safety_system::transport::fss_connection::processMessages()
 {
     this->run.store(true);
+    flight_safety_system::exception_guard handler_guard("transport", "processMessage");
     while (this->run.load())
     {
         auto msg = this->recvMsg();
@@ -181,18 +182,7 @@ void flight_safety_system::transport::fss_connection::processMessages()
                 std::scoped_lock lock_holder(this->msg_lock);
                 if (this->handler != nullptr)
                 {
-                    try
-                    {
-                        this->handler->processMessage(msg);
-                    }
-                    catch (const std::exception &e)
-                    {
-                        FSS_LOG_ERROR("transport", "Exception in processMessage (closed): " << e.what());
-                    }
-                    catch (...)
-                    {
-                        FSS_LOG_ERROR("transport", "Unknown exception in processMessage (closed)");
-                    }
+                    handler_guard.run([&]() -> void { this->handler->processMessage(msg); });
                 }
                 else
                 {
@@ -205,18 +195,7 @@ void flight_safety_system::transport::fss_connection::processMessages()
             std::scoped_lock lock_holder(this->msg_lock);
             if (this->handler != nullptr)
             {
-                try
-                {
-                    this->handler->processMessage(msg);
-                }
-                catch (const std::exception &e)
-                {
-                    FSS_LOG_ERROR("transport", "Exception in processMessage: " << e.what());
-                }
-                catch (...)
-                {
-                    FSS_LOG_ERROR("transport", "Unknown exception in processMessage");
-                }
+                handler_guard.run([&]() -> void { this->handler->processMessage(msg); });
             }
             else
             {
@@ -517,6 +496,7 @@ static void listen_thread(flight_safety_system::transport::fss_listen *listen)
 
 void flight_safety_system::transport::fss_listen::processMessages()
 {
+    flight_safety_system::exception_guard accept_guard("transport", "new connection");
     while (this->getFd() >= 0)
     {
         struct sockaddr_storage sa = {};
@@ -551,19 +531,10 @@ void flight_safety_system::transport::fss_listen::processMessages()
         set_tcp_keepalive(newfd);
         if (this->cb != nullptr)
         {
-            try
-            {
+            accept_guard.run([&]() -> void {
                 auto conn = this->newConnection(newfd);
                 this->cb(conn);
-            }
-            catch (const std::exception &e)
-            {
-                FSS_LOG_ERROR("transport", "Exception handling new connection: " << e.what());
-            }
-            catch (...)
-            {
-                FSS_LOG_ERROR("transport", "Unknown exception handling new connection");
-            }
+            });
         }
         else
         {

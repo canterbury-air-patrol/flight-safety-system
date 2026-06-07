@@ -202,25 +202,16 @@ auto main(int argc, char *argv[]) -> int
     constexpr int send_config_period_ticks = 15 * ticks_per_sec;
     std::atomic<bool> poll_running{true};
     std::thread command_poller([&clients, &dbc, &poll_running, command_poll_ms]() -> void {
+        flight_safety_system::exception_guard poll_guard("server", "pollCommands");
         while (poll_running.load())
         {
-            try
-            {
-                clients->pollCommands(dbc.get());
-            }
-            catch (const std::exception &e)
-            {
-                FSS_LOG_ERROR("server", "Exception in pollCommands: " << e.what());
-            }
-            catch (...)
-            {
-                FSS_LOG_ERROR("server", "Unknown exception in pollCommands");
-            }
+            poll_guard.run([&]() -> void { clients->pollCommands(dbc.get()); });
             std::this_thread::sleep_for(std::chrono::milliseconds(command_poll_ms));
         }
     });
 
     uint64_t tick_counter = 0;
+    flight_safety_system::exception_guard tick_guard("server", "main loop tick");
     while (running == 1)
     {
         if (reload_crl == 1)
@@ -236,8 +227,7 @@ auto main(int argc, char *argv[]) -> int
             }
         }
         usleep(command_poll_ms * usec_per_msec);
-        try
-        {
+        tick_guard.run([&]() -> void {
             clients->sendCommand();
             if ((tick_counter % ticks_per_sec) == 0)
             {
@@ -259,15 +249,7 @@ auto main(int argc, char *argv[]) -> int
                 clients->broadcastMsg(flight_safety_system::server::build_server_list_msg(dbc.get()));
                 clients->sendSMMSettings();
             }
-        }
-        catch (const std::exception &e)
-        {
-            FSS_LOG_ERROR("server", "Exception in main loop tick: " << e.what());
-        }
-        catch (...)
-        {
-            FSS_LOG_ERROR("server", "Unknown exception in main loop tick");
-        }
+        });
         tick_counter++;
     }
 
