@@ -18,16 +18,26 @@ auto fss_current_timestamp() -> uint64_t;
 class IClock {
 public:
     IClock() = default;
-    IClock(const IClock&) = delete;
-    IClock(IClock&&) = delete;
-    auto operator=(const IClock&) -> IClock& = delete;
-    auto operator=(IClock&&) -> IClock& = delete;
+    IClock(const IClock &) = delete;
+    IClock(IClock &&) = delete;
+    auto operator=(const IClock &) -> IClock & = delete;
+    auto operator=(IClock &&) -> IClock & = delete;
     virtual ~IClock() = default;
     virtual auto now_ms() const -> uint64_t = 0;
 };
 
 class WallClock : public IClock {
 public:
+    auto now_ms() const -> uint64_t override;
+};
+
+class MonotonicClock : public IClock {
+public:
+    MonotonicClock() = default;
+    MonotonicClock(const MonotonicClock &) = delete;
+    MonotonicClock(MonotonicClock &&) = delete;
+    auto operator=(const MonotonicClock &) -> MonotonicClock & = delete;
+    auto operator=(MonotonicClock &&) -> MonotonicClock & = delete;
     auto now_ms() const -> uint64_t override;
 };
 } // namespace flight_safety_system

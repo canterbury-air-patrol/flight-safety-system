@@ -75,7 +75,7 @@ private:
     uint64_t retry_delay{retry_delay_start};
     uint64_t effective_delay{retry_delay_start};
     std::mt19937 rng{std::random_device{}()};
-    std::shared_ptr<flight_safety_system::IClock> clock{std::make_shared<flight_safety_system::WallClock>()};
+    std::shared_ptr<flight_safety_system::IClock> clock{std::make_shared<flight_safety_system::MonotonicClock>()};
     std::atomic<bool> liveness_active{false};
     std::atomic<uint64_t> last_message_received_time{0};
     uint64_t server_timeout_ms{30000};
