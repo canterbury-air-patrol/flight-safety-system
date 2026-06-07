@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.0.1] - 2026-06-08
 
 ### Fixed
-- debian packages installing the correct headers
+- Debian packages now install the correct headers
 
 ## [1.0.0] - 2026-05-16
 
