@@ -217,10 +217,13 @@ auto main(int argc, char *argv[]) -> int
         if (reload_crl == 1)
         {
             reload_crl = 0;
-            FSS_LOG_INFO("server", "SIGHUP received — reloading CRL, rebuilding listener");
-            listen.reset();
-            listen = std::make_shared<flight_safety_system::transport_ssl::fss_listen>(
-                config["port"].asInt(), connect_cb, ca_public_key, server_private_key, server_public_key, crl_file);
+            FSS_LOG_INFO("server", "SIGHUP received — reloading CRL");
+            /* The listener is not rebuilt: each new connection loads the CRL
+             * file fresh during its TLS handshake (see setupSession), so new
+             * connections already honour an updated CRL. Tearing down and
+             * rebinding the listener here only risks a window with no listener
+             * (or, on a failed rebind, a dead listener). We only need to drop
+             * already-established sessions whose certs are now revoked. */
             if (!crl_file.empty())
             {
                 clients->disconnectRevokedClients(crl_file);
