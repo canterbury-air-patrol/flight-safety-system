@@ -33,11 +33,6 @@ public:
 
 class MonotonicClock : public IClock {
 public:
-    MonotonicClock() = default;
-    MonotonicClock(const MonotonicClock &) = delete;
-    MonotonicClock(MonotonicClock &&) = delete;
-    auto operator=(const MonotonicClock &) -> MonotonicClock & = delete;
-    auto operator=(MonotonicClock &&) -> MonotonicClock & = delete;
     auto now_ms() const -> uint64_t override;
 };
 } // namespace flight_safety_system
