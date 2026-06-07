@@ -29,8 +29,11 @@ all_test_SOURCES = main.cpp messages.cpp connection.cpp client.cpp \
 	exception_isolation_test.cpp \
 	../src/client_session.cpp \
 	../src/db-write-queue.cpp \
-	../src/db.cpp \
-	../src/server-db.c
+	../src/db.cpp
+# server-db.c is generated from server-db.pgc by ecpg (see src/Makefile.am).
+# It must be nodist_ so `make dist` distributes the .pgc source, not the
+# generated .c, and doesn't demand a build rule that only exists in src/.
+nodist_all_test_SOURCES = ../src/server-db.c
 # Header search path belongs at the preprocessor layer so it applies to both
 # the C (server-db.c) and C++ sources, independent of CFLAGS/CXXFLAGS.
 all_test_CPPFLAGS = -I$(top_srcdir)/src
