@@ -1,3 +1,4 @@
 usr/lib/*/libfss-transport.*
 usr/lib/*/pkgconfig/fss-transport.pc
 usr/include/fss-transport.hpp
+usr/include/secure-string.hpp
