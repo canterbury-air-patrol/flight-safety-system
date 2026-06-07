@@ -4,7 +4,10 @@ AM_CXXFLAGS = -pthread -fPIC -std=c++17 -I. -Werror -Wall -Wshadow -Wunused -Wnu
 
 bin_PROGRAMS =
 
-EXTRA_DIST=client.json server.json
+# fss-server.service.in is distributed unconditionally: a source template must
+# ship in every tarball regardless of whether the host that ran `make dist`
+# detected systemd, so the tarball can be rebuilt in a systemd-enabled config.
+EXTRA_DIST=client.json server.json fss-server.service.in
 
 if FAKE_CLIENT
 bin_PROGRAMS += fss-fake-client
@@ -17,10 +20,9 @@ endif
 if HAVE_SYSTEMD
 if SERVER
 # fss-server.service is generated from the .in template: install it but do not
-# distribute it (nodist_). The template itself ships in the tarball via
-# EXTRA_DIST and must never be installed into the unit directory.
+# distribute it (nodist_). The template itself ships via EXTRA_DIST above and
+# must never be installed into the unit directory.
 nodist_systemdsystemunit_DATA = fss-server.service
-EXTRA_DIST += fss-server.service.in
 CLEANFILES = fss-server.service
 
 SERVICE_SUBS = \
