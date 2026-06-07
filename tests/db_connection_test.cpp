@@ -31,16 +31,12 @@ TEST_CASE("db_connection: invalid host reports not connected")
 
 namespace {
 
-/* SKIP the test if TEST_DB_HOST is unset; otherwise build a db_connection from
- * the TEST_DB_* env vars and REQUIRE it has connected.  Returns a connection
- * the caller can use directly — no further SKIP/isConnected boilerplate. */
-auto live_db_or_skip() -> std::unique_ptr<flight_safety_system::server::db_connection>
+/* Build a db_connection from the TEST_DB_* env vars and REQUIRE it has
+ * connected.  Precondition: TEST_DB_HOST is set — call sites guard that with
+ * LIVE_DB_OR_SKIP below, which skips the test when no database is configured. */
+auto make_live_db() -> std::unique_ptr<flight_safety_system::server::db_connection>
 {
     const char *host = std::getenv("TEST_DB_HOST");
-    if (host == nullptr)
-    {
-        SKIP("TEST_DB_HOST not set");
-    }
     int port = 5432;
     if (const char *p = std::getenv("TEST_DB_PORT"))
     {
@@ -58,21 +54,44 @@ auto live_db_or_skip() -> std::unique_ptr<flight_safety_system::server::db_conne
 
 } // namespace
 
+/* Catch2's SKIP() macro arrived in 3.3; distro packages can be older (Debian
+ * bookworm ships Catch2 2.x).  Where SKIP is missing, fall back to marking the
+ * test passed and bailing out of the current TEST_CASE. */
+#ifndef SKIP
+#define SKIP(msg)                                                                                                      \
+    do                                                                                                                 \
+    {                                                                                                                  \
+        SUCCEED(msg);                                                                                                  \
+        return;                                                                                                        \
+    } while (0)
+#endif
+
+/* Skip the current TEST_CASE when no live database is configured; otherwise
+ * bind `name` to a freshly connected db_connection.  `name` is a declarator,
+ * so it cannot be parenthesised — hence the bugprone-macro-parentheses waiver. */
+#define LIVE_DB_OR_SKIP(name)                                                                                          \
+    if (std::getenv("TEST_DB_HOST") == nullptr)                                                                        \
+    {                                                                                                                  \
+        SKIP("TEST_DB_HOST not set");                                                                                  \
+    }                                                                                                                  \
+    auto name = make_live_db() // NOLINT(bugprone-macro-parentheses)
+
 TEST_CASE("db_connection: connects to live database")
 {
-    /* live_db_or_skip() asserts isConnected before returning. */
-    (void)live_db_or_skip();
+    /* make_live_db() asserts isConnected before returning. */
+    LIVE_DB_OR_SKIP(dbc);
+    (void)dbc;
 }
 
 TEST_CASE("db_connection: getAssetId returns non-zero for pre-inserted asset")
 {
-    auto dbc = live_db_or_skip();
+    LIVE_DB_OR_SKIP(dbc);
     REQUIRE(dbc->getAssetId("test-asset") != 0);
 }
 
 TEST_CASE("db_connection: recordRtt writes a row without error")
 {
-    auto dbc = live_db_or_skip();
+    LIVE_DB_OR_SKIP(dbc);
     auto asset_id = dbc->getAssetId("test-asset");
     REQUIRE(asset_id != 0);
     dbc->recordRtt(asset_id, uint64_t{42});
@@ -80,7 +99,7 @@ TEST_CASE("db_connection: recordRtt writes a row without error")
 
 TEST_CASE("db_connection: recordStatus writes a row without error")
 {
-    auto dbc = live_db_or_skip();
+    LIVE_DB_OR_SKIP(dbc);
     auto asset_id = dbc->getAssetId("test-asset");
     REQUIRE(asset_id != 0);
     dbc->recordStatus(asset_id, uint8_t{80}, uint32_t{1000}, 12.4);
@@ -88,7 +107,7 @@ TEST_CASE("db_connection: recordStatus writes a row without error")
 
 TEST_CASE("db_connection: recordSearchStatus writes a row without error")
 {
-    auto dbc = live_db_or_skip();
+    LIVE_DB_OR_SKIP(dbc);
     auto asset_id = dbc->getAssetId("test-asset");
     REQUIRE(asset_id != 0);
     dbc->recordSearchStatus(asset_id, uint64_t{1}, uint64_t{50}, uint64_t{100});
@@ -96,7 +115,7 @@ TEST_CASE("db_connection: recordSearchStatus writes a row without error")
 
 TEST_CASE("db_connection: recordPosition with valid altitude inserts row")
 {
-    auto dbc = live_db_or_skip();
+    LIVE_DB_OR_SKIP(dbc);
     auto asset_id = dbc->getAssetId("test-asset");
     REQUIRE(asset_id != 0);
     dbc->recordPosition(asset_id, -43.5, 172.6, uint32_t{100});
@@ -104,7 +123,7 @@ TEST_CASE("db_connection: recordPosition with valid altitude inserts row")
 
 TEST_CASE("db_connection: recordPosition with overflow altitude is discarded")
 {
-    auto dbc = live_db_or_skip();
+    LIVE_DB_OR_SKIP(dbc);
     auto asset_id = dbc->getAssetId("test-asset");
     REQUIRE(asset_id != 0);
     constexpr auto huge_alt = static_cast<uint32_t>(std::numeric_limits<int>::max()) + uint32_t{1};
@@ -113,7 +132,7 @@ TEST_CASE("db_connection: recordPosition with overflow altitude is discarded")
 
 TEST_CASE("db_connection: getSmmSettings returns non-null for configured asset")
 {
-    auto dbc = live_db_or_skip();
+    LIVE_DB_OR_SKIP(dbc);
     auto asset_id = dbc->getAssetId("test-asset");
     REQUIRE(asset_id != 0);
     auto settings = dbc->getSmmSettings(asset_id);
@@ -125,13 +144,13 @@ TEST_CASE("db_connection: getSmmSettings returns non-null for configured asset")
 
 TEST_CASE("db_connection: getSmmSettings returns null for asset with no config")
 {
-    auto dbc = live_db_or_skip();
+    LIVE_DB_OR_SKIP(dbc);
     REQUIRE(dbc->getSmmSettings(uint64_t{999999}) == nullptr);
 }
 
 TEST_CASE("db_connection: getActiveServers returns pre-configured server")
 {
-    auto dbc = live_db_or_skip();
+    LIVE_DB_OR_SKIP(dbc);
     auto servers = dbc->getActiveServers();
     REQUIRE_FALSE(servers.empty());
     bool found = false;
@@ -147,14 +166,14 @@ TEST_CASE("db_connection: getActiveServers returns pre-configured server")
 
 TEST_CASE("db_connection: tryReconnectIfNeeded returns when connection is healthy")
 {
-    auto dbc = live_db_or_skip();
+    LIVE_DB_OR_SKIP(dbc);
     dbc->tryReconnectIfNeeded();
     REQUIRE(dbc->isConnected());
 }
 
 TEST_CASE("db_connection: tryReconnectIfNeeded reconnects after underlying disconnect")
 {
-    auto dbc = live_db_or_skip();
+    LIVE_DB_OR_SKIP(dbc);
     /* Force both underlying ECPG connections closed so db_ping() fails on
      * each, triggering the reconnect branch in tryReconnectIfNeeded(). */
     db_disconnect(flight_safety_system::server::db_connection::read_conn_name);
@@ -168,7 +187,7 @@ TEST_CASE("db_connection: tryReconnectIfNeeded restores a single dropped connect
     /* The read and write paths use independent ECPG connections. If only one
      * is lost, tryReconnectIfNeeded must restore it — and operations on that
      * connection must work again — while the other is left untouched. */
-    auto dbc = live_db_or_skip();
+    LIVE_DB_OR_SKIP(dbc);
     auto asset_id = dbc->getAssetId("test-asset");
     REQUIRE(asset_id != 0);
 
@@ -199,7 +218,7 @@ TEST_CASE("db_connection: getCommand returns non-null for asset with pending com
 {
     /* The test fixture inserts an RTL command for test-asset before the test
      * suite runs.  getCommand() must find it and return a non-null result. */
-    auto dbc = live_db_or_skip();
+    LIVE_DB_OR_SKIP(dbc);
     auto asset_id = dbc->getAssetId("test-asset");
     REQUIRE(asset_id != 0);
     auto cmd = dbc->getCommand(asset_id);
