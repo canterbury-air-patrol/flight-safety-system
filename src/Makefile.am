@@ -45,6 +45,11 @@ pkgconfig_DATA += fss-client-ssl.pc
 .pgc.c:
 	ecpg -o $@ $< $(ECPGFLAGS)
 
+# server-db.c is generated from server-db.pgc, by either the server build or
+# the tests (when the server is disabled). Clean it unconditionally so it is
+# never left behind after distclean, which `make distcheck` rejects.
+CLEANFILES = server-db.c
+
 if SERVER
 sbin_PROGRAMS += fss-server
 
@@ -56,6 +61,5 @@ fss_server_LDADD += libfss-transport-ssl.la
 else
 if ENABLE_TESTS
 BUILT_SOURCES = server-db.c
-CLEANFILES = server-db.c
 endif
 endif
