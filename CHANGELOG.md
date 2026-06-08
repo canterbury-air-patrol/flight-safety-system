@@ -54,8 +54,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ~25 s instead of the OS default of ~127 s.
 - **Postgres port configurable** — `postgres.port` is now an explicit field in
   `server.json`; defaults to 5432 if absent.
+- **Structured logging framework** — a new `fss-log.hpp` provides levelled,
+  structured logging used across the server and client.
+- **Bounded message queues** — outbound queues are capped with a drop-oldest
+  policy so a slow or stalled peer cannot grow memory without limit.
 
 ### Changed
+
+- **C++ standard raised from C++14 to C++17** — the build now requires a
+  C++17-capable compiler.
 
 - **DB reconnect on connection loss** — `db_connection` detects a dropped
   Postgres connection on each main-loop tick and reconnects automatically,
@@ -79,6 +86,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   discarded rather than sent.
 - **DB main-loop invariant documented and enforced** — synchronous DB reads are
   banned from the main loop; all reads go through the background command poller.
+- **Reconnect backoff hardened** — client reconnect backoff now adds jitter and
+  is clamped to its cap instead of overshooting.
 
 ### Fixed
 
@@ -95,6 +104,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - All cppcheck findings eliminated; `.cppcheck-suppress` file removed.
 - Various clang-tidy findings resolved (narrowing casts, C-style casts,
   `reinterpret_cast` via `void*` helpers, `emplace_back`, scoped locks, etc.).
+- Liveness and timeout timing now use a monotonic clock, so wall-clock
+  adjustments no longer disturb keepalive and reconnect timing.
+- `send()` is retried on `EINTR` instead of dropping the connection, and
+  `accept()` backs off on fd/memory exhaustion rather than spinning.
+- `SO_REUSEADDR` set on the listening socket so the server can restart
+  immediately without waiting for the socket to leave `TIME_WAIT`.
+- Out-of-range inputs rejected — invalid position reports, GOTO commands with
+  out-of-range coordinates, and out-of-range asset-command bytes are discarded,
+  and coordinate/voltage packing guards against NaN and overflow.
+- `tslc` field now serialized correctly in position reports.
 
 ### CI / Infrastructure
 
@@ -130,5 +149,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.12.3] - 2025-11-07
 
+[1.0.1]: https://github.com/canterbury-air-patrol/flight-safety-system/compare/1.0.0...1.0.1
 [1.0.0]: https://github.com/canterbury-air-patrol/flight-safety-system/compare/0.12.3...1.0.0
 [0.12.3]: https://github.com/canterbury-air-patrol/flight-safety-system/releases/tag/0.12.3
