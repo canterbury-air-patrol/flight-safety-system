@@ -22,9 +22,19 @@
 #include "fss-transport.hpp"
 
 using flight_safety_system::transport::fss_connection;
+using flight_safety_system::transport::fss_message_cb;
 using flight_safety_system::transport::fss_message_identity;
 
 namespace {
+
+/* Minimal fss_message_cb subclass for concurrency tests.  Exposes the
+ * protected writer methods so the test threads can exercise them directly. */
+struct MinimalCb : fss_message_cb {
+    explicit MinimalCb(std::shared_ptr<fss_connection> t_conn = nullptr) : fss_message_cb(std::move(t_conn)) {}
+    void processMessage(std::shared_ptr<flight_safety_system::transport::fss_message>) override {}
+    void testSetConnection(std::shared_ptr<fss_connection> c) { setConnection(std::move(c)); }
+    void testClearConnection() { clearConnection(); }
+};
 
 /* Build a Unix socketpair and return both fds; close the second so the
  * first observes EOF and the recv thread exits naturally. */
@@ -102,4 +112,44 @@ TEST_CASE("tsan: concurrent sendMsg + disconnect on a connected pair")
     REQUIRE(send_successes.load() <= send_attempts.load());
 
     ::close(fds[1]);
+}
+
+/* Regression for the thread-safety fix on fss_message_cb::conn: one thread
+ * repeatedly writes conn via setConnection/clearConnection while another reads
+ * it via sendMsg, getConnection, and connected.  TSan must not report a race. */
+TEST_CASE("tsan: concurrent setConnection/clearConnection and sendMsg/getConnection")
+{
+    auto conn = std::make_shared<fss_connection>();
+    MinimalCb cb{conn};
+    auto msg = std::make_shared<fss_message_identity>("tsan-cb-racer");
+
+    constexpr int iterations = 5000;
+    std::atomic<bool> start{false};
+
+    std::thread writer([&]() {
+        while (!start.load())
+        {
+        }
+        for (int i = 0; i < iterations; ++i)
+        {
+            cb.testSetConnection(conn);
+            cb.testClearConnection();
+        }
+    });
+
+    std::thread reader([&]() {
+        while (!start.load())
+        {
+        }
+        for (int i = 0; i < iterations; ++i)
+        {
+            cb.sendMsg(msg);
+            cb.getConnection();
+            cb.connected();
+        }
+    });
+
+    start.store(true);
+    writer.join();
+    reader.join();
 }
