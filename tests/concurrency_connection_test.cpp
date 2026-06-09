@@ -127,8 +127,9 @@ TEST_CASE("tsan: concurrent setConnection/clearConnection and sendMsg/getConnect
     std::atomic<bool> start{false};
 
     std::thread writer([&]() {
-        while (!start.load())
+        while (!start.load(std::memory_order_acquire))
         {
+            std::this_thread::yield();
         }
         for (int i = 0; i < iterations; ++i)
         {
@@ -138,8 +139,9 @@ TEST_CASE("tsan: concurrent setConnection/clearConnection and sendMsg/getConnect
     });
 
     std::thread reader([&]() {
-        while (!start.load())
+        while (!start.load(std::memory_order_acquire))
         {
+            std::this_thread::yield();
         }
         for (int i = 0; i < iterations; ++i)
         {
@@ -149,7 +151,7 @@ TEST_CASE("tsan: concurrent setConnection/clearConnection and sendMsg/getConnect
         }
     });
 
-    start.store(true);
+    start.store(true, std::memory_order_release);
     writer.join();
     reader.join();
 }
