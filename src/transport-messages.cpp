@@ -285,15 +285,21 @@ flight_safety_system::transport::fss_message_cb::fss_message_cb(std::shared_ptr<
 {
 }
 
-flight_safety_system::transport::fss_message_cb::fss_message_cb(const fss_message_cb &from) = default;
+flight_safety_system::transport::fss_message_cb::fss_message_cb(const fss_message_cb &from) : conn(nullptr)
+{
+    const std::scoped_lock lock(from.conn_lock);
+    this->conn = from.conn;
+}
 
 void flight_safety_system::transport::fss_message_cb::setConnection(std::shared_ptr<fss_connection> t_conn)
 {
+    const std::scoped_lock lock(this->conn_lock);
     this->conn = std::move(t_conn);
 }
 
 void flight_safety_system::transport::fss_message_cb::clearConnection()
 {
+    const std::scoped_lock lock(this->conn_lock);
     this->conn = nullptr;
 }
 
@@ -302,6 +308,7 @@ auto flight_safety_system::transport::fss_message_cb::operator=(
 {
     if (this != &other)
     {
+        const std::scoped_lock lock(this->conn_lock, other.conn_lock);
         this->conn = other.conn;
     }
     return *this;
@@ -309,29 +316,37 @@ auto flight_safety_system::transport::fss_message_cb::operator=(
 
 auto flight_safety_system::transport::fss_message_cb::getConnection() -> std::shared_ptr<fss_connection>
 {
+    const std::scoped_lock lock(this->conn_lock);
     return this->conn;
 }
+
 auto flight_safety_system::transport::fss_message_cb::connected() -> bool
 {
+    const std::scoped_lock lock(this->conn_lock);
     return this->conn != nullptr;
 }
 
 void flight_safety_system::transport::fss_message_cb::disconnect()
 {
-    if (this->conn != nullptr)
+    std::shared_ptr<fss_connection> c;
     {
-        this->conn->disconnect();
-        this->conn = nullptr;
+        const std::scoped_lock lock(this->conn_lock);
+        c = std::move(this->conn);
+    }
+    if (c)
+    {
+        c->disconnect();
     }
 }
 
 auto flight_safety_system::transport::fss_message_cb::sendMsg(const std::shared_ptr<fss_message> &msg) -> bool
 {
-    if (this->conn != nullptr)
+    std::shared_ptr<fss_connection> c;
     {
-        return this->conn->sendMsg(msg);
+        const std::scoped_lock lock(this->conn_lock);
+        c = this->conn;
     }
-    return false;
+    return c ? c->sendMsg(msg) : false;
 }
 
 flight_safety_system::transport::fss_message::fss_message(fss_message_type t_type) : id(0), type(t_type) {}

@@ -590,6 +590,8 @@ auto flight_safety_system::transport::fss_listen::startListening() -> bool
 
 flight_safety_system::transport::fss_message_cb::~fss_message_cb()
 {
+    // No lock: destructor runs only when no other thread holds a reference to
+    // this object, so conn cannot be concurrently read or written here.
     if (this->conn != nullptr)
     {
         this->conn->setHandler(nullptr);

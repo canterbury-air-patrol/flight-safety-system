@@ -3,6 +3,7 @@
 #include <atomic>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <queue>
 #include <sys/types.h>
 #include <thread>
@@ -121,6 +122,7 @@ public:
 class fss_message_cb {
 private:
     std::shared_ptr<fss_connection> conn;
+    mutable std::mutex conn_lock{};
 protected:
     void setConnection(std::shared_ptr<fss_connection> t_conn);
     void clearConnection();
