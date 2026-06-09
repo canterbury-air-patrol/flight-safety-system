@@ -331,11 +331,16 @@ void flight_safety_system::transport::fss_message_cb::disconnect()
     std::shared_ptr<fss_connection> c;
     {
         const std::scoped_lock lock(this->conn_lock);
-        c = std::move(this->conn);
+        c = this->conn; // copy — conn must stay non-null while the recv thread runs
     }
     if (c)
     {
-        c->disconnect();
+        c->disconnect(); // joins recv thread; processMessage may call getConnection() during this
+        const std::scoped_lock lock(this->conn_lock);
+        if (this->conn == c)
+        {
+            this->conn = nullptr;
+        }
     }
 }
 
