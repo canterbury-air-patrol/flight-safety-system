@@ -1,3 +1,10 @@
+flight-safety-system (1.0.2) stable; urgency=medium
+
+  * Fix data race on fss_message_cb::conn between reconnect and send paths.
+  * Fix null-pointer dereference in disconnect() during connection teardown.
+
+ -- Scott Parlane <sjp@canterburyairpatrol.org>  Mon, 9 Jun 2026 00:00:00 +0000
+
 flight-safety-system (1.0.1) stable; urgency=medium
   * Correctly install the new header files
 
