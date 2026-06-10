@@ -11,6 +11,13 @@ class session;
 
 namespace flight_safety_system {
 namespace transport_ssl {
+/* Exception contract: no gnutls::exception escapes this library's public
+ * entry points. Misconfiguration (missing/unreadable CA, key, cert, or CRL
+ * files) and TLS setup failures surface as fss_connection_client::create()
+ * returning nullptr, connectTo() returning false, or — on the server accept
+ * path — a connection delivered to the connect callback in an unusable
+ * state (recv thread never started, getMsg() stays null). The cause is
+ * logged. Callers must not need a try/catch around connection setup. */
 class fss_connection : public flight_safety_system::transport::fss_connection {
 private:
     std::unique_ptr<gnutls::certificate_credentials> credentials;

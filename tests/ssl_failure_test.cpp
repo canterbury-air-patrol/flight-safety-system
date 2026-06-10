@@ -146,6 +146,51 @@ TEST_CASE("ssl: server surfaces wrong-CN-but-CA-signed cert via getClientNames",
     accepted = nullptr;
 }
 
+TEST_CASE("ssl: misconfigured cert paths fail without throwing")
+{
+    /* Regression: set_x509_trust_file / set_x509_key_file throw
+     * gnutls::exception on a missing or unreadable file, and those calls
+     * were outside any try block — a misconfigured client crashed instead
+     * of logging and returning failure.  The library contract is that no
+     * gnutls exception escapes: connectTo() returns false and create()
+     * returns nullptr.  A live listener is required so the TCP connect
+     * succeeds and the failure happens in TLS setup, not before it. */
+    accepted = nullptr;
+    const uint16_t port = fss_test::pick_port();
+    REQUIRE(port != 0);
+    auto listen = std::make_shared<flight_safety_system::transport_ssl::fss_listen>(
+        port, accept_cb, CA_PUBLIC_FILE, SERVER_PRIVATE_FILE, SERVER_PUBLIC_FILE);
+    REQUIRE(listen != nullptr);
+
+    SECTION("nonexistent CA file")
+    {
+        auto client = std::make_shared<flight_safety_system::transport_ssl::fss_connection_client>(
+            "certs/no-such-ca.pem", CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE);
+        bool connected = true;
+        REQUIRE_NOTHROW(connected = client->connectTo("localhost", port));
+        REQUIRE_FALSE(connected);
+    }
+
+    SECTION("nonexistent client key")
+    {
+        auto client = std::make_shared<flight_safety_system::transport_ssl::fss_connection_client>(
+            CA_PUBLIC_FILE, "certs/no-such-key.pem", CLIENT_PUBLIC_FILE);
+        bool connected = true;
+        REQUIRE_NOTHROW(connected = client->connectTo("localhost", port));
+        REQUIRE_FALSE(connected);
+    }
+
+    SECTION("create() with nonexistent key returns nullptr")
+    {
+        std::shared_ptr<flight_safety_system::transport_ssl::fss_connection_client> client;
+        REQUIRE_NOTHROW(client = flight_safety_system::transport_ssl::fss_connection_client::create(
+                            CA_PUBLIC_FILE, "certs/no-such-key.pem", CLIENT_PUBLIC_FILE, "localhost", port));
+        REQUIRE(client == nullptr);
+    }
+
+    accepted = nullptr;
+}
+
 TEST_CASE("ssl: getSessionDesc on unconnected client returns empty string")
 {
     auto conn = std::make_shared<flight_safety_system::transport_ssl::fss_connection_client>(
