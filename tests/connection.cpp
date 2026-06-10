@@ -158,35 +158,29 @@ public:
 
 void noop_signal_handler(int /*signum*/) {}
 
-} // namespace
-
-TEST_CASE("recvMsg survives EINTR mid-message")
+/* Regression driver: a signal interrupting recv() (no SA_RESTART) used to be
+ * treated as a connection failure, synthesising message_closed and dropping a
+ * healthy peer.  Send the first prefix_len bytes of a framed identity message
+ * so recvMsg blocks at the desired stage (1 byte = mid-header; the full
+ * 2-byte length prefix and more = mid-body), signal the receiving thread
+ * several times, then complete the message and require it to arrive intact. */
+void run_eintr_recv_test(size_t prefix_len, const std::string &client_name)
 {
-    /* Regression: a signal interrupting recv() (no SA_RESTART) used to be
-     * treated as a connection failure, synthesising message_closed and
-     * dropping a healthy peer.  Block in recvMsg with a partial header,
-     * signal the receiving thread several times, then complete the message
-     * and require it to arrive intact. */
     int fds[2];
     REQUIRE(::socketpair(AF_UNIX, SOCK_STREAM, 0, fds) == 0);
+    fss_test::scoped_fd peer(fds[1]);
+    raw_recv_connection conn(fds[0]); /* owns and closes fds[0] */
 
-    struct sigaction sa = {};
-    sa.sa_handler = noop_signal_handler;
-    sigemptyset(&sa.sa_mask);
-    sa.sa_flags = 0; /* deliberately no SA_RESTART so recv() returns EINTR */
-    struct sigaction old_sa = {};
-    REQUIRE(sigaction(SIGUSR1, &sa, &old_sa) == 0);
+    fss_test::scoped_signal_handler sig_guard(SIGUSR1, noop_signal_handler);
+    REQUIRE(sig_guard.ok());
 
-    raw_recv_connection conn(fds[0]);
-
-    auto send_msg = std::make_shared<flight_safety_system::transport::fss_message_identity>("eintrClient");
+    auto send_msg = std::make_shared<flight_safety_system::transport::fss_message_identity>(client_name);
     auto bl = send_msg->getPacked();
     const char *data = bl->getData();
     size_t len = bl->getLength();
-    REQUIRE(len > 1);
+    REQUIRE(len > prefix_len);
 
-    /* First byte only: recvMsg blocks waiting for the rest of the header. */
-    REQUIRE(::write(fds[1], data, 1) == 1);
+    REQUIRE(::write(peer.get(), data, prefix_len) == static_cast<ssize_t>(prefix_len));
 
     /* Catch2 assertions are not thread-safe: collect the worker's result in
      * an atomic and assert after join(), as the concurrency tests do. */
@@ -204,22 +198,33 @@ TEST_CASE("recvMsg survives EINTR mid-message")
             pthread_kill(recv_thread_id, SIGUSR1);
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
-        rest_written.store(::write(fds[1], data + 1, len - 1));
+        rest_written.store(::write(peer.get(), data + prefix_len, len - prefix_len));
     });
 
     auto msg = conn.recvMsg();
     signaller.join();
 
-    REQUIRE(rest_written.load() == static_cast<ssize_t>(len - 1));
+    REQUIRE(rest_written.load() == static_cast<ssize_t>(len - prefix_len));
     REQUIRE(msg != nullptr);
     REQUIRE(msg->getType() == flight_safety_system::transport::message_type_identity);
     auto identity = std::dynamic_pointer_cast<flight_safety_system::transport::fss_message_identity>(msg);
     REQUIRE(identity != nullptr);
-    REQUIRE(identity->getName() == "eintrClient");
+    REQUIRE(identity->getName() == client_name);
+}
 
-    REQUIRE(sigaction(SIGUSR1, &old_sa, nullptr) == 0);
-    ::close(fds[1]);
-    /* fds[0] is owned and closed by conn's destructor. */
+} // namespace
+
+TEST_CASE("recvMsg survives EINTR mid-header")
+{
+    /* One byte: recvMsg blocks reading the 2-byte length prefix. */
+    run_eintr_recv_test(1, "eintrClient");
+}
+
+TEST_CASE("recvMsg survives EINTR mid-body")
+{
+    /* Full length prefix plus one byte: the header read completes and
+     * recvMsg blocks in the body read loop. */
+    run_eintr_recv_test(sizeof(uint16_t) + 1, "eintrBodyClient");
 }
 
 TEST_CASE("fss_connection: base isPeerCertRevoked always returns false")

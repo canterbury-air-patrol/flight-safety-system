@@ -158,6 +158,10 @@ protected:
     auto recvMsg() -> std::shared_ptr<fss_message>;
     auto getMessageId() -> uint64_t;
     virtual auto sendMsg(const std::shared_ptr<flight_safety_system::transport::buf_len> &bl) -> bool;
+    /* Contract: never reports an interrupted call — implementations retry
+     * EINTR (plain TCP) / GNUTLS_E_INTERRUPTED (TLS) internally.  Returns
+     * -2 when the transport is already closed/unusable, 0 on orderly peer
+     * close, and a negative value on hard errors. */
     virtual auto recvBytes(void *bytes, size_t max_bytes) -> ssize_t;
     auto getFd() -> int;
     void setFd(int new_fd);
