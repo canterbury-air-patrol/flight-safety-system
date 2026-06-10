@@ -89,4 +89,18 @@ void set_tcp_keepalive(int fd)
     {
         FSS_PERROR("transport", "setsockopt TCP_KEEPCNT failed");
     }
+#ifdef TCP_USER_TIMEOUT
+    /* Keepalive probes only fire on an idle connection; once unacked data is
+     * in flight the kernel falls back to the retransmission timeout
+     * (~15 minutes), so a blocking send() into a black-holed peer can stall
+     * a sender thread for that long. TCP_USER_TIMEOUT bounds how long
+     * transmitted data may stay unacknowledged before the kernel errors the
+     * connection out, matching the 30 s liveness timeout the server already
+     * applies at the application layer (default client_timeout). */
+    unsigned int user_timeout_ms = 30000;
+    if (setsockopt(fd, IPPROTO_TCP, TCP_USER_TIMEOUT, &user_timeout_ms, sizeof(user_timeout_ms)) < 0)
+    {
+        FSS_PERROR("transport", "setsockopt TCP_USER_TIMEOUT failed");
+    }
+#endif
 }
