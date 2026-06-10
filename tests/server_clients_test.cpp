@@ -13,6 +13,10 @@
 #include <list>
 #include <memory>
 #include <string>
+#include <vector>
+
+#include <sys/socket.h>
+#include <unistd.h>
 
 #include "fss-transport.hpp"
 #include "fss-server.hpp"
@@ -261,6 +265,38 @@ TEST_CASE("server_clients: disconnectRevokedClients drops revoked connections")
 
     sc.disconnectRevokedClients("any.crl");
     sc.cleanupRemovableClients();
+}
+
+TEST_CASE("server_clients: destruction races recv-thread disconnect callbacks")
+{
+    /* Regression: ~server_clients used to join each connection's recv thread
+     * while holding the list lock.  A recv thread delivering message_closed
+     * calls clientDisconnected(), which needs that same lock — deadlock.
+     * Build clients on real socketpair-backed connections (live recv
+     * threads), close every peer so the closed messages race the destructor,
+     * and require the destructor to complete.  Pre-fix this case hangs. */
+    constexpr int n_clients = 8;
+    fss_test::MockDatabase mock;
+    std::vector<int> peer_fds;
+    {
+        auto sc = std::make_unique<server_clients>();
+        for (int i = 0; i < n_clients; i++)
+        {
+            int fds[2];
+            REQUIRE(::socketpair(AF_UNIX, SOCK_STREAM, 0, fds) == 0);
+            auto conn = fss::transport::fss_connection::create(fds[0]);
+            auto writer = make_null_writer();
+            auto client = std::make_shared<fss::server::fss_client>(conn, &mock, writer, sc.get());
+            sc->clientConnected(client);
+            peer_fds.push_back(fds[1]);
+        }
+        for (int fd : peer_fds)
+        {
+            ::close(fd);
+        }
+        sc.reset();
+    }
+    SUCCEED("destructor completed without deadlock");
 }
 
 TEST_CASE("server_clients: disconnectRevokedClients leaves non-revoked clients")
