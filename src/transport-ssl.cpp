@@ -39,7 +39,12 @@ flight_safety_system::transport_ssl::fss_connection::fss_connection(int t_fd, st
 
 flight_safety_system::transport_ssl::fss_connection::~fss_connection()
 {
-    if (this->usable)
+    /* bye() cannot race the recv thread's session->recv(): both create()
+     * paths capture the connection shared_ptr in the recv-thread lambda, so
+     * this destructor only runs once that thread has dropped its reference —
+     * i.e. after processMessages() returned (or on the recv thread itself,
+     * where recv() has likewise finished). */
+    if (this->usable.load())
     {
         try
         {
@@ -49,7 +54,7 @@ flight_safety_system::transport_ssl::fss_connection::~fss_connection()
         {
             FSS_LOG_WARN("ssl", "fss_connection shutdown, gnutls exception during bye");
         }
-        this->usable = false;
+        this->usable.store(false);
     }
     this->disconnect();
 }
@@ -66,7 +71,7 @@ flight_safety_system::transport_ssl::fss_connection_server::fss_connection_serve
                                                           std::move(t_public_key), std::move(t_crl))
 {
     this->setFd(t_fd);
-    this->usable = this->setupSSL();
+    this->usable.store(this->setupSSL());
 }
 
 auto flight_safety_system::transport_ssl::fss_connection_server::create(int t_fd, std::string t_ca,
@@ -76,7 +81,7 @@ auto flight_safety_system::transport_ssl::fss_connection_server::create(int t_fd
 {
     auto conn = std::shared_ptr<fss_connection_server>(new fss_connection_server(
         t_fd, std::move(t_ca), std::move(t_private_key), std::move(t_public_key), std::move(t_crl)));
-    if (conn->usable)
+    if (conn->usable.load())
     {
         conn->startRecvThread(std::thread([conn]() -> void { conn->processMessages(); }));
     }
@@ -128,9 +133,9 @@ auto flight_safety_system::transport_ssl::fss_connection_client::connectTo(const
 
     set_tcp_keepalive(this->getFd());
 
-    this->usable = this->setupSSL();
+    this->usable.store(this->setupSSL());
 
-    return this->usable;
+    return this->usable.load();
 }
 
 // NOLINTBEGIN(bugprone-easily-swappable-parameters)
@@ -161,7 +166,7 @@ auto flight_safety_system::transport_ssl::fss_connection::setupSession() -> bool
     {
         FSS_LOG_ERROR("ssl",
                       "Failed to set TLS priority: " << ex.what() << (err_pos ? std::string(" near: ") + err_pos : ""));
-        this->usable = false;
+        this->usable.store(false);
         return false;
     }
 
@@ -286,7 +291,7 @@ auto flight_safety_system::transport_ssl::fss_connection_server::setupSSL() -> b
 auto flight_safety_system::transport_ssl::fss_connection::sendMsg(
     const std::shared_ptr<flight_safety_system::transport::buf_len> &bl) -> bool
 {
-    if (!this->usable)
+    if (!this->usable.load())
     {
         FSS_LOG_ERROR("ssl", "Attempt to send on unusable transport_ssl::fss_connection");
         return false;
@@ -304,12 +309,12 @@ auto flight_safety_system::transport_ssl::fss_connection::sendMsg(
         catch (gnutls::exception &ex)
         {
             FSS_LOG_ERROR("ssl", "send: caught gnutls exception: " << ex.get_code() << ", " << ex.what());
-            this->usable = false;
+            this->usable.store(false);
             return false;
         }
         if (transferred <= 0)
         {
-            this->usable = false;
+            this->usable.store(false);
             return false;
         }
         sent += transferred;
@@ -319,7 +324,7 @@ auto flight_safety_system::transport_ssl::fss_connection::sendMsg(
 
 auto flight_safety_system::transport_ssl::fss_connection::recvBytes(void *t_bytes, size_t t_max_bytes) -> ssize_t
 {
-    if (!this->usable)
+    if (!this->usable.load())
     {
         FSS_LOG_ERROR("ssl", "Attempt to recv on unusable transport_ssl::fss_connection");
         return -2;
@@ -338,7 +343,7 @@ auto flight_safety_system::transport_ssl::fss_connection::recvBytes(void *t_byte
                 continue;
             }
             FSS_LOG_ERROR("ssl", "recv: caught gnutls exception: " << ex.get_code() << ", " << ex.what());
-            this->usable = false;
+            this->usable.store(false);
             return bytes_recved;
         }
         /* Some C++ wrapper variants return AGAIN/INTERRUPTED rather than throwing. */
