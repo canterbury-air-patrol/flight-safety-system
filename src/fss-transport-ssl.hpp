@@ -1,5 +1,6 @@
 #include <fss-transport.hpp>
 
+#include <atomic>
 #include <list>
 #include <string>
 
@@ -18,8 +19,19 @@ private:
     std::string public_key_file;
     std::string crl_file;
 protected:
+    /* session and possible_names (in fss_connection_server) are written only
+     * during setupSSL(), which completes before startRecvThread() — so they
+     * are immutable once any second thread exists and need no locking.
+     * Concurrent session->send() (sender threads, serialised by the base
+     * class send_lock) and session->recv() (recv thread) on one session is
+     * permitted by GnuTLS for TLS without rehandshake; this design relies on
+     * that. */
     std::unique_ptr<gnutls::session> session{nullptr};
-    bool usable{false};
+    /* Written by the recv thread (recvBytes failure), sender threads (send
+     * failure), and the destructor; read by all of them — must be atomic.
+     * Advisory only: a send that races a concurrent clear fails inside
+     * gnutls and clears the flag again. */
+    std::atomic<bool> usable{false};
     auto sendMsg(const std::shared_ptr<flight_safety_system::transport::buf_len>& bl) -> bool override;
     auto recvBytes(void* bytes, size_t max_bytes) -> ssize_t override;
     auto setupSession() -> bool;
