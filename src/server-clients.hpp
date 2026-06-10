@@ -132,8 +132,18 @@ public:
     void broadcastMsg(const std::shared_ptr<flight_safety_system::transport::fss_message> &msg,
                       flight_safety_system::server::fss_client *except = nullptr) override
     {
-        std::scoped_lock guard(this->lock);
-        for (const auto &client : this->clients)
+        /* Snapshot, then send outside the lock (as sendRTTRequest does):
+         * sends block on the socket, and holding the global lock across a
+         * blocking send lets one stuck client stall every recv thread that
+         * needs clientDisconnected()/broadcastMsg() — and the main loop.
+         * A client disconnected mid-iteration is harmless: the snapshot's
+         * shared_ptr keeps it alive and the send just fails. */
+        std::vector<std::shared_ptr<flight_safety_system::server::fss_client>> snapshot;
+        {
+            std::scoped_lock guard(this->lock);
+            std::copy(this->clients.begin(), this->clients.end(), std::back_inserter(snapshot));
+        }
+        for (const auto &client : snapshot)
         {
             if (client->isAircraft() && client.get() != except)
             {
@@ -159,8 +169,13 @@ public:
     };
     void sendSMMSettings()
     {
-        std::scoped_lock guard(this->lock);
-        for (const auto &client : this->clients)
+        /* Snapshot, then act outside the lock — see broadcastMsg(). */
+        std::vector<std::shared_ptr<flight_safety_system::server::fss_client>> snapshot;
+        {
+            std::scoped_lock guard(this->lock);
+            std::copy(this->clients.begin(), this->clients.end(), std::back_inserter(snapshot));
+        }
+        for (const auto &client : snapshot)
         {
             client->sendSMMSettings();
         }
@@ -198,8 +213,13 @@ public:
     };
     void sendCommand()
     {
-        std::scoped_lock guard(this->lock);
-        for (const auto &client : this->clients)
+        /* Snapshot, then act outside the lock — see broadcastMsg(). */
+        std::vector<std::shared_ptr<flight_safety_system::server::fss_client>> snapshot;
+        {
+            std::scoped_lock guard(this->lock);
+            std::copy(this->clients.begin(), this->clients.end(), std::back_inserter(snapshot));
+        }
+        for (const auto &client : snapshot)
         {
             client->sendCommand();
         }
