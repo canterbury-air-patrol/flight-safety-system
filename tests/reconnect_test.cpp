@@ -171,6 +171,36 @@ TEST_CASE("reconnect: fake clock throttles attempts within retry window")
     REQUIRE(server->attempts == 1);
 }
 
+TEST_CASE("reconnect: connection close resets backoff for an immediate retry")
+{
+    /* A closed connection requests a backoff reset via the atomic
+     * backoff_reset_requested hand-off (the recv thread must not touch the
+     * backoff fields directly); the next reconnect() consumes it and
+     * attempts immediately, even mid-retry-window. */
+    auto client = std::make_shared<flight_safety_system::client_ssl::fss_client>(CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE,
+                                                                                 CLIENT_PUBLIC_FILE);
+    auto server = std::make_shared<CountingServer>(client.get(), "127.0.0.1", static_cast<uint16_t>(20598),
+                                                   CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE);
+    auto fake = std::make_shared<FakeClock>();
+    server->setClock(fake);
+
+    /* Arm the throttle with one (failed) attempt past the initial window. */
+    fake->advance(1001);
+    server->reconnect();
+    REQUIRE(server->attempts == 1);
+
+    /* Inside the grown retry window: throttled. */
+    fake->advance(1);
+    server->reconnect();
+    REQUIRE(server->attempts == 1);
+
+    /* Deliver closed as the recv thread would; the reset must take effect
+     * on the next reconnect() call. */
+    server->processMessage(std::make_shared<flight_safety_system::transport::fss_message_closed>());
+    server->reconnect();
+    REQUIRE(server->attempts == 2);
+}
+
 TEST_CASE("reconnect: fake clock exposes exponential backoff growth")
 {
     auto client = std::make_shared<flight_safety_system::client_ssl::fss_client>(CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE,

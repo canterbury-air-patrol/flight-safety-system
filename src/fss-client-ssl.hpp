@@ -68,6 +68,12 @@ private:
     std::string ca_file{""};
     std::string private_key_file{""};
     std::string public_key_file{""};
+    /* Backoff bookkeeping (last_tried, retry_count, retry_delay,
+     * effective_delay, rng) is touched only from the application thread that
+     * drives reconnection — the caller of attemptReconnect() / reconnect()
+     * and connectTo(..., true). The recv thread must NOT write these
+     * directly: when a connection closes it requests a reset via the atomic
+     * backoff_reset_requested flag, which reconnect() consumes. */
     uint64_t last_tried{0};
     uint64_t retry_count{0};
     static constexpr uint64_t retry_delay_start = 1000;
@@ -75,6 +81,7 @@ private:
     uint64_t retry_delay{retry_delay_start};
     uint64_t effective_delay{retry_delay_start};
     std::mt19937 rng{std::random_device{}()};
+    std::atomic<bool> backoff_reset_requested{false};
     std::shared_ptr<flight_safety_system::IClock> clock{std::make_shared<flight_safety_system::MonotonicClock>()};
     std::atomic<bool> liveness_active{false};
     std::atomic<uint64_t> last_message_received_time{0};
