@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <csignal>
 #include <cstdint>
 #include <cstring>
 #include <functional>
@@ -104,6 +105,66 @@ public:
     auto operator=(const scoped_log_level &) -> scoped_log_level & = delete;
     auto operator=(scoped_log_level &&) -> scoped_log_level & = delete;
     ~scoped_log_level() { flight_safety_system::log::detail::current_level().store(saved); }
+};
+
+/* RAII signal-handler override.  Installs the handler deliberately without
+ * SA_RESTART (so blocking syscalls return EINTR) and restores the previous
+ * disposition on destruction — including when a Catch2 assertion unwinds the
+ * test early, so the override cannot leak into later tests. */
+class scoped_signal_handler {
+private:
+    int signum;
+    struct sigaction old_sa = {};
+    bool installed{false};
+public:
+    scoped_signal_handler(int t_signum, void (*t_handler)(int)) : signum(t_signum)
+    {
+        struct sigaction sa = {};
+        sa.sa_handler = t_handler;
+        sigemptyset(&sa.sa_mask);
+        sa.sa_flags = 0;
+        this->installed = (sigaction(this->signum, &sa, &this->old_sa) == 0);
+    }
+    scoped_signal_handler(const scoped_signal_handler &) = delete;
+    scoped_signal_handler(scoped_signal_handler &&) = delete;
+    auto operator=(const scoped_signal_handler &) -> scoped_signal_handler & = delete;
+    auto operator=(scoped_signal_handler &&) -> scoped_signal_handler & = delete;
+    ~scoped_signal_handler()
+    {
+        if (this->installed)
+        {
+            sigaction(this->signum, &this->old_sa, nullptr);
+        }
+    }
+    [[nodiscard]] auto ok() const -> bool { return this->installed; }
+};
+
+/* RAII owner for a test-created file descriptor: closed on destruction even
+ * when an assertion unwinds the test early.  release() transfers ownership
+ * (e.g. to an fss_connection, which closes its fd itself). */
+class scoped_fd {
+private:
+    int fd_;
+public:
+    explicit scoped_fd(int t_fd) : fd_(t_fd) {}
+    scoped_fd(const scoped_fd &) = delete;
+    scoped_fd(scoped_fd &&) = delete;
+    auto operator=(const scoped_fd &) -> scoped_fd & = delete;
+    auto operator=(scoped_fd &&) -> scoped_fd & = delete;
+    ~scoped_fd()
+    {
+        if (this->fd_ >= 0)
+        {
+            ::close(this->fd_);
+        }
+    }
+    [[nodiscard]] auto get() const -> int { return this->fd_; }
+    auto release() -> int
+    {
+        int f = this->fd_;
+        this->fd_ = -1;
+        return f;
+    }
 };
 
 /* Build a buf_len with a valid header (length/type/id) but a caller-specified
