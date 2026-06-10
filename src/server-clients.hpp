@@ -26,9 +26,26 @@ public:
     server_clients() = default;
     ~server_clients() override
     {
+        /* Same hazard as cleanupRemovableClients() (see the comment there):
+         * disconnect() joins the connection's recv thread, and that thread may
+         * itself be blocked acquiring this->lock in clientDisconnected() or
+         * broadcastMsg().  Joining while holding the lock would deadlock, so
+         * drain both lists under the lock and disconnect outside it.
+         * shutting_down is set first so a recv thread that wins the race to
+         * clientDisconnected() no-ops instead of re-queueing into a dying
+         * object. */
         this->shutting_down = true;
-        std::scoped_lock guard(this->lock);
-        for (const auto &c : this->clients)
+        std::list<std::shared_ptr<flight_safety_system::server::fss_client>> doomed;
+        {
+            std::scoped_lock guard(this->lock);
+            doomed.splice(doomed.end(), this->clients);
+            while (!this->disconnected.empty())
+            {
+                doomed.push_back(std::move(this->disconnected.front()));
+                this->disconnected.pop();
+            }
+        }
+        for (const auto &c : doomed)
         {
             c->disconnect();
         }
