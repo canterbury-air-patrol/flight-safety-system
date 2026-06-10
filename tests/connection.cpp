@@ -12,6 +12,12 @@
 #error No catch header
 #endif
 
+#include <atomic>
+#include <csignal>
+#include <thread>
+
+#include <pthread.h>
+#include <sys/socket.h>
 #include <unistd.h>
 
 #include "fss-transport.hpp"
@@ -138,6 +144,82 @@ TEST_CASE("Queue overflow drops oldest messages")
 
     conn = nullptr;
     client_conn = nullptr;
+}
+
+namespace {
+
+/* Expose the protected fd-constructor and recvMsg so a test can drive the
+ * receive path synchronously on its own thread (no recv thread started). */
+class raw_recv_connection : public flight_safety_system::transport::fss_connection {
+public:
+    explicit raw_recv_connection(int t_fd) : fss_connection(t_fd) {}
+    using fss_connection::recvMsg;
+};
+
+void noop_signal_handler(int /*signum*/) {}
+
+} // namespace
+
+TEST_CASE("recvMsg survives EINTR mid-message")
+{
+    /* Regression: a signal interrupting recv() (no SA_RESTART) used to be
+     * treated as a connection failure, synthesising message_closed and
+     * dropping a healthy peer.  Block in recvMsg with a partial header,
+     * signal the receiving thread several times, then complete the message
+     * and require it to arrive intact. */
+    int fds[2];
+    REQUIRE(::socketpair(AF_UNIX, SOCK_STREAM, 0, fds) == 0);
+
+    struct sigaction sa = {};
+    sa.sa_handler = noop_signal_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0; /* deliberately no SA_RESTART so recv() returns EINTR */
+    struct sigaction old_sa = {};
+    REQUIRE(sigaction(SIGUSR1, &sa, &old_sa) == 0);
+
+    raw_recv_connection conn(fds[0]);
+
+    auto send_msg = std::make_shared<flight_safety_system::transport::fss_message_identity>("eintrClient");
+    auto bl = send_msg->getPacked();
+    const char *data = bl->getData();
+    size_t len = bl->getLength();
+    REQUIRE(len > 1);
+
+    /* First byte only: recvMsg blocks waiting for the rest of the header. */
+    REQUIRE(::write(fds[1], data, 1) == 1);
+
+    /* Catch2 assertions are not thread-safe: collect the worker's result in
+     * an atomic and assert after join(), as the concurrency tests do. */
+    std::atomic<ssize_t> rest_written{-1};
+    pthread_t recv_thread_id = pthread_self();
+    std::thread signaller([&]() -> void {
+        /* Best-effort pause so the main thread reaches recv() before the
+         * signals; correctness does not depend on it (an early signal is
+         * swallowed by the no-op handler and the final write still
+         * completes the message). */
+        constexpr int signal_count = 5;
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        for (int i = 0; i < signal_count; i++)
+        {
+            pthread_kill(recv_thread_id, SIGUSR1);
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        rest_written.store(::write(fds[1], data + 1, len - 1));
+    });
+
+    auto msg = conn.recvMsg();
+    signaller.join();
+
+    REQUIRE(rest_written.load() == static_cast<ssize_t>(len - 1));
+    REQUIRE(msg != nullptr);
+    REQUIRE(msg->getType() == flight_safety_system::transport::message_type_identity);
+    auto identity = std::dynamic_pointer_cast<flight_safety_system::transport::fss_message_identity>(msg);
+    REQUIRE(identity != nullptr);
+    REQUIRE(identity->getName() == "eintrClient");
+
+    REQUIRE(sigaction(SIGUSR1, &old_sa, nullptr) == 0);
+    ::close(fds[1]);
+    /* fds[0] is owned and closed by conn's destructor. */
 }
 
 TEST_CASE("fss_connection: base isPeerCertRevoked always returns false")

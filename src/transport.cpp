@@ -408,8 +408,17 @@ auto flight_safety_system::transport::fss_connection::recvMsg()
         ssize_t this_time = this->recvBytes(&header[received], sizeof(uint16_t) - received);
         if ((this_time == -2) || (this_time < 0 && errno == EBADF) || this_time == 0)
         {
-            /* Connection was closed */
+            /* Connection was closed. The EBADF check must stay ahead of the
+             * EINTR retry: disconnect() closes the fd under us to wake this
+             * recv, and that must terminate the loop, not retry. */
             return std::make_shared<flight_safety_system::transport::fss_message_closed>();
+        }
+        if (this_time == -1 && errno == EINTR)
+        {
+            /* A signal interrupted recv() before any bytes arrived; that is
+             * not a connection failure, so retry rather than dropping the
+             * peer (same rationale as the EINTR retry in sendMsg). */
+            continue;
         }
         if (this_time < 0)
         {
@@ -444,6 +453,12 @@ auto flight_safety_system::transport::fss_connection::recvMsg()
     while (received != total_length)
     {
         ssize_t this_time = this->recvBytes(&data[received], total_length - received);
+        if (this_time == -1 && errno == EINTR)
+        {
+            /* Interrupted by a signal mid-message; retry. -2 (transport
+             * already closed) must not retry and is handled below. */
+            continue;
+        }
         if (this_time < 0)
         {
             FSS_PERROR("transport", "Error receiving data");
