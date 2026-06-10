@@ -373,6 +373,18 @@ void flight_safety_system::client_ssl::fss_server::setClock(std::shared_ptr<flig
 
 auto flight_safety_system::client_ssl::fss_server::reconnect() -> bool
 {
+    /* Consume a reset requested by the recv thread (connection closed):
+     * retry immediately and restart the backoff progression. All backoff
+     * fields are only ever touched on this thread (see the header), so the
+     * atomic flag is the only cross-thread hand-off. */
+    if (this->backoff_reset_requested.exchange(false))
+    {
+        this->last_tried = 0;
+        this->retry_count = 0;
+        this->retry_delay = retry_delay_start;
+        this->effective_delay = retry_delay_start;
+    }
+
     uint64_t ts = this->clock->now_ms();
     uint64_t elapsed_time = ts - this->last_tried;
 
@@ -438,10 +450,12 @@ void flight_safety_system::client_ssl::fss_server::processMessage(
 #endif
     if (msg->getType() == flight_safety_system::transport::message_type_closed)
     {
-        /* Connection has been closed, schedule reconnection */
+        /* Connection has been closed, schedule reconnection. This runs on
+         * the recv thread, which must not touch the backoff fields directly
+         * (they belong to the reconnect-driving thread — see the header);
+         * request the reset via the atomic flag instead. */
+        this->backoff_reset_requested.store(true);
         this->getClient()->serverRequiresReconnect(this);
-        this->last_tried = 0;
-        this->retry_count = 0;
         return;
     }
     else
