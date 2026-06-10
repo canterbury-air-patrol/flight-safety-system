@@ -16,12 +16,14 @@
 #include <csignal>
 #include <thread>
 
+#include <netinet/tcp.h>
 #include <pthread.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
 #include "fss-transport.hpp"
 #include "test_helpers.hpp"
+#include "transport.hpp"
 
 TEST_CASE("Connection Create (failure)")
 {
@@ -225,6 +227,23 @@ TEST_CASE("recvMsg survives EINTR mid-body")
     /* Full length prefix plus one byte: the header read completes and
      * recvMsg blocks in the body read loop. */
     run_eintr_recv_test(sizeof(uint16_t) + 1, "eintrBodyClient");
+}
+
+TEST_CASE("set_tcp_keepalive bounds unacked data with TCP_USER_TIMEOUT")
+{
+#ifdef TCP_USER_TIMEOUT
+    /* Keepalives only cover idle connections; TCP_USER_TIMEOUT is what
+     * bounds a blocking send() into a black-holed peer.  Regression-pin
+     * that set_tcp_keepalive applies it. */
+    int sock = ::socket(AF_INET6, SOCK_STREAM, IPPROTO_TCP);
+    REQUIRE(sock >= 0);
+    fss_test::scoped_fd guard(sock);
+    set_tcp_keepalive(sock);
+    unsigned int val = 0;
+    socklen_t len = sizeof(val);
+    REQUIRE(::getsockopt(sock, IPPROTO_TCP, TCP_USER_TIMEOUT, &val, &len) == 0);
+    REQUIRE(val == 30000);
+#endif
 }
 
 TEST_CASE("fss_connection: base isPeerCertRevoked always returns false")
