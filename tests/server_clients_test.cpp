@@ -277,23 +277,37 @@ TEST_CASE("server_clients: destruction races recv-thread disconnect callbacks")
      * and require the destructor to complete.  Pre-fix this case hangs. */
     constexpr int n_clients = 8;
     fss_test::MockDatabase mock;
-    std::vector<int> peer_fds;
+    /* Guard the peer fds so a REQUIRE failure mid-setup cannot leak them
+     * into later tests; close_all() doubles as the deliberate trigger for
+     * the message_closed deliveries (idempotent with the destructor). */
+    struct peer_fd_guard {
+        std::vector<int> fds{};
+        ~peer_fd_guard() { close_all(); }
+        void close_all()
+        {
+            for (int &fd : fds)
+            {
+                if (fd >= 0)
+                {
+                    ::close(fd);
+                    fd = -1;
+                }
+            }
+        }
+    } peers;
     {
         auto sc = std::make_unique<server_clients>();
         for (int i = 0; i < n_clients; i++)
         {
             int fds[2];
             REQUIRE(::socketpair(AF_UNIX, SOCK_STREAM, 0, fds) == 0);
+            peers.fds.push_back(fds[1]);
             auto conn = fss::transport::fss_connection::create(fds[0]);
             auto writer = make_null_writer();
             auto client = std::make_shared<fss::server::fss_client>(conn, &mock, writer, sc.get());
             sc->clientConnected(client);
-            peer_fds.push_back(fds[1]);
         }
-        for (int fd : peer_fds)
-        {
-            ::close(fd);
-        }
+        peers.close_all();
         sc.reset();
     }
     SUCCEED("destructor completed without deadlock");
