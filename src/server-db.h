@@ -20,9 +20,14 @@ struct asset_command_s {
     char *command;
     unsigned long long timestamp;
     unsigned long long dbid;
+    /* NaN when the row's position is NULL — the dispatch layer's coordinate
+     * validation then refuses to send a GOTO built from this row. */
     double latitude;
     double longitude;
     uint32_t altitude;
+    /* Non-zero when the row's altitude is NULL; altitude is unsigned so it
+     * has no NaN-style sentinel of its own. */
+    int altitude_null;
 };
 
 struct asset_command_s *db_asset_command_get(const char *conn, unsigned long long asset_id_arg);

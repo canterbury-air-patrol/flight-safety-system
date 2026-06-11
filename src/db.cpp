@@ -136,7 +136,8 @@ auto flight_safety_system::server::db_connection::getCommand(uint64_t asset_id) 
         if (command)
         {
             res = std::make_shared<asset_command>(command->dbid, command->timestamp, std::string(command->command),
-                                                  command->latitude, command->longitude, command->altitude);
+                                                  command->latitude, command->longitude, command->altitude,
+                                                  command->altitude_null == 0);
             free(command->command);
             free(command);
         }
