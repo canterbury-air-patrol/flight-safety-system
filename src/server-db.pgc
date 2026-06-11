@@ -1,6 +1,7 @@
 #include "server-db.h"
 
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -19,16 +20,23 @@
 int db_connect(const char *conn_arg, const char *host, int port, const char *user, const char *pass, const char *db)
 {
     /* Set connect_timeout and TCP keepalives via environment variables.
-     * overwrite=0 so this is a no-op on reconnects; the first call happens
-     * before any threads are started so the setenv is safe.
+     * setenv is not thread-safe, and reconnects call db_connect with other
+     * threads live, so guard it to run only on the first call - which
+     * happens in the db_connection constructor before any threads exist.
+     * overwrite=0 preserves operator overrides from the real environment.
      * keepalives_idle=10 / interval=5 / count=3 means the kernel declares
      * the connection dead after 10 + 5*3 = 25 s of silence, replacing the
      * OS default retransmit timeout of ~127 s. */
-    setenv("PGCONNECT_TIMEOUT",  "10", 0);
-    setenv("PGKEEPALIVES",       "1",  0);
-    setenv("PGKEEPALIVESIDLE",   "10", 0);
-    setenv("PGKEEPALIVEINTERVAL","5",  0);
-    setenv("PGKEEPALIVESCOUNT",  "3",  0);
+    static int env_configured = 0;
+    if (!env_configured)
+    {
+        env_configured = 1;
+        setenv("PGCONNECT_TIMEOUT",  "10", 0);
+        setenv("PGKEEPALIVES",       "1",  0);
+        setenv("PGKEEPALIVESIDLE",   "10", 0);
+        setenv("PGKEEPALIVEINTERVAL","5",  0);
+        setenv("PGKEEPALIVESCOUNT",  "3",  0);
+    }
 
     /* ECPG connection target: dbname@host:port */
     char *target = NULL;
@@ -74,6 +82,15 @@ unsigned long long db_get_asset_id(const char *conn_arg, const char *asset_name_
     EXEC SQL END DECLARE SECTION;
 
     EXEC SQL AT :conn SELECT id INTO :asset_id FROM assets_asset WHERE name = :asset_name;
+
+    if (sqlca.sqlcode < 0)
+    {
+        /* A query failure (connection down, etc.) returns 0 just like an
+         * unknown asset, and the caller rejects the client either way.
+         * Print the SQL error so the log tells the truth about why
+         * identification failed. */
+        sqlprint();
+    }
 
     return asset_id;
 }
@@ -225,6 +242,15 @@ db_asset_smm_settings_get(const char *conn_arg, unsigned long long asset_id_arg)
 
     EXEC SQL AT :conn SELECT 1, SMM.address, SMM.port, SMM.https, A.smm_login, A.smm_password INTO :success, :server_address, :server_port, :server_https, :smm_login, :smm_password FROM config_assetconfig AS A, config_smmconfig AS SMM WHERE A.asset_id = :asset_id AND A.smm_id = SMM.id;
 
+
+    if (success == 1 && sqlca.sqlwarn[1] == 'W')
+    {
+        /* A host variable was truncated (address/login/password longer than
+         * its buffer). Truncated credentials must not be shipped to an
+         * aircraft; treat the row as absent and say why. */
+        fprintf(stderr, "smm settings for asset %llu exceed buffer sizes; ignoring row\n", asset_id);
+        success = 0;
+    }
 
     struct smm_settings_s *settings = NULL;
     if (success == 1)

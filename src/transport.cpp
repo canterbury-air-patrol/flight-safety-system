@@ -24,8 +24,6 @@
 
 #include "transport.hpp"
 
-namespace {
-
 auto safe_close_fd(int fd, const char *context) -> int
 {
     for (;;)
@@ -63,8 +61,6 @@ auto safe_shutdown_fd(int fd, const char *context) -> int
         return -1;
     }
 }
-
-} // anonymous namespace
 
 #ifdef DEBUG
 /* Run inet_ntop on a sockaddr_storage object */
@@ -267,7 +263,13 @@ auto flight_safety_system::transport::fss_connection::connectTo(const std::strin
 
     if (this->fd.load() == -1)
     {
-        this->fd.store(socket(remote.ss_family == AF_INET ? PF_INET : PF_INET6, SOCK_STREAM, IPPROTO_TCP));
+        int new_fd = socket(remote.ss_family == AF_INET ? PF_INET : PF_INET6, SOCK_STREAM, IPPROTO_TCP);
+        if (new_fd < 0)
+        {
+            FSS_PERROR("transport", "Failed to create socket");
+            return false;
+        }
+        this->fd.store(new_fd);
     }
 
     int current_fd = this->fd.load();
