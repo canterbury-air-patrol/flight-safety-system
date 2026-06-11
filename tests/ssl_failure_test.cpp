@@ -188,6 +188,9 @@ TEST_CASE("ssl: misconfigured cert paths fail without throwing")
         REQUIRE(client == nullptr);
     }
 
+    /* Join the accept thread (which assigns the `accepted` global from its
+     * callback) before clearing the global, so the two writes can't race. */
+    listen = nullptr;
     accepted = nullptr;
 }
 

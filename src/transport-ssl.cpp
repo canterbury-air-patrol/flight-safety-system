@@ -450,9 +450,23 @@ flight_safety_system::transport_ssl::fss_listen::fss_listen(uint16_t t_port,
                                                             flight_safety_system::transport::fss_connect_cb t_cb,
                                                             std::string t_ca, std::string t_private_key,
                                                             std::string t_public_key, std::string t_crl)
-    : flight_safety_system::transport::fss_listen(t_port, std::move(t_cb)), ca_file(std::move(t_ca)),
+    : flight_safety_system::transport::fss_listen(t_port, std::move(t_cb), defer_start_t{}), ca_file(std::move(t_ca)),
       private_key_file(std::move(t_private_key)), public_key_file(std::move(t_public_key)), crl_file(std::move(t_crl))
 {
+    /* Start the accept thread only now that this object is fully
+     * constructed: the thread virtual-dispatches into newConnection(),
+     * which reads the path strings initialised above. Starting it from the
+     * base constructor (the default behaviour) would race that. */
+    this->startListening();
+}
+
+flight_safety_system::transport_ssl::fss_listen::~fss_listen()
+{
+    /* Join the accept thread while the cert/key path strings it reads in
+     * newConnection() are still alive; the base destructor's disconnect()
+     * would run only after they are destroyed. disconnect() is idempotent,
+     * so the base's call becomes a no-op. */
+    this->disconnect();
 }
 
 auto flight_safety_system::transport_ssl::fss_connection_server::getClientNames() -> std::list<std::string>

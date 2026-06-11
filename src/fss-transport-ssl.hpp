@@ -107,6 +107,12 @@ protected:
 public:
     fss_listen(uint16_t t_port, flight_safety_system::transport::fss_connect_cb t_cb, std::string t_ca,
                std::string t_private_key, std::string t_public_key, std::string t_crl = {});
+    /* Copy/move are already deleted via the base class. */
+    /* Joins the accept thread before this class's members are destroyed:
+     * that thread reads the cert/key path strings above in newConnection(),
+     * and the base destructor's join runs only after derived members are
+     * already gone — a use-after-free window without this. */
+    ~fss_listen() override;
 };
 } // namespace transport_ssl
 } // namespace flight_safety_system
