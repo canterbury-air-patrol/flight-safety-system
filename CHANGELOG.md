@@ -5,6 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- A black-holed client connection (radio dropout with unacked data in
+  flight) could stall a blocking send for the kernel's ~15-minute
+  retransmission timeout; `TCP_USER_TIMEOUT` now bounds this to 30 s,
+  matching the application-level client timeout.
+- `sendCommand`/`broadcastMsg`/`sendSMMSettings` no longer hold the global
+  client lock across blocking sends, so one stuck client cannot stall
+  command dispatch to other aircraft or block the recv threads.
+- The 15 s config tick no longer performs synchronous DB reads from the
+  main loop; the server list and SMM settings are cached by the command
+  poller thread, restoring the documented main-loop DB contract.
+- `~server_clients` no longer joins connection recv threads while holding
+  the client-list lock, fixing an intermittent shutdown deadlock.
+- A command row with a NULL position or altitude is now refused at
+  dispatch instead of decoding as latitude/longitude (0,0) — Null
+  Island — or altitude 0 (descend-to-ground).
+- `transport_ssl`'s `usable` flag is now atomic, fixing a data race
+  between the recv thread, sender threads, and the destructor.
+- The client reconnect backoff bookkeeping is now owned by a single
+  thread, with the recv thread requesting resets via an atomic flag.
+- Missing or unreadable CA/key/cert files no longer throw a raw
+  `gnutls::exception` out of the client connection API; setup failures
+  are logged and surfaced as `nullptr`/`false` returns.
+- A signal interrupting a blocking `recv()` (EINTR) no longer tears down
+  a healthy plain-TCP connection; the receive path retries, matching the
+  existing send-path and TLS behaviour.
+- The per-frame "Got a null msg" warning is throttled (first frame and
+  every 100th), so a peer streaming undecodable frames cannot flood the
+  log at line rate.
+- Failure-path cleanups: `setenv` in `db_connect` runs only before
+  threads exist, DB read errors during identification are logged
+  distinctly from "unknown asset", truncated SMM credentials are
+  refused instead of shipped, and both `connectTo` paths handle
+  `socket()` failure.
+
 ## [1.0.2] - 2026-06-09
 
 ### Fixed
