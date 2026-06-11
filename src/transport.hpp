@@ -5,6 +5,10 @@
 
 auto convert_str_to_sa(const std::string &addr, uint16_t port, struct sockaddr_storage *sa) -> bool;
 void set_tcp_keepalive(int fd);
+/* close()/shutdown() with EINTR retry and failure logging; context names the
+ * call site in the log. shutdown treats ENOTCONN as success. */
+auto safe_close_fd(int fd, const char *context) -> int;
+auto safe_shutdown_fd(int fd, const char *context) -> int;
 
 template<typename T> inline auto as_sockaddr(T *addr) -> struct sockaddr *
 {

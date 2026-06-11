@@ -136,18 +136,27 @@ auto flight_safety_system::transport_ssl::fss_connection_client::connectTo(const
 
     if (this->getFd() == -1)
     {
-        this->setFd(socket(remote.ss_family == AF_INET ? PF_INET : PF_INET6, SOCK_STREAM, IPPROTO_TCP));
+        int new_fd = socket(remote.ss_family == AF_INET ? PF_INET : PF_INET6, SOCK_STREAM, IPPROTO_TCP);
+        if (new_fd < 0)
+        {
+            FSS_PERROR("ssl", "Failed to create socket");
+            return false;
+        }
+        this->setFd(new_fd);
     }
 
     // Limit the total number of SYN's that are sent
     int synRetries = 2;
-    setsockopt(this->getFd(), IPPROTO_TCP, TCP_SYNCNT, &synRetries, sizeof(synRetries));
+    if (setsockopt(this->getFd(), IPPROTO_TCP, TCP_SYNCNT, &synRetries, sizeof(synRetries)) < 0)
+    {
+        FSS_PERROR("ssl", "setsockopt TCP_SYNCNT failed, using kernel default");
+    }
 
     if (connect(this->getFd(), as_sockaddr(&remote),
                 remote.ss_family == AF_INET ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6)) < 0)
     {
         FSS_PERROR("ssl", "Failed to connect to " + address);
-        close(this->getFd());
+        safe_close_fd(this->getFd(), "ssl/connect");
         this->setFd(-1);
         return false;
     }
