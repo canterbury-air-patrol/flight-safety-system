@@ -184,10 +184,12 @@ auto main(int argc, char *argv[]) -> int
 
     /* Main-loop DB contract: the loop below must make NO synchronous DB
      * reads. Reads are handled exclusively by the command_poller thread
-     * below, which caches results on each fss_client. The loop only calls
-     * sendCommand() (reads the cache), write-queue enqueues (async), and
-     * in-memory bookkeeping. A DB stall therefore cannot block heartbeats
-     * or timeout monitoring.
+     * below, which caches results: pending commands and SMM settings on
+     * each fss_client, and the active-server-list message on
+     * server_clients. The loop only calls sendCommand()/sendSMMSettings()/
+     * broadcastMsg() (all read caches), write-queue enqueues (async), and
+     * in-memory bookkeeping. A DB stall therefore cannot block heartbeats,
+     * timeout monitoring, or command dispatch.
      *
      * Split tick: sendCommand runs every command_poll_ms so safety-critical
      * commands (TERM, DISARM) reach aircraft in <=100ms instead of <=1s.
@@ -203,9 +205,21 @@ auto main(int argc, char *argv[]) -> int
     std::atomic<bool> poll_running{true};
     std::thread command_poller([&clients, &dbc, &poll_running, command_poll_ms]() -> void {
         flight_safety_system::exception_guard poll_guard("server", "pollCommands");
+        uint64_t poll_counter = 0;
         while (poll_running.load())
         {
-            poll_guard.run([&]() -> void { clients->pollCommands(dbc.get()); });
+            poll_guard.run([&]() -> void {
+                clients->pollCommands(dbc.get());
+                /* Config reads share the poller so the main loop never
+                 * touches the DB. First refresh happens immediately
+                 * (counter 0) so the caches are primed at startup. */
+                if ((poll_counter % send_config_period_ticks) == 0)
+                {
+                    clients->setCachedServerList(flight_safety_system::server::build_server_list_msg(dbc.get()));
+                    clients->refreshSmmSettings();
+                }
+            });
+            poll_counter++;
             std::this_thread::sleep_for(std::chrono::milliseconds(command_poll_ms));
         }
     });
@@ -254,7 +268,15 @@ auto main(int argc, char *argv[]) -> int
             }
             if ((tick_counter % send_config_period_ticks) == 0)
             {
-                clients->broadcastMsg(flight_safety_system::server::build_server_list_msg(dbc.get()));
+                /* Cache-only: the poller builds the server list and refreshes
+                 * the per-client SMM settings. Empty cache (startup race with
+                 * the poller's first pass) just skips one broadcast; clients
+                 * also receive the list directly at identify time. */
+                auto server_list = clients->getCachedServerList();
+                if (server_list != nullptr)
+                {
+                    clients->broadcastMsg(server_list);
+                }
                 clients->sendSMMSettings();
             }
         });

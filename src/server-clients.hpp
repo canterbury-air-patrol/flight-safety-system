@@ -22,6 +22,10 @@ private:
     uint64_t identify_timeout_ms{30000};
     uint64_t rate_capacity{100};
     uint64_t rate_refill_per_s{20};
+    /* Guarded by lock. Built by the command poller thread (the only place
+     * allowed to read the DB for it); broadcast by the main loop, which must
+     * never perform a synchronous DB read. */
+    std::shared_ptr<flight_safety_system::transport::fss_message_server_list> cached_server_list{};
 public:
     server_clients() = default;
     ~server_clients() override
@@ -169,7 +173,8 @@ public:
     };
     void sendSMMSettings()
     {
-        /* Snapshot, then act outside the lock — see broadcastMsg(). */
+        /* Snapshot, then act outside the lock — see broadcastMsg().
+         * Sends cached settings only; the poller refreshes the caches. */
         std::vector<std::shared_ptr<flight_safety_system::server::fss_client>> snapshot;
         {
             std::scoped_lock guard(this->lock);
@@ -179,6 +184,30 @@ public:
         {
             client->sendSMMSettings();
         }
+    };
+    /* Synchronous DB reads; poller thread only — see the main-loop DB
+     * contract in server.cpp. */
+    void refreshSmmSettings()
+    {
+        std::vector<std::shared_ptr<flight_safety_system::server::fss_client>> snapshot;
+        {
+            std::scoped_lock guard(this->lock);
+            std::copy(this->clients.begin(), this->clients.end(), std::back_inserter(snapshot));
+        }
+        for (const auto &client : snapshot)
+        {
+            client->refreshSmmSettings();
+        }
+    };
+    void setCachedServerList(std::shared_ptr<flight_safety_system::transport::fss_message_server_list> msg)
+    {
+        std::scoped_lock guard(this->lock);
+        this->cached_server_list = std::move(msg);
+    };
+    auto getCachedServerList() -> std::shared_ptr<flight_safety_system::transport::fss_message_server_list>
+    {
+        std::scoped_lock guard(this->lock);
+        return this->cached_server_list;
     };
     void sendRTTRequest(const std::shared_ptr<flight_safety_system::transport::fss_message_rtt_request> &rtt_req)
     {

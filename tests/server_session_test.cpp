@@ -1180,8 +1180,8 @@ TEST_CASE("session: rtt_request from identified client receives rtt_response")
 
 TEST_CASE("session: sendSMMSettings returns early when asset_id is zero")
 {
-    /* sendSMMSettings() guards against asset_id==0 (unidentified client)
-     * and must return without calling getSmmSettings on the database. */
+    /* An unidentified client (asset_id==0) has an empty settings cache and
+     * must neither send a message nor touch the database. */
     fss_test::MockDatabase mock;
     /* Do NOT add an asset_id entry — the client will remain unidentified
      * so cached_asset_id stays 0 after any processMessage call. */
@@ -1192,9 +1192,48 @@ TEST_CASE("session: sendSMMSettings returns early when asset_id is zero")
     auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
 
     const std::size_t before = conn->sent.size();
-    session->sendSMMSettings(); /* asset_id == 0 → early return */
-    /* No smm_settings message should have been sent. */
+    session->sendSMMSettings();    /* empty cache → nothing sent */
+    session->refreshSmmSettings(); /* asset_id == 0 → early return, no DB read */
     REQUIRE(conn->sent.size() == before);
+    REQUIRE(mock.smm_reads == 0);
+}
+
+TEST_CASE("session: sendSMMSettings sends from cache without re-reading the database")
+{
+    /* The main loop calls sendSMMSettings() every 15 s; it must serve the
+     * cache primed at identify time (and refreshed by the poller thread),
+     * never performing a synchronous DB read itself. */
+    fss_test::MockDatabase mock;
+    constexpr uint64_t asset_id = 14;
+    mock.asset_ids["craft"] = asset_id;
+    mock.smm[asset_id] = std::make_shared<fss::server::smm_settings>("https://smm.test", fss::secure_string{"u"},
+                                                                     fss::secure_string{"p"});
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+
+    const int reads_after_identify = mock.smm_reads;
+    REQUIRE(reads_after_identify >= 1); /* identify primes the cache */
+
+    /* Drop the DB entry: a cache-respecting send still delivers the cached
+     * settings and performs no new read. */
+    mock.smm.clear();
+    conn->sent.clear();
+    session->sendSMMSettings();
+    REQUIRE(find_sent<fss::transport::fss_message_smm_settings>(conn->sent) != nullptr);
+    REQUIRE(mock.smm_reads == reads_after_identify);
+
+    /* refreshSmmSettings (poller path) re-reads: the entry is gone, so the
+     * cache empties and nothing further is sent. */
+    session->refreshSmmSettings();
+    REQUIRE(mock.smm_reads == reads_after_identify + 1);
+    conn->sent.clear();
+    session->sendSMMSettings();
+    REQUIRE(find_sent<fss::transport::fss_message_smm_settings>(conn->sent) == nullptr);
 }
 
 TEST_CASE("session: sendRTTRequest skips second request within retry interval")
