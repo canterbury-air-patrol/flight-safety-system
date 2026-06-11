@@ -501,6 +501,12 @@ flight_safety_system::transport::fss_listen::fss_listen(uint16_t t_port, fss_con
     this->startListening();
 }
 
+flight_safety_system::transport::fss_listen::fss_listen(uint16_t t_port, fss_connect_cb t_cb, defer_start_t /*tag*/)
+    : fss_connection(), port(t_port), cb(std::move(t_cb))
+{
+    /* Derived constructor calls startListening() when it is done. */
+}
+
 flight_safety_system::transport::fss_listen::~fss_listen()
 {
     this->disconnect();

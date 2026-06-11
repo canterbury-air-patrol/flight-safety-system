@@ -191,12 +191,19 @@ public:
 class fss_listen : public fss_connection {
 private:
     uint16_t port;
-    auto startListening() -> bool;
     fss_connect_cb cb;
     static constexpr int default_max_pending_conns = 10;
     int max_pending_connections{default_max_pending_conns};
 protected:
     virtual auto newConnection(int fd) -> std::shared_ptr<flight_safety_system::transport::fss_connection>;
+    /* Binds, listens, and starts the accept thread. The public constructor
+     * calls this; derived classes use the defer_start_t constructor and call
+     * it at the END of their own constructor instead, so the accept thread
+     * (which virtual-dispatches processMessages/newConnection and reads
+     * derived members) can never observe a partially constructed object. */
+    auto startListening() -> bool;
+    struct defer_start_t {};
+    fss_listen(uint16_t t_port, fss_connect_cb t_cb, defer_start_t);
 public:
     fss_listen(uint16_t t_port, fss_connect_cb t_cb);
     fss_listen(fss_listen &) = delete;
