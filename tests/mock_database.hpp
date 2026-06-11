@@ -104,9 +104,14 @@ public:
 
     auto getSmmSettings(uint64_t asset_id) -> std::shared_ptr<flight_safety_system::server::smm_settings> override
     {
+        smm_reads++;
         auto it = smm.find(asset_id);
         return it == smm.end() ? nullptr : it->second;
     }
+
+    /* Number of getSmmSettings calls — lets tests assert that send paths
+     * use the cache rather than re-reading the database. */
+    int smm_reads{0};
 
     auto isConnected() const -> bool override { return true; }
     void tryReconnectIfNeeded() override {}

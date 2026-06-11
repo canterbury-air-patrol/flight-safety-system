@@ -153,6 +153,10 @@ private:
     std::atomic<uint64_t> expected_seq{0};
     std::atomic<uint64_t> cached_asset_id{0};
     std::shared_ptr<asset_command> pending_command{nullptr};
+    /* Guarded by client_lock. Refreshed by refreshSmmSettings() (poller
+     * thread, plus once at identify time); read by sendSMMSettings() so the
+     * main loop never performs a synchronous DB read. */
+    std::shared_ptr<smm_settings> cached_smm_settings{nullptr};
     std::string name{};
     std::mutex client_lock{};
     std::list<std::shared_ptr<fss_client_rtt>> outstanding_rtt_requests{};
@@ -186,6 +190,10 @@ public:
     void activate();
     void processMessage(std::shared_ptr<transport::fss_message> message) override;
     void sendRTTRequest(const std::shared_ptr<transport::fss_message_rtt_request> &rtt_req);
+    /* Synchronous DB read; called from the command poller thread (and once
+     * from the recv thread at identify time) — never from the main loop. */
+    void refreshSmmSettings();
+    /* Sends the cached settings only; no DB access. */
     void sendSMMSettings();
     void sendCommand();
     auto isAircraft() -> bool;

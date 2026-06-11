@@ -311,7 +311,7 @@ void fss::server::fss_client::sendRTTRequest(const std::shared_ptr<fss::transpor
     }
 }
 
-void fss::server::fss_client::sendSMMSettings()
+void fss::server::fss_client::refreshSmmSettings()
 {
     uint64_t asset_id = this->cached_asset_id.load();
     if (asset_id == 0)
@@ -319,6 +319,17 @@ void fss::server::fss_client::sendSMMSettings()
         return;
     }
     auto smm = this->dbc->getSmmSettings(asset_id);
+    std::scoped_lock guard(this->client_lock);
+    this->cached_smm_settings = std::move(smm);
+}
+
+void fss::server::fss_client::sendSMMSettings()
+{
+    std::shared_ptr<smm_settings> smm;
+    {
+        std::scoped_lock guard(this->client_lock);
+        smm = this->cached_smm_settings;
+    }
     if (smm != nullptr)
     {
         auto settings_msg = std::make_shared<fss::transport::fss_message_smm_settings>(
@@ -464,6 +475,10 @@ void fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss
                 this->identified = true;
                 FSS_LOG_INFO("server", "Aircraft client identified: " << this->getName());
                 this->sendCommand();
+                /* Identify runs on the recv thread, where a synchronous DB
+                 * read is allowed — prime the cache so the settings go out
+                 * now rather than after the poller's next refresh. */
+                this->refreshSmmSettings();
                 this->sendSMMSettings();
                 this->getConnection()->sendMsg(getServersListMsg(this->dbc));
             }
