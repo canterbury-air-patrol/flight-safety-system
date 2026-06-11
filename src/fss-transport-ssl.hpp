@@ -25,6 +25,13 @@ private:
     std::string private_key_file;
     std::string public_key_file;
     std::string crl_file;
+    /* Each contains the gnutlsxx exception for one credential-loading step,
+     * logging the offending file and returning false (see the exception
+     * contract above). */
+    auto loadTrustFile() -> bool;
+    auto loadKeyPair() -> bool;
+    auto loadCrl() -> bool;
+    auto attachCredentials() -> bool;
 protected:
     /* session and possible_names (in fss_connection_server) are written only
      * during setupSSL(), which completes before startRecvThread() — so they
