@@ -20,6 +20,27 @@
 extern const char *inet_ntop_stor(struct sockaddr_storage *src, char *dst, size_t dstlen, uint16_t *port);
 #endif
 
+namespace {
+
+/* gnutls_init (via the gnutls::session constructors) can throw; contain it
+ * so session construction follows the same no-throw contract as the
+ * credential loaders. Returns the derived type so callers can use the
+ * session-specific API without a downcast. */
+template<typename SessionT> auto make_session_or_log(const char *what) -> std::unique_ptr<SessionT>
+{
+    try
+    {
+        return std::make_unique<SessionT>();
+    }
+    catch (const gnutls::exception &e)
+    {
+        FSS_LOG_ERROR("ssl", "Failed to initialise " << what << ": " << e.what());
+        return nullptr;
+    }
+}
+
+} // anonymous namespace
+
 flight_safety_system::transport_ssl::fss_connection::fss_connection(std::string t_ca, std::string t_private_key,
                                                                     std::string t_public_key, std::string t_crl)
     : flight_safety_system::transport::fss_connection(), credentials(new gnutls::certificate_credentials()),
@@ -155,6 +176,73 @@ auto flight_safety_system::transport_ssl::fss_connection_client::create(std::str
     return conn;
 }
 
+/* The gnutlsxx wrappers throw on failure (missing file, unreadable key,
+ * malformed PEM). Each loader below contains the exception for one step so
+ * misconfiguration surfaces as setupSession() returning false — never as a
+ * gnutls::exception escaping the library API (see the contract note in the
+ * header). */
+auto flight_safety_system::transport_ssl::fss_connection::loadTrustFile() -> bool
+{
+    try
+    {
+        this->credentials->set_x509_trust_file(this->ca_file.c_str(), GNUTLS_X509_FMT_PEM);
+        return true;
+    }
+    catch (const gnutls::exception &e)
+    {
+        FSS_LOG_ERROR("ssl", "Failed to load CA trust file '" << this->ca_file << "': " << e.what());
+        return false;
+    }
+}
+
+auto flight_safety_system::transport_ssl::fss_connection::loadKeyPair() -> bool
+{
+    try
+    {
+        this->credentials->set_x509_key_file(this->public_key_file.c_str(), this->private_key_file.c_str(),
+                                             GNUTLS_X509_FMT_PEM);
+        return true;
+    }
+    catch (const gnutls::exception &e)
+    {
+        FSS_LOG_ERROR("ssl", "Failed to load key pair (cert '" << this->public_key_file << "', key '"
+                                                               << this->private_key_file << "'): " << e.what());
+        return false;
+    }
+}
+
+auto flight_safety_system::transport_ssl::fss_connection::loadCrl() -> bool
+{
+    if (this->crl_file.empty())
+    {
+        return true;
+    }
+    try
+    {
+        this->credentials->set_x509_crl_file(this->crl_file.c_str(), GNUTLS_X509_FMT_PEM);
+        return true;
+    }
+    catch (const gnutls::exception &e)
+    {
+        FSS_LOG_ERROR("ssl", "Failed to load CRL file '" << this->crl_file << "': " << e.what());
+        return false;
+    }
+}
+
+auto flight_safety_system::transport_ssl::fss_connection::attachCredentials() -> bool
+{
+    try
+    {
+        this->session->set_credentials(*this->credentials);
+        return true;
+    }
+    catch (const gnutls::exception &e)
+    {
+        FSS_LOG_ERROR("ssl", "Failed to attach credentials to TLS session: " << e.what());
+        return false;
+    }
+}
+
 auto flight_safety_system::transport_ssl::fss_connection::setupSession() -> bool
 {
     const char *err_pos = nullptr;
@@ -162,7 +250,7 @@ auto flight_safety_system::transport_ssl::fss_connection::setupSession() -> bool
     {
         this->session->set_priority("SECURE256:+SECURE128:-VERS-TLS1.0:-VERS-TLS1.1:%SERVER_PRECEDENCE", &err_pos);
     }
-    catch (gnutls::exception &ex)
+    catch (const gnutls::exception &ex)
     {
         FSS_LOG_ERROR("ssl",
                       "Failed to set TLS priority: " << ex.what() << (err_pos ? std::string(" near: ") + err_pos : ""));
@@ -170,49 +258,8 @@ auto flight_safety_system::transport_ssl::fss_connection::setupSession() -> bool
         return false;
     }
 
-    /* The gnutlsxx wrappers throw on failure (missing file, unreadable key,
-     * malformed PEM). Contain every load here so misconfiguration surfaces
-     * as setupSession() returning false — never as a gnutls::exception
-     * escaping the library API (see the contract note in the header). */
-    try
+    if (!this->loadTrustFile() || !this->loadKeyPair() || !this->loadCrl() || !this->attachCredentials())
     {
-        this->credentials->set_x509_trust_file(this->ca_file.c_str(), GNUTLS_X509_FMT_PEM);
-    }
-    catch (gnutls::exception &e)
-    {
-        FSS_LOG_ERROR("ssl", "Failed to load CA trust file '" << this->ca_file << "': " << e.what());
-        return false;
-    }
-    try
-    {
-        this->credentials->set_x509_key_file(this->public_key_file.c_str(), this->private_key_file.c_str(),
-                                             GNUTLS_X509_FMT_PEM);
-    }
-    catch (gnutls::exception &e)
-    {
-        FSS_LOG_ERROR("ssl", "Failed to load key pair (cert '" << this->public_key_file << "', key '"
-                                                               << this->private_key_file << "'): " << e.what());
-        return false;
-    }
-    if (!this->crl_file.empty())
-    {
-        try
-        {
-            this->credentials->set_x509_crl_file(this->crl_file.c_str(), GNUTLS_X509_FMT_PEM);
-        }
-        catch (gnutls::exception &e)
-        {
-            FSS_LOG_ERROR("ssl", "Failed to load CRL file '" << this->crl_file << "': " << e.what());
-            return false;
-        }
-    }
-    try
-    {
-        this->session->set_credentials(*this->credentials);
-    }
-    catch (gnutls::exception &e)
-    {
-        FSS_LOG_ERROR("ssl", "Failed to attach credentials to TLS session: " << e.what());
         return false;
     }
 
@@ -222,18 +269,13 @@ auto flight_safety_system::transport_ssl::fss_connection::setupSession() -> bool
 
 auto flight_safety_system::transport_ssl::fss_connection_client::setupSSL() -> bool
 {
-    gnutls::client_session *clientSession = nullptr;
-    try
+    auto new_session = make_session_or_log<gnutls::client_session>("TLS client session");
+    if (new_session == nullptr)
     {
-        clientSession = new gnutls::client_session();
-    }
-    catch (gnutls::exception &e)
-    {
-        FSS_LOG_ERROR("ssl", "Failed to initialise TLS client session: " << e.what());
         return false;
     }
-
-    this->session = std::unique_ptr<gnutls::session>(clientSession);
+    auto *clientSession = new_session.get();
+    this->session = std::move(new_session);
 
     if (!this->setupSession())
     {
@@ -262,18 +304,13 @@ auto flight_safety_system::transport_ssl::fss_connection_client::setupSSL() -> b
 
 auto flight_safety_system::transport_ssl::fss_connection_server::setupSSL() -> bool
 {
-    gnutls::server_session *serverSession = nullptr;
-    try
+    auto new_session = make_session_or_log<gnutls::server_session>("TLS server session");
+    if (new_session == nullptr)
     {
-        serverSession = new gnutls::server_session();
-    }
-    catch (gnutls::exception &e)
-    {
-        FSS_LOG_ERROR("ssl", "Failed to initialise TLS server session: " << e.what());
         return false;
     }
-
-    this->session = std::unique_ptr<gnutls::session>(serverSession);
+    auto *serverSession = new_session.get();
+    this->session = std::move(new_session);
 
     if (!this->setupSession())
     {
