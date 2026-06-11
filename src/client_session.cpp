@@ -56,8 +56,10 @@ auto fss::server::fss_server_details::getPort() -> uint16_t
 
 // NOLINTBEGIN(bugprone-easily-swappable-parameters)
 fss::server::asset_command::asset_command(uint64_t t_dbid, uint64_t t_timestamp, const std::string &t_cmd,
-                                          double t_latitude, double t_longitude, uint32_t t_altitude)
-    : dbid(t_dbid), timestamp(t_timestamp), latitude(t_latitude), longitude(t_longitude), altitude(t_altitude)
+                                          double t_latitude, double t_longitude, uint32_t t_altitude,
+                                          bool t_altitude_valid)
+    : dbid(t_dbid), timestamp(t_timestamp), latitude(t_latitude), longitude(t_longitude), altitude(t_altitude),
+      altitude_valid(t_altitude_valid)
 // NOLINTEND(bugprone-easily-swappable-parameters)
 {
     if (t_cmd == "RTL")
@@ -121,6 +123,10 @@ auto fss::server::asset_command::getLongitude() -> double
 auto fss::server::asset_command::getAltitude() -> uint32_t
 {
     return this->altitude;
+}
+auto fss::server::asset_command::isAltitudeValid() -> bool
+{
+    return this->altitude_valid;
 }
 
 // NOLINTBEGIN(bugprone-easily-swappable-parameters)
@@ -207,6 +213,14 @@ void fss::server::fss_client::sendCommand()
             FSS_LOG_ERROR("server", "Refusing to dispatch GOTO command with invalid coordinates to "
                                         << this->name << " (dbid=" << ac->getDBId() << ", lat=" << ac->getLatitude()
                                         << ", lon=" << ac->getLongitude() << ")");
+            return;
+        }
+        if (command == fss::transport::asset_command_altitude && !ac->isAltitudeValid())
+        {
+            /* A NULL altitude must not dispatch as 0 — that is a
+             * descend-to-ground instruction. */
+            FSS_LOG_ERROR("server", "Refusing to dispatch ALT command with NULL altitude to "
+                                        << this->name << " (dbid=" << ac->getDBId() << ")");
             return;
         }
         std::shared_ptr<fss::transport::fss_message_asset_command> msg = nullptr;

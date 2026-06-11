@@ -1,5 +1,6 @@
 #include "server-db.h"
 
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -162,9 +163,14 @@ db_asset_command_get(const char *conn_arg, unsigned long long asset_id_arg)
             }
             res->dbid = id;
             res->timestamp = ts;
-            res->latitude = lat;
-            res->longitude = lng;
+            /* A NULL position must not decode as (0,0) -- Null Island is a
+             * legal coordinate, so a GOTO built from it would dispatch.  Map
+             * NULL to NaN, which the dispatch layer's coordinate validation
+             * refuses.  Altitude has no NaN, so carry an explicit flag. */
+            res->latitude = (lat_ind < 0) ? NAN : lat;
+            res->longitude = (lng_ind < 0) ? NAN : lng;
             res->altitude = alt;
+            res->altitude_null = (alt_ind < 0);
         }
     }
     return res;
@@ -217,7 +223,7 @@ db_asset_smm_settings_get(const char *conn_arg, unsigned long long asset_id_arg)
     int success = 0;
     EXEC SQL END DECLARE SECTION;
 
-    EXEC SQL AT :conn SELECT 1, SMM.address, SMM.port, SMM.https, A.smm_login, A.smm_password A INTO :success, :server_address, :server_port, :server_https, :smm_login, :smm_password FROM config_assetconfig AS A, config_smmconfig AS SMM WHERE A.asset_id = :asset_id AND A.smm_id = SMM.id;
+    EXEC SQL AT :conn SELECT 1, SMM.address, SMM.port, SMM.https, A.smm_login, A.smm_password INTO :success, :server_address, :server_port, :server_https, :smm_login, :smm_password FROM config_assetconfig AS A, config_smmconfig AS SMM WHERE A.asset_id = :asset_id AND A.smm_id = SMM.id;
 
 
     struct smm_settings_s *settings = NULL;

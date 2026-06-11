@@ -47,15 +47,20 @@ private:
     double latitude;
     double longitude;
     uint32_t altitude;
+    /* False when the DB row's altitude was NULL: altitude is unsigned, so
+     * unlike a NULL position (NaN) it has no in-band sentinel. sendCommand
+     * refuses to dispatch an ALT command without a valid altitude. */
+    bool altitude_valid;
 public:
     asset_command(uint64_t t_dbid, uint64_t t_timestamp, const std::string &t_cmd, double t_latitude,
-                  double t_longitude, uint32_t t_altitude);
+                  double t_longitude, uint32_t t_altitude, bool t_altitude_valid = true);
     auto getDBId() -> uint64_t;
     auto getTimeStamp() -> uint64_t;
     auto getCommand() -> transport::fss_asset_command;
     auto getLatitude() -> double;
     auto getLongitude() -> double;
     auto getAltitude() -> uint32_t;
+    auto isAltitudeValid() -> bool;
 };
 
 /* Pure-virtual database seam: lets ClientSession be unit-tested against

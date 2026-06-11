@@ -10,6 +10,7 @@
 #error No catch header
 #endif
 
+#include <cmath>
 #include <limits>
 #include <list>
 #include <memory>
@@ -835,6 +836,65 @@ TEST_CASE("session: sendCommand skips unknown command type")
     session->sendCommand();
 
     REQUIRE(find_sent<fss::transport::fss_message_asset_command>(conn->sent) == nullptr);
+}
+
+TEST_CASE("session: sendCommand refuses GOTO built from a NULL position")
+{
+    /* A command row with a NULL position maps to NaN coordinates in the DB
+     * layer (db_asset_command_get); the dispatch guard must refuse it rather
+     * than send the aircraft to whatever the host vars happened to hold. */
+    fss_test::MockDatabase mock;
+    constexpr uint64_t asset_id = 21;
+    mock.asset_ids["craft"] = asset_id;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+    conn->sent.clear();
+
+    auto null_pos_goto = std::make_shared<fss::server::asset_command>(100, 2000, "GOTO", NAN, NAN, 0);
+    session->setPendingCommand(null_pos_goto);
+    session->sendCommand();
+
+    REQUIRE(find_sent<fss::transport::fss_message_asset_command>(conn->sent) == nullptr);
+}
+
+TEST_CASE("session: sendCommand refuses ALT built from a NULL altitude")
+{
+    /* A command row with a NULL altitude must not dispatch as altitude 0 -
+     * that is a descend-to-ground instruction. The DB layer flags the NULL
+     * via altitude_valid=false. */
+    fss_test::MockDatabase mock;
+    constexpr uint64_t asset_id = 22;
+    mock.asset_ids["craft"] = asset_id;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+    conn->sent.clear();
+
+    auto null_alt =
+        std::make_shared<fss::server::asset_command>(101, 2000, "ALT", 0.0, 0.0, 0, /*altitude_valid*/ false);
+    session->setPendingCommand(null_alt);
+    session->sendCommand();
+    REQUIRE(find_sent<fss::transport::fss_message_asset_command>(conn->sent) == nullptr);
+
+    /* The same command with a real altitude dispatches normally. */
+    auto valid_alt = std::make_shared<fss::server::asset_command>(102, 2001, "ALT", 0.0, 0.0, 250);
+    session->setPendingCommand(valid_alt);
+    session->sendCommand();
+    auto cmd_msg = find_sent<fss::transport::fss_message_asset_command>(conn->sent);
+    REQUIRE(cmd_msg != nullptr);
+    REQUIRE(cmd_msg->getCommand() == fss::transport::asset_command_altitude);
+    REQUIRE(cmd_msg->getAltitude() == 250);
 }
 
 TEST_CASE("session: sendSMMSettings sends smm_settings message when db returns settings")
