@@ -271,3 +271,11 @@ jobs:
         ASAN_OPTIONS: detect_leaks=0
         UBSAN_OPTIONS: print_stacktrace=1
       run: make check
+
+    # The automake test driver buries the sanitizer report in log files;
+    # without this step a failure here is undiagnosable from the job log.
+    - name: show test logs on failure
+      if: failure()
+      run: |
+        cat tests/test-suite.log 2>/dev/null || true
+        cat tests/all_test.log 2>/dev/null || true
