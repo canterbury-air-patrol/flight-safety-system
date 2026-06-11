@@ -108,6 +108,11 @@ auto flight_safety_system::transport::fss_connection::getDroppedMessages() -> ui
     return this->dropped_messages.load();
 }
 
+auto flight_safety_system::transport::fss_connection::getNullMsgCount() -> uint64_t
+{
+    return this->consecutive_null_msgs.load();
+}
+
 void flight_safety_system::transport::fss_connection::disconnect()
 {
     this->run.store(false);
@@ -171,9 +176,19 @@ void flight_safety_system::transport::fss_connection::processMessages()
         auto msg = this->recvMsg();
         if (msg == nullptr)
         {
-            FSS_LOG_WARN("transport", "Got a null msg");
+            /* Undecodable frame (zero/short declared length, unknown type,
+             * or decode mismatch). A peer streaming garbage drives this
+             * loop at line rate, so throttle the log to the first frame and
+             * every null_msg_log_interval-th after — otherwise a single bad
+             * peer floods the log unboundedly. */
+            uint64_t nulls = ++this->consecutive_null_msgs;
+            if (nulls == 1 || (nulls % null_msg_log_interval) == 0)
+            {
+                FSS_LOG_WARN("transport", "Got a null msg (" << nulls << " consecutive undecodable frames)");
+            }
             continue;
         }
+        this->consecutive_null_msgs.store(0);
         if (msg->getType() == message_type_closed)
         {
             FSS_LOG_INFO("transport", "Remote closed the connection");

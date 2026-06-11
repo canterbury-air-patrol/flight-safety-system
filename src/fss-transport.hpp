@@ -153,6 +153,12 @@ class fss_connection {
     std::mutex msg_lock{};
     size_t max_queue_size{default_max_queue_size};
     std::atomic<uint64_t> dropped_messages{0};
+    /* Consecutive undecodable frames from the peer; reset by the next
+     * successfully decoded message. Drives log throttling in
+     * processMessages() — atomic so tests/monitoring can read it from
+     * another thread. */
+    std::atomic<uint64_t> consecutive_null_msgs{0};
+    static constexpr uint64_t null_msg_log_interval = 100;
     std::atomic<uint16_t> negotiated_version{FSS_PROTOCOL_VERSION_LEGACY};
 protected:
     auto recvMsg() -> std::shared_ptr<fss_message>;
@@ -171,6 +177,7 @@ public:
     fss_connection();
     static auto create(int fd, size_t t_max_queue_size = default_max_queue_size) -> std::shared_ptr<fss_connection>;
     auto getDroppedMessages() -> uint64_t;
+    auto getNullMsgCount() -> uint64_t;
     fss_connection(fss_connection &) = delete;
     fss_connection(fss_connection &&) = delete;
     auto operator=(fss_connection &) -> fss_connection & = delete;

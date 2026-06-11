@@ -13,6 +13,9 @@
 #include <memory>
 #include <string>
 
+#include <sys/socket.h>
+#include <unistd.h>
+
 #include "fss-transport.hpp"
 #include "test_helpers.hpp"
 
@@ -43,6 +46,56 @@ using flight_safety_system::transport::message_type_server_list;
 using flight_safety_system::transport::message_type_smm_settings;
 using flight_safety_system::transport::message_type_system_status;
 using flight_safety_system::transport::message_type_unknown;
+
+TEST_CASE("malformed: undecodable frame stream is log-throttled and survivable")
+{
+    /* A connected peer streaming garbage frames used to emit one WARN per
+     * frame — unbounded log growth at line rate.  The log is now throttled
+     * to the first frame and every 100th after, the connection stays up,
+     * and a subsequent valid message resets the counter and is delivered. */
+    fss_test::capture_cerr capture; /* installed before the recv thread starts */
+    int fds[2];
+    REQUIRE(::socketpair(AF_UNIX, SOCK_STREAM, 0, fds) == 0);
+    fss_test::scoped_fd peer(fds[1]);
+    auto conn = flight_safety_system::transport::fss_connection::create(fds[0]);
+
+    /* Unknown-type frame, declared length 16 (8-byte aligned so recvMsg
+     * consumes exactly what is written): header (12) + 4 padding bytes. */
+    constexpr uint64_t frames = 250;
+    auto garbage = fss_test::make_framed_buffer(0x00FFU, 1, std::string(4, '\0'), 16);
+    for (uint64_t i = 0; i < frames; i++)
+    {
+        REQUIRE(::write(peer.get(), garbage->getData(), garbage->getLength()) ==
+                static_cast<ssize_t>(garbage->getLength()));
+    }
+    REQUIRE(fss_test::wait_for([&]() { return conn->getNullMsgCount() >= frames; }));
+    REQUIRE(conn->getNullMsgCount() == frames);
+
+    /* A valid message is still delivered and resets the counter. */
+    auto ident = std::make_shared<fss_message_identity>("recovers");
+    ident->setId(2);
+    auto good = ident->getPacked();
+    REQUIRE(::write(peer.get(), good->getData(), good->getLength()) == static_cast<ssize_t>(good->getLength()));
+    std::shared_ptr<fss_message> msg;
+    REQUIRE(fss_test::wait_for([&]() {
+        msg = conn->getMsg();
+        return msg != nullptr;
+    }));
+    REQUIRE(msg->getType() == message_type_identity);
+    REQUIRE(conn->getNullMsgCount() == 0);
+
+    conn->disconnect();
+
+    /* 250 garbage frames log at 1, 100, and 200 — three lines, not 250. */
+    const std::string logged = capture.str();
+    std::size_t occurrences = 0;
+    for (std::size_t pos = logged.find("Got a null msg"); pos != std::string::npos;
+         pos = logged.find("Got a null msg", pos + 1))
+    {
+        occurrences++;
+    }
+    REQUIRE(occurrences == 3);
+}
 
 TEST_CASE("malformed: decode returns nullptr for buffer shorter than header")
 {
