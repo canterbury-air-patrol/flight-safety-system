@@ -277,5 +277,4 @@ jobs:
     - name: show test logs on failure
       if: failure()
       run: |
-        cat tests/test-suite.log 2>/dev/null || true
-        cat tests/all_test.log 2>/dev/null || true
+        cat tests/*.log 2>/dev/null || true
