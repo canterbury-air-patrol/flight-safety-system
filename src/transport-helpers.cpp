@@ -97,7 +97,11 @@ void set_tcp_keepalive(int fd)
      * transmitted data may stay unacknowledged before the kernel errors the
      * connection out, matching the 30 s liveness timeout the server already
      * applies at the application layer (default client_timeout). */
-    unsigned int user_timeout_ms = 30000;
+    /* tcp(7): TCP_USER_TIMEOUT takes an unsigned int (milliseconds). The
+     * regression test pins this value with a literal on purpose - changing
+     * it must consciously break the test. */
+    constexpr unsigned int tcp_user_timeout_ms = 30000;
+    unsigned int user_timeout_ms = tcp_user_timeout_ms;
     if (setsockopt(fd, IPPROTO_TCP, TCP_USER_TIMEOUT, &user_timeout_ms, sizeof(user_timeout_ms)) < 0)
     {
         FSS_PERROR("transport", "setsockopt TCP_USER_TIMEOUT failed");
