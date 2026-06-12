@@ -371,6 +371,16 @@ void flight_safety_system::client_ssl::fss_server::setClock(std::shared_ptr<flig
     this->clock = std::move(t_clock);
 }
 
+/* Restore the backoff state to its cold-start values. Only ever called from
+ * the thread driving reconnection (see the ownership note in the header). */
+void flight_safety_system::client_ssl::fss_server::resetBackoff()
+{
+    this->last_tried = 0;
+    this->retry_count = 0;
+    this->retry_delay = retry_delay_start;
+    this->effective_delay = retry_delay_start;
+}
+
 auto flight_safety_system::client_ssl::fss_server::reconnect() -> bool
 {
     /* Consume a reset requested by the recv thread (connection closed):
@@ -379,10 +389,7 @@ auto flight_safety_system::client_ssl::fss_server::reconnect() -> bool
      * atomic flag is the only cross-thread hand-off. */
     if (this->backoff_reset_requested.exchange(false))
     {
-        this->last_tried = 0;
-        this->retry_count = 0;
-        this->retry_delay = retry_delay_start;
-        this->effective_delay = retry_delay_start;
+        this->resetBackoff();
     }
 
     uint64_t ts = this->clock->now_ms();
@@ -418,10 +425,7 @@ auto flight_safety_system::client_ssl::fss_server::reconnect() -> bool
              * exchanged after TLS connect, before identity. */
             this->sendVersion();
             this->sendIdentify();
-            this->retry_count = 0;
-            this->last_tried = 0;
-            this->retry_delay = retry_delay_start;
-            this->effective_delay = retry_delay_start;
+            this->resetBackoff();
             return true;
         }
     }

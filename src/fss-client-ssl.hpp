@@ -82,6 +82,7 @@ private:
     uint64_t effective_delay{retry_delay_start};
     std::mt19937 rng{std::random_device{}()};
     std::atomic<bool> backoff_reset_requested{false};
+    void resetBackoff();
     std::shared_ptr<flight_safety_system::IClock> clock{std::make_shared<flight_safety_system::MonotonicClock>()};
     std::atomic<bool> liveness_active{false};
     std::atomic<uint64_t> last_message_received_time{0};
