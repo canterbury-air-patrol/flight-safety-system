@@ -26,6 +26,17 @@ private:
      * allowed to read the DB for it); broadcast by the main loop, which must
      * never perform a synchronous DB read. */
     std::shared_ptr<flight_safety_system::transport::fss_message_server_list> cached_server_list{};
+    /* Copy the client list under the lock so the caller can act on it
+     * outside the lock: sends block on sockets and disconnect() joins recv
+     * threads, and neither may ever run while holding it.  A client that is
+     * disconnected mid-iteration stays alive via the snapshot's shared_ptr
+     * and the operation fails harmlessly; one connected mid-iteration is
+     * covered by the caller's next pass. */
+    auto snapshotClients() -> std::vector<std::shared_ptr<flight_safety_system::server::fss_client>>
+    {
+        std::scoped_lock guard(this->lock);
+        return {this->clients.begin(), this->clients.end()};
+    }
 public:
     server_clients() = default;
     ~server_clients() override
@@ -136,18 +147,7 @@ public:
     void broadcastMsg(const std::shared_ptr<flight_safety_system::transport::fss_message> &msg,
                       flight_safety_system::server::fss_client *except = nullptr) override
     {
-        /* Snapshot, then send outside the lock (as sendRTTRequest does):
-         * sends block on the socket, and holding the global lock across a
-         * blocking send lets one stuck client stall every recv thread that
-         * needs clientDisconnected()/broadcastMsg() — and the main loop.
-         * A client disconnected mid-iteration is harmless: the snapshot's
-         * shared_ptr keeps it alive and the send just fails. */
-        std::vector<std::shared_ptr<flight_safety_system::server::fss_client>> snapshot;
-        {
-            std::scoped_lock guard(this->lock);
-            std::copy(this->clients.begin(), this->clients.end(), std::back_inserter(snapshot));
-        }
-        for (const auto &client : snapshot)
+        for (const auto &client : this->snapshotClients())
         {
             if (client->isAircraft() && client.get() != except)
             {
@@ -157,12 +157,7 @@ public:
     }
     void checkTimeouts()
     {
-        std::vector<std::shared_ptr<flight_safety_system::server::fss_client>> snapshot;
-        {
-            std::scoped_lock guard(this->lock);
-            std::copy(this->clients.begin(), this->clients.end(), std::back_inserter(snapshot));
-        }
-        for (const auto &client : snapshot)
+        for (const auto &client : this->snapshotClients())
         {
             if (client->isTimedOut())
             {
@@ -173,14 +168,8 @@ public:
     };
     void sendSMMSettings()
     {
-        /* Snapshot, then act outside the lock — see broadcastMsg().
-         * Sends cached settings only; the poller refreshes the caches. */
-        std::vector<std::shared_ptr<flight_safety_system::server::fss_client>> snapshot;
-        {
-            std::scoped_lock guard(this->lock);
-            std::copy(this->clients.begin(), this->clients.end(), std::back_inserter(snapshot));
-        }
-        for (const auto &client : snapshot)
+        /* Sends cached settings only; the poller refreshes the caches. */
+        for (const auto &client : this->snapshotClients())
         {
             client->sendSMMSettings();
         }
@@ -189,12 +178,7 @@ public:
      * contract in server.cpp. */
     void refreshSmmSettings()
     {
-        std::vector<std::shared_ptr<flight_safety_system::server::fss_client>> snapshot;
-        {
-            std::scoped_lock guard(this->lock);
-            std::copy(this->clients.begin(), this->clients.end(), std::back_inserter(snapshot));
-        }
-        for (const auto &client : snapshot)
+        for (const auto &client : this->snapshotClients())
         {
             client->refreshSmmSettings();
         }
@@ -211,57 +195,33 @@ public:
     };
     void sendRTTRequest(const std::shared_ptr<flight_safety_system::transport::fss_message_rtt_request> &rtt_req)
     {
-        std::vector<std::shared_ptr<flight_safety_system::server::fss_client>> snapshot;
-        {
-            std::scoped_lock guard(this->lock);
-            std::copy(this->clients.begin(), this->clients.end(), std::back_inserter(snapshot));
-        }
-        for (const auto &client : snapshot)
+        for (const auto &client : this->snapshotClients())
         {
             client->sendRTTRequest(rtt_req);
         }
     };
     void pollCommands(flight_safety_system::server::IDatabase *dbc)
     {
-        std::vector<std::pair<std::shared_ptr<flight_safety_system::server::fss_client>, uint64_t>> snapshot;
+        for (const auto &client : this->snapshotClients())
         {
-            std::scoped_lock guard(this->lock);
-            for (const auto &c : this->clients)
+            uint64_t asset_id = client->getCachedAssetId(); /* atomic */
+            if (asset_id != 0)
             {
-                uint64_t id = c->getCachedAssetId();
-                if (id != 0)
-                {
-                    snapshot.emplace_back(c, id);
-                }
+                client->setPendingCommand(dbc->getCommand(asset_id));
             }
-        }
-        for (auto &[client, asset_id] : snapshot)
-        {
-            client->setPendingCommand(dbc->getCommand(asset_id));
         }
     };
     void sendCommand()
     {
-        /* Snapshot, then act outside the lock — see broadcastMsg(). */
-        std::vector<std::shared_ptr<flight_safety_system::server::fss_client>> snapshot;
-        {
-            std::scoped_lock guard(this->lock);
-            std::copy(this->clients.begin(), this->clients.end(), std::back_inserter(snapshot));
-        }
-        for (const auto &client : snapshot)
+        for (const auto &client : this->snapshotClients())
         {
             client->sendCommand();
         }
     };
     auto disconnectRevokedClients(const std::string &crl_file) -> std::size_t
     {
-        std::vector<std::shared_ptr<flight_safety_system::server::fss_client>> snapshot;
-        {
-            std::scoped_lock guard(this->lock);
-            std::copy(this->clients.begin(), this->clients.end(), std::back_inserter(snapshot));
-        }
         std::size_t disconnected_count = 0;
-        for (const auto &client : snapshot)
+        for (const auto &client : this->snapshotClients())
         {
             auto conn = client->getConnection();
             if (conn && conn->isPeerCertRevoked(crl_file))
