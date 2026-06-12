@@ -97,6 +97,58 @@ TEST_CASE("malformed: undecodable frame stream is log-throttled and survivable")
     REQUIRE(occurrences == 3);
 }
 
+TEST_CASE("malformed: valid message mid-stream re-arms the log throttle")
+{
+    /* The throttle counter resets on every successfully decoded message, so
+     * a second garbage burst must log from its own frame 1 again - proving
+     * an honest peer interleaving valid traffic is never starved of the
+     * warning, and that the counter genuinely resets. */
+    fss_test::capture_cerr capture;
+    int fds[2];
+    REQUIRE(::socketpair(AF_UNIX, SOCK_STREAM, 0, fds) == 0);
+    fss_test::scoped_fd peer(fds[1]);
+    auto conn = flight_safety_system::transport::fss_connection::create(fds[0]);
+
+    constexpr uint64_t burst = 150; /* logs at 1 and 100 */
+    auto garbage = fss_test::make_framed_buffer(0x00FFU, 1, std::string(4, '\0'), 16);
+    auto send_burst = [&]() -> void {
+        for (uint64_t i = 0; i < burst; i++)
+        {
+            REQUIRE(::write(peer.get(), garbage->getData(), garbage->getLength()) ==
+                    static_cast<ssize_t>(garbage->getLength()));
+        }
+        REQUIRE(fss_test::wait_for([&]() { return conn->getNullMsgCount() >= burst; }));
+    };
+
+    send_burst();
+
+    /* Valid message: delivered, resets the counter. */
+    auto ident = std::make_shared<fss_message_identity>("midstream");
+    ident->setId(2);
+    auto good = ident->getPacked();
+    REQUIRE(::write(peer.get(), good->getData(), good->getLength()) == static_cast<ssize_t>(good->getLength()));
+    std::shared_ptr<fss_message> msg;
+    REQUIRE(fss_test::wait_for([&]() {
+        msg = conn->getMsg();
+        return msg != nullptr;
+    }));
+    REQUIRE(msg->getType() == message_type_identity);
+    REQUIRE(conn->getNullMsgCount() == 0);
+
+    send_burst();
+    conn->disconnect();
+
+    /* Two bursts of 150: throttle fires at 1 and 100 in each = 4 lines. */
+    const std::string logged = capture.str();
+    std::size_t occurrences = 0;
+    for (std::size_t pos = logged.find("Got a null msg"); pos != std::string::npos;
+         pos = logged.find("Got a null msg", pos + 1))
+    {
+        occurrences++;
+    }
+    REQUIRE(occurrences == 4);
+}
+
 TEST_CASE("malformed: decode returns nullptr for buffer shorter than header")
 {
     /* Header is 2 + 2 + 8 = 12 bytes. Anything shorter must not crash. */
