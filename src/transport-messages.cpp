@@ -119,11 +119,19 @@ static auto unpackString(const char *data, size_t length, size_t &offset, String
     }
     result.assign(data + offset, len);
     offset += len;
-    /* Align to 8-byte boundary */
+    /* Align to 8-byte boundary. This can push offset past length when the
+     * string ends near the buffer end; that is fine for the string itself
+     * (already fully read), and every subsequent reader guards against
+     * offset > length, but clamp so the overshoot can never be mistaken for
+     * available bytes. */
     size_t unpack_remainder = offset % sizeof(uint64_t);
     if (unpack_remainder != 0)
     {
         offset += sizeof(uint64_t) - unpack_remainder;
+    }
+    if (offset > length)
+    {
+        offset = length;
     }
     return true;
 }
@@ -137,7 +145,10 @@ class BufferReader {
     bool m_ok;
     auto ensureAvailable(size_t n) -> bool
     {
-        if (!m_ok || m_length - m_offset < n)
+        /* m_offset > m_length is possible after unpackString aligns the
+         * offset up past the end of the buffer; guard before subtracting so
+         * the size_t arithmetic cannot wrap and admit an out-of-bounds read. */
+        if (!m_ok || m_offset > m_length || m_length - m_offset < n)
         {
             m_ok = false;
             return false;
