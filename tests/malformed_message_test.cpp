@@ -278,6 +278,44 @@ TEST_CASE("decode type consistency: identity_non_aircraft")
     REQUIRE(std::dynamic_pointer_cast<fss_message_identity_non_aircraft>(decoded) != nullptr);
 }
 
+TEST_CASE("malformed: string alignment overshoot does not read past the buffer")
+{
+    /* Regression for a heap over-read: unpackString rounds the offset up to
+     * an 8-byte boundary, which can push it past the declared buffer length;
+     * BufferReader::ensureAvailable then subtracted (length - offset) as
+     * size_t and wrapped, admitting an out-of-bounds read on the following
+     * field. Craft a server_list whose single address ends so the alignment
+     * overshoots, then the loop attempts to read the next port (the
+     * underflow site). Pre-fix this aborts under ASan; post-fix the loop
+     * ends cleanly with exactly the one decoded server.
+     *
+     * Layout after the 12-byte header: port(2) + len(2) + 6 addr bytes = 22
+     * total. offset reaches 22, aligns up to 24 (> 22). */
+    std::string payload;
+    const uint16_t port_n = htons(1);
+    const uint16_t len_n = htons(6);
+    payload.append(reinterpret_cast<const char *>(&port_n), sizeof(port_n));
+    payload.append(reinterpret_cast<const char *>(&len_n), sizeof(len_n));
+    payload.append("abcdef", 6);
+    REQUIRE(payload.size() == 10);
+
+    auto framed = fss_test::make_framed_buffer(static_cast<uint16_t>(message_type_server_list), 1, payload,
+                                               static_cast<uint16_t>(12 + payload.size()));
+    /* Re-wrap at EXACT size, as recvMsg does: make_framed_buffer grows its
+     * string via append() and leaves spare capacity that would absorb the
+     * over-read, whereas the real receive path builds the buffer from the
+     * wire at precisely its length. */
+    auto bl = std::make_shared<buf_len>(framed->getData(), static_cast<uint16_t>(framed->getLength()));
+    auto decoded = fss_message::decode(bl);
+    REQUIRE(decoded != nullptr);
+    auto sl = std::dynamic_pointer_cast<fss_message_server_list>(decoded);
+    REQUIRE(sl != nullptr);
+    auto servers = sl->getServers();
+    REQUIRE(servers.size() == 1);
+    REQUIRE(servers[0].first == "abcdef");
+    REQUIRE(servers[0].second == 1);
+}
+
 TEST_CASE("decode type consistency: position_report")
 {
     auto orig =
