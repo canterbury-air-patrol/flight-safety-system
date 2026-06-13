@@ -102,6 +102,21 @@ void packString(const std::shared_ptr<flight_safety_system::transport::buf_len> 
     packStringRaw(bl, val.data(), val.size());
 }
 
+/* Advance a read offset to the next 8-byte boundary, clamped to the buffer
+ * length. The clamp makes the postcondition offset <= length explicit: a
+ * field ending near the buffer end can leave alignment padding that runs past
+ * the end, and clamping ensures a later reader can never mistake that padding
+ * for available bytes (which would wrap the size_t bounds check). */
+static auto align_read_offset(size_t offset, size_t length) -> size_t
+{
+    size_t remainder = offset % sizeof(uint64_t);
+    if (remainder != 0)
+    {
+        offset += sizeof(uint64_t) - remainder;
+    }
+    return offset > length ? length : offset;
+}
+
 template<typename StringType>
 static auto unpackString(const char *data, size_t length, size_t &offset, StringType &result) -> bool
 {
@@ -119,20 +134,9 @@ static auto unpackString(const char *data, size_t length, size_t &offset, String
     }
     result.assign(data + offset, len);
     offset += len;
-    /* Align to 8-byte boundary. This can push offset past length when the
-     * string ends near the buffer end; that is fine for the string itself
-     * (already fully read), and every subsequent reader guards against
-     * offset > length, but clamp so the overshoot can never be mistaken for
-     * available bytes. */
-    size_t unpack_remainder = offset % sizeof(uint64_t);
-    if (unpack_remainder != 0)
-    {
-        offset += sizeof(uint64_t) - unpack_remainder;
-    }
-    if (offset > length)
-    {
-        offset = length;
-    }
+    /* Align to the 8-byte boundary; align_read_offset clamps so the padding
+     * past the buffer end can never be mistaken for available bytes. */
+    offset = align_read_offset(offset, length);
     return true;
 }
 
