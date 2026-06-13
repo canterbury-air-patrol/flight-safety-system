@@ -328,6 +328,17 @@ auto flight_safety_system::transport_ssl::fss_connection_server::setupSSL() -> b
 
     serverSession->set_certificate_request(GNUTLS_CERT_REQUIRE);
 
+    /* GNUTLS_CERT_REQUIRE only forces the client to PRESENT a certificate;
+     * on its own it does not check that the certificate chains to our
+     * trusted CA. Without this, a self-signed cert carrying a known asset
+     * CN would pass the handshake and then satisfy the CN-based identity
+     * check — an authentication bypass. Enable inline verification so the
+     * handshake itself fails for any client cert that does not validate
+     * against the trust file (the client side already does the equivalent
+     * via set_verify_cert). NULL hostname: a client certificate's identity
+     * is its CN, matched at the application layer, not a hostname. */
+    gnutls_session_set_verify_cert(this->session->ptr(), nullptr, 0);
+
     int ret = -1;
     try
     {
