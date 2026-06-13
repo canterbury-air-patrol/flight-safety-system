@@ -464,6 +464,10 @@ flight_safety_system::transport::fss_message_identity::fss_message_identity(std:
 
 void flight_safety_system::transport::fss_message_identity::packData(std::shared_ptr<buf_len> bl)
 {
+    /* Deliberately NOT packString format: the name is raw bytes with no
+     * length prefix, and the decoder derives its length from the message
+     * header (see unpackData). Converting this to packString would break
+     * wire compatibility with every deployed peer. */
     bl->addData(this->name.c_str(), this->name.length());
 }
 
@@ -638,8 +642,19 @@ void flight_safety_system::transport::fss_message_position_report::unpackData(co
     reader.readUint8(this->altitude_type);
     reader.readUint8(this->emitter_type);
     reader.readUint8(this->tslc);
-    this->latitude = static_cast<double>(lat) * FSS_COORD_SCALE;
-    this->longitude = static_cast<double>(lng) * FSS_COORD_SCALE;
+    /* A truncated frame must not yield (0,0) — Null Island is a legal
+     * coordinate that passes validation. NaN is the honest "unknown" and
+     * is rejected by the coordinate checks downstream. */
+    if (reader.ok())
+    {
+        this->latitude = static_cast<double>(lat) * FSS_COORD_SCALE;
+        this->longitude = static_cast<double>(lng) * FSS_COORD_SCALE;
+    }
+    else
+    {
+        this->latitude = NAN;
+        this->longitude = NAN;
+    }
 }
 
 auto flight_safety_system::transport::fss_message_position_report::getLatitude() -> double
@@ -874,8 +889,18 @@ void flight_safety_system::transport::fss_message_asset_command::unpackData(cons
     {
         this->command = decode_asset_command(cmd);
     }
-    this->latitude = lat * FSS_COORD_SCALE;
-    this->longitude = lng * FSS_COORD_SCALE;
+    /* Same rationale as fss_message_position_report::unpackData: a truncated
+     * frame decodes to NaN, never to Null Island. */
+    if (reader.ok())
+    {
+        this->latitude = lat * FSS_COORD_SCALE;
+        this->longitude = lng * FSS_COORD_SCALE;
+    }
+    else
+    {
+        this->latitude = NAN;
+        this->longitude = NAN;
+    }
 }
 
 auto flight_safety_system::transport::fss_message_asset_command::getCommand() -> fss_asset_command
@@ -1026,11 +1051,21 @@ flight_safety_system::transport::fss_message_identity_non_aircraft::fss_message_
 
 void flight_safety_system::transport::fss_message_identity_non_aircraft::addCapability(uint8_t cap_id)
 {
+    /* Shifting by >= the type width is undefined behaviour; the bitmap holds
+     * capability ids 0..63 only. */
+    if (cap_id >= std::numeric_limits<uint64_t>::digits)
+    {
+        return;
+    }
     this->capabilities |= (static_cast<uint64_t>(1) << cap_id);
 }
 
 auto flight_safety_system::transport::fss_message_identity_non_aircraft::getCapability(uint8_t cap_id) -> bool
 {
+    if (cap_id >= std::numeric_limits<uint64_t>::digits)
+    {
+        return false;
+    }
     return !!(this->capabilities & (static_cast<uint64_t>(1) << cap_id));
 }
 
