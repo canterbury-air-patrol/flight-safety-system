@@ -653,6 +653,56 @@ TEST_CASE("session: v2 replayed data message is dropped")
     REQUIRE(handler.disconnects == 0);       // connection stays up
 }
 
+TEST_CASE("session: duplicate version message is ignored without derailing the session")
+{
+    /* A buggy peer re-sending the version handshake mid-session must not
+     * re-negotiate the protocol version (downgrade) nor re-anchor the
+     * sequence check (which, for an out-of-order duplicate, would silently
+     * drop all subsequent telemetry while the session looks alive). */
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 1;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+
+    uint64_t next_id = 1;
+    establish_v2_session(session, next_id);
+
+    auto pos = make_position_msg(fss::fss_current_timestamp());
+    pos->setId(next_id++);
+    session->processMessage(pos);
+    REQUIRE(handler.broadcasts.size() == 1);
+
+    /* In-sequence duplicate offering a lower version: must not downgrade. */
+    auto dup = std::make_shared<fss::transport::fss_message_version>(1U, 1U, 0U);
+    dup->setId(next_id++);
+    session->processMessage(dup);
+    REQUIRE(conn->getNegotiatedVersion() == fss::transport::FSS_PROTOCOL_VERSION);
+    REQUIRE(handler.disconnects == 0);
+
+    /* The duplicate consumed a sequence id; the stream must continue. */
+    auto pos2 = make_position_msg(fss::fss_current_timestamp());
+    pos2->setId(next_id++);
+    session->processMessage(pos2);
+    REQUIRE(handler.broadcasts.size() == 2);
+
+    /* Out-of-sequence duplicate: ignored entirely, must not re-anchor the
+     * sequence check to its id. */
+    auto stray = std::make_shared<fss::transport::fss_message_version>(1U, 1U, 0U);
+    stray->setId(99);
+    session->processMessage(stray);
+
+    auto pos3 = make_position_msg(fss::fss_current_timestamp());
+    pos3->setId(next_id++);
+    session->processMessage(pos3);
+    REQUIRE(handler.broadcasts.size() == 3);
+    REQUIRE(handler.disconnects == 0);
+}
+
 TEST_CASE("session: v2 replayed identity disconnects")
 {
     /* m7.1 phase 2: a replayed (or out-of-order) identity message must
