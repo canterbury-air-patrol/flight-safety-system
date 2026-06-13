@@ -758,6 +758,11 @@ TEST_CASE("messages: BufferReader readInt32 short-read returns false")
                                            std::string(payload, '\0'), total);
     auto decoded = flight_safety_system::transport::fss_message::decode(bl);
     REQUIRE(decoded != nullptr);
+    /* The latitude/longitude reads failed, so the coordinates must decode to
+     * NaN, never to (0,0) — Null Island is a legal coordinate that would pass
+     * validation. */
+    REQUIRE(std::isnan(decoded->getLatitude()));
+    REQUIRE(std::isnan(decoded->getLongitude()));
 }
 
 /* readInt16 failure (line 99): position_report truncated just before the
@@ -774,6 +779,27 @@ TEST_CASE("messages: BufferReader readInt16 short-read returns false")
                                            std::string(payload, '\0'), total);
     auto decoded = flight_safety_system::transport::fss_message::decode(bl);
     REQUIRE(decoded != nullptr);
+    /* Truncation in a trailing field still NaNs the coordinates, even though
+     * latitude/longitude themselves were read — the buffer is incomplete. */
+    REQUIRE(std::isnan(decoded->getLatitude()));
+    REQUIRE(std::isnan(decoded->getLongitude()));
+}
+
+/* asset_command truncated before the trailing command byte: the coordinates
+ * must likewise decode to NaN rather than (0,0). */
+TEST_CASE("messages: truncated asset_command decodes coordinates as NaN")
+{
+    using flight_safety_system::transport::message_type_command;
+    /* timestamp(uint64) + latitude(int32) + longitude(int32); altitude and
+     * the command byte are absent, so reader.ok() is false at the end. */
+    constexpr size_t payload = sizeof(uint64_t) + sizeof(int32_t) * 2;
+    constexpr size_t total = framed_header_len + payload;
+    auto bl =
+        fss_test::make_framed_buffer(static_cast<uint16_t>(message_type_command), 1, std::string(payload, '\0'), total);
+    auto decoded = flight_safety_system::transport::fss_message::decode(bl);
+    REQUIRE(decoded != nullptr);
+    REQUIRE(std::isnan(decoded->getLatitude()));
+    REQUIRE(std::isnan(decoded->getLongitude()));
 }
 
 /* readUint32 failure (line 129): version message truncated after the two

@@ -219,6 +219,25 @@ public:
     }
 };
 
+/* Apply decoded fixed-point lat/lng to a message, but only if the buffer was
+ * fully read: a truncated frame must decode to NaN, never to (0,0) — Null
+ * Island is a legal coordinate that passes validation. Shared by the
+ * position-report and asset-command decoders so the policy stays in one place. */
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
+void assign_coordinates(const BufferReader &reader, int32_t lat, int32_t lng, double &out_lat, double &out_lng)
+{
+    if (reader.ok())
+    {
+        out_lat = static_cast<double>(lat) * FSS_COORD_SCALE;
+        out_lng = static_cast<double>(lng) * FSS_COORD_SCALE;
+    }
+    else
+    {
+        out_lat = NAN;
+        out_lng = NAN;
+    }
+}
+
 } // namespace
 
 flight_safety_system::transport::buf_len::buf_len(const buf_len &bl) = default;
@@ -642,19 +661,7 @@ void flight_safety_system::transport::fss_message_position_report::unpackData(co
     reader.readUint8(this->altitude_type);
     reader.readUint8(this->emitter_type);
     reader.readUint8(this->tslc);
-    /* A truncated frame must not yield (0,0) — Null Island is a legal
-     * coordinate that passes validation. NaN is the honest "unknown" and
-     * is rejected by the coordinate checks downstream. */
-    if (reader.ok())
-    {
-        this->latitude = static_cast<double>(lat) * FSS_COORD_SCALE;
-        this->longitude = static_cast<double>(lng) * FSS_COORD_SCALE;
-    }
-    else
-    {
-        this->latitude = NAN;
-        this->longitude = NAN;
-    }
+    assign_coordinates(reader, lat, lng, this->latitude, this->longitude);
 }
 
 auto flight_safety_system::transport::fss_message_position_report::getLatitude() -> double
@@ -889,18 +896,7 @@ void flight_safety_system::transport::fss_message_asset_command::unpackData(cons
     {
         this->command = decode_asset_command(cmd);
     }
-    /* Same rationale as fss_message_position_report::unpackData: a truncated
-     * frame decodes to NaN, never to Null Island. */
-    if (reader.ok())
-    {
-        this->latitude = lat * FSS_COORD_SCALE;
-        this->longitude = lng * FSS_COORD_SCALE;
-    }
-    else
-    {
-        this->latitude = NAN;
-        this->longitude = NAN;
-    }
+    assign_coordinates(reader, lat, lng, this->latitude, this->longitude);
 }
 
 auto flight_safety_system::transport::fss_message_asset_command::getCommand() -> fss_asset_command
@@ -1052,9 +1048,11 @@ flight_safety_system::transport::fss_message_identity_non_aircraft::fss_message_
 void flight_safety_system::transport::fss_message_identity_non_aircraft::addCapability(uint8_t cap_id)
 {
     /* Shifting by >= the type width is undefined behaviour; the bitmap holds
-     * capability ids 0..63 only. */
+     * capability ids 0..63 only. An out-of-range id is a caller error, so
+     * surface it (at debug, to avoid log noise) rather than silently no-op. */
     if (cap_id >= std::numeric_limits<uint64_t>::digits)
     {
+        FSS_LOG_DEBUG("transport", "Ignoring out-of-range capability id " << static_cast<unsigned>(cap_id));
         return;
     }
     this->capabilities |= (static_cast<uint64_t>(1) << cap_id);
@@ -1064,6 +1062,7 @@ auto flight_safety_system::transport::fss_message_identity_non_aircraft::getCapa
 {
     if (cap_id >= std::numeric_limits<uint64_t>::digits)
     {
+        FSS_LOG_DEBUG("transport", "Querying out-of-range capability id " << static_cast<unsigned>(cap_id));
         return false;
     }
     return !!(this->capabilities & (static_cast<uint64_t>(1) << cap_id));
