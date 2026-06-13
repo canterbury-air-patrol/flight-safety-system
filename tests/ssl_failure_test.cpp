@@ -146,6 +146,38 @@ TEST_CASE("ssl: server surfaces wrong-CN-but-CA-signed cert via getClientNames",
     accepted = nullptr;
 }
 
+TEST_CASE("ssl: server rejects a client cert signed by an untrusted CA", "[ssl_foreign_client_cert]")
+{
+    /* Authentication bypass regression: GNUTLS_CERT_REQUIRE forces the
+     * client to present a cert but does not by itself verify it chains to
+     * the trusted CA. The server must reject a cert signed by a foreign CA
+     * during the handshake, so it never reaches the CN-based identity check
+     * — otherwise a self-signed cert carrying a known asset CN would
+     * authenticate. The client trusts the main CA (so it accepts the
+     * server); it presents an alt-CA client cert the server does not trust.
+     * A correctly verifying server must surface NO client name. */
+    accepted = nullptr;
+    const uint16_t port = fss_test::pick_port();
+    REQUIRE(port != 0);
+    auto listen = std::make_shared<flight_safety_system::transport_ssl::fss_listen>(
+        port, accept_cb, CA_PUBLIC_FILE, SERVER_PRIVATE_FILE, SERVER_PUBLIC_FILE);
+    REQUIRE(listen != nullptr);
+
+    auto client = std::make_shared<flight_safety_system::transport_ssl::fss_connection_client>(
+        CA_PUBLIC_FILE, ALT_CLIENT_PRIVATE_FILE, ALT_CLIENT_PUBLIC_FILE);
+    /* The client's own verification of the (trusted) server may briefly
+     * succeed before the server aborts; we don't assert on connectTo's
+     * result, only that the server never accepts the foreign identity. */
+    client->connectTo("localhost", port);
+
+    /* The SSL listener runs the handshake synchronously before invoking the
+     * accept callback, so once accepted is set the server has finished (and
+     * rejected) verification; a correctly verifying server surfaces no CN. */
+    REQUIRE(fss_test::wait_for([]() { return accepted != nullptr; }));
+    REQUIRE(accepted->getClientNames().empty());
+    accepted = nullptr;
+}
+
 TEST_CASE("ssl: misconfigured cert paths fail without throwing")
 {
     /* Regression: set_x509_trust_file / set_x509_key_file throw
