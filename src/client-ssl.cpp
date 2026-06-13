@@ -21,22 +21,33 @@ flight_safety_system::client_ssl::fss_client::fss_client(const std::string &t_fi
         FSS_LOG_ERROR("client", "Failed to load configuration");
         return;
     }
-    Json::Value config;
-    configfile >> config;
-
-    this->setAssetName(config["name"].asString());
-
-    this->ca_file = config["ssl"]["ca_public_key"].asString();
-    this->private_key_file = config["ssl"]["client_private_key"].asString();
-    this->public_key_file = config["ssl"]["client_public_key"].asString();
-
-    /* Load all the known servers from the config */
-    for (unsigned int idx = 0; idx < config["servers"].size(); idx++)
+    /* jsoncpp throws Json::Exception on malformed JSON or wrong-typed
+     * values; this is a library constructor, so contain it and leave the
+     * client without a usable server list (like the missing-file path
+     * above) rather than letting the exception escape into the consumer. */
+    try
     {
-        auto server = std::make_shared<flight_safety_system::client_ssl::fss_server>(
-            this, config["servers"][idx]["address"].asString(), config["servers"][idx]["port"].asInt(), this->ca_file,
-            this->private_key_file, this->public_key_file);
-        this->addServer(server);
+        Json::Value config;
+        configfile >> config;
+
+        this->setAssetName(config["name"].asString());
+
+        this->ca_file = config["ssl"]["ca_public_key"].asString();
+        this->private_key_file = config["ssl"]["client_private_key"].asString();
+        this->public_key_file = config["ssl"]["client_public_key"].asString();
+
+        /* Load all the known servers from the config */
+        for (unsigned int idx = 0; idx < config["servers"].size(); idx++)
+        {
+            auto server = std::make_shared<flight_safety_system::client_ssl::fss_server>(
+                this, config["servers"][idx]["address"].asString(), config["servers"][idx]["port"].asInt(),
+                this->ca_file, this->private_key_file, this->public_key_file);
+            this->addServer(server);
+        }
+    }
+    catch (const Json::Exception &e)
+    {
+        FSS_LOG_ERROR("client", "Invalid configuration in " << t_fileName << ": " << e.what());
     }
 }
 

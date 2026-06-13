@@ -72,45 +72,112 @@ auto main(int argc, char *argv[]) -> int
         FSS_LOG_ERROR("server", "Failed to load configuration: " << conf_file);
         return 1;
     }
-    Json::Value config;
-    configfile >> config;
-
-    if (config.isMember("log_level"))
+    /* Read the whole configuration inside one try block: jsoncpp throws
+     * Json::Exception on malformed JSON and on wrong-typed values (e.g.
+     * "port": "8080"), and an uncaught throw here would std::terminate
+     * without saying which field is bad. All values land in locals so no
+     * config access happens after this block. */
+    constexpr int default_pg_port = 5432;
+    constexpr std::size_t default_db_queue_depth = 10000;
+    constexpr int default_client_timeout_sec = 30;
+    constexpr int default_identify_timeout_sec = 30;
+    constexpr uint64_t default_rate_capacity = 100;
+    constexpr uint64_t default_rate_refill_per_s = 20;
+    int listen_port = 0;
+    int pg_port = default_pg_port;
+    std::string pg_host;
+    std::string pg_user;
+    std::string pg_pass;
+    std::string pg_db;
+    std::size_t db_queue_depth = default_db_queue_depth;
+    uint64_t client_timeout_sec = default_client_timeout_sec;
+    uint64_t identify_timeout_sec = default_identify_timeout_sec;
+    uint64_t rate_capacity = default_rate_capacity;
+    uint64_t rate_refill = default_rate_refill_per_s;
+    std::string ca_public_key;
+    std::string server_private_key;
+    std::string server_public_key;
+    std::string crl_file;
+    try
     {
-        flight_safety_system::log::set_level(config["log_level"].asString());
-    }
+        Json::Value config;
+        configfile >> config;
 
-    auto cfg_require = [&](const char *path, const Json::Value &node, const char *key) -> bool {
-        if (!node.isMember(key) || node[key].asString().empty())
+        if (config.isMember("log_level"))
         {
-            FSS_LOG_ERROR("server", "Missing required config field: " << path << "." << key);
-            return false;
+            flight_safety_system::log::set_level(config["log_level"].asString());
         }
-        return true;
-    };
-    bool cfg_ok = true;
-    if (!config.isMember("port"))
-    {
-        FSS_LOG_ERROR("server", "Missing required config field: port");
-        cfg_ok = false;
+
+        auto cfg_require = [&](const char *path, const Json::Value &node, const char *key) -> bool {
+            if (!node.isMember(key) || node[key].asString().empty())
+            {
+                FSS_LOG_ERROR("server", "Missing required config field: " << path << "." << key);
+                return false;
+            }
+            return true;
+        };
+        bool cfg_ok = true;
+        if (!config.isMember("port"))
+        {
+            FSS_LOG_ERROR("server", "Missing required config field: port");
+            cfg_ok = false;
+        }
+        cfg_ok &= cfg_require("postgres", config["postgres"], "host");
+        cfg_ok &= cfg_require("postgres", config["postgres"], "user");
+        cfg_ok &= cfg_require("postgres", config["postgres"], "pass");
+        cfg_ok &= cfg_require("postgres", config["postgres"], "db");
+        cfg_ok &= cfg_require("ssl", config["ssl"], "ca_public_key");
+        cfg_ok &= cfg_require("ssl", config["ssl"], "server_private_key");
+        cfg_ok &= cfg_require("ssl", config["ssl"], "server_public_key");
+        if (!cfg_ok)
+        {
+            return 1;
+        }
+
+        listen_port = config["port"].asInt();
+        if (config["postgres"].isMember("port"))
+        {
+            pg_port = config["postgres"]["port"].asInt();
+        }
+        pg_host = config["postgres"]["host"].asString();
+        pg_user = config["postgres"]["user"].asString();
+        pg_pass = config["postgres"]["pass"].asString();
+        pg_db = config["postgres"]["db"].asString();
+        if (config.isMember("db_queue_depth"))
+        {
+            db_queue_depth = config["db_queue_depth"].asUInt();
+        }
+        if (config.isMember("client_timeout"))
+        {
+            client_timeout_sec = config["client_timeout"].asUInt64();
+        }
+        if (config.isMember("identify_timeout"))
+        {
+            identify_timeout_sec = config["identify_timeout"].asUInt64();
+        }
+        if (config.isMember("message_rate_capacity"))
+        {
+            rate_capacity = config["message_rate_capacity"].asUInt64();
+        }
+        if (config.isMember("message_rate_refill"))
+        {
+            rate_refill = config["message_rate_refill"].asUInt64();
+        }
+        ca_public_key = config["ssl"]["ca_public_key"].asString();
+        server_private_key = config["ssl"]["server_private_key"].asString();
+        server_public_key = config["ssl"]["server_public_key"].asString();
+        if (config["ssl"].isMember("crl_file"))
+        {
+            crl_file = config["ssl"]["crl_file"].asString();
+        }
     }
-    cfg_ok &= cfg_require("postgres", config["postgres"], "host");
-    cfg_ok &= cfg_require("postgres", config["postgres"], "user");
-    cfg_ok &= cfg_require("postgres", config["postgres"], "pass");
-    cfg_ok &= cfg_require("postgres", config["postgres"], "db");
-    cfg_ok &= cfg_require("ssl", config["ssl"], "ca_public_key");
-    cfg_ok &= cfg_require("ssl", config["ssl"], "server_private_key");
-    cfg_ok &= cfg_require("ssl", config["ssl"], "server_public_key");
-    if (!cfg_ok)
+    catch (const Json::Exception &e)
     {
+        FSS_LOG_ERROR("server", "Invalid configuration in " << conf_file << ": " << e.what());
         return 1;
     }
 
-    constexpr int default_pg_port = 5432;
-    int pg_port = config["postgres"].isMember("port") ? config["postgres"]["port"].asInt() : default_pg_port;
-    auto dbc = std::make_shared<flight_safety_system::server::db_connection>(
-        config["postgres"]["host"].asString(), pg_port, config["postgres"]["user"].asString(),
-        config["postgres"]["pass"].asString(), config["postgres"]["db"].asString());
+    auto dbc = std::make_shared<flight_safety_system::server::db_connection>(pg_host, pg_port, pg_user, pg_pass, pg_db);
 
     if (!dbc->isConnected())
     {
@@ -118,9 +185,6 @@ auto main(int argc, char *argv[]) -> int
         return 1;
     }
 
-    constexpr std::size_t default_db_queue_depth = 10000;
-    std::size_t db_queue_depth =
-        config.isMember("db_queue_depth") ? config["db_queue_depth"].asUInt() : default_db_queue_depth;
     flight_safety_system::server::db_write_sink sink =
         [dbc](const flight_safety_system::server::db_write_task &task) -> void {
         std::visit(
@@ -141,31 +205,13 @@ auto main(int argc, char *argv[]) -> int
     auto writer = std::make_shared<flight_safety_system::server::db_write_queue>(db_queue_depth, sink);
 
     auto clients = std::make_shared<server_clients>();
-    constexpr int default_client_timeout_sec = 30;
     constexpr int msec_per_sec = 1000;
-    uint64_t client_timeout_sec =
-        config.isMember("client_timeout") ? config["client_timeout"].asUInt64() : default_client_timeout_sec;
     clients->setClientTimeoutMs(client_timeout_sec * msec_per_sec);
-
-    constexpr int default_identify_timeout_sec = 30;
-    uint64_t identify_timeout_sec =
-        config.isMember("identify_timeout") ? config["identify_timeout"].asUInt64() : default_identify_timeout_sec;
     clients->setClientIdentifyTimeoutMs(identify_timeout_sec * msec_per_sec);
-
-    constexpr uint64_t default_rate_capacity = 100;
-    constexpr uint64_t default_rate_refill_per_s = 20;
-    uint64_t rate_capacity =
-        config.isMember("message_rate_capacity") ? config["message_rate_capacity"].asUInt64() : default_rate_capacity;
-    uint64_t rate_refill =
-        config.isMember("message_rate_refill") ? config["message_rate_refill"].asUInt64() : default_rate_refill_per_s;
     clients->setClientRateLimits(rate_capacity, rate_refill);
 
     std::shared_ptr<flight_safety_system::transport::fss_listen> listen;
     FSS_LOG_INFO("server", "Starting fss server in TLS mode");
-    std::string ca_public_key = config["ssl"]["ca_public_key"].asString();
-    std::string server_private_key = config["ssl"]["server_private_key"].asString();
-    std::string server_public_key = config["ssl"]["server_public_key"].asString();
-    std::string crl_file = config["ssl"].isMember("crl_file") ? config["ssl"]["crl_file"].asString() : std::string{};
     if (!crl_file.empty())
     {
         FSS_LOG_INFO("server", "CRL file configured: " << crl_file);
@@ -180,7 +226,7 @@ auto main(int argc, char *argv[]) -> int
         return true;
     };
     listen = std::make_shared<flight_safety_system::transport_ssl::fss_listen>(
-        config["port"].asInt(), connect_cb, ca_public_key, server_private_key, server_public_key, crl_file);
+        listen_port, connect_cb, ca_public_key, server_private_key, server_public_key, crl_file);
 
     /* Main-loop DB contract: the loop below must make NO synchronous DB
      * reads. Reads are handled exclusively by the command_poller thread
