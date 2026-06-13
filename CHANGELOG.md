@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.0.3] - 2026-06-13
 
 ### Security
 - The server now verifies that a client certificate chains to the configured
@@ -49,6 +49,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The per-frame "Got a null msg" warning is throttled (first frame and
   every 100th), so a peer streaming undecodable frames cannot flood the
   log at line rate.
+- A peer re-sending the wire-protocol version handshake after negotiation
+  could downgrade the protocol version mid-session, and an out-of-sequence
+  duplicate re-anchored the sequence check to its id — silently dropping all
+  subsequent telemetry while the session still looked alive. Duplicates are
+  now dropped with a throttled warning: the sequence advances only for an
+  exactly in-sequence duplicate, the version is never re-negotiated, and the
+  check is never re-anchored.
+- `db_active_fss_servers_get` no longer appends a NULL entry to the
+  active-server list when an allocation fails mid-cursor; the NULL acted as a
+  premature terminator that truncated the list and leaked every entry after
+  it. The append is skipped instead, keeping the array NULL-terminated.
+- A malformed or wrong-typed configuration value (e.g. a string where a
+  number is expected) no longer aborts the server through an uncaught
+  `jsoncpp` exception or throws out of the client library constructor. The
+  server now reads every value inside one guarded block and reports the
+  offending file; the client contains the exception and behaves as it does
+  for a missing config file.
+- Hardened message decoding: capability ids outside the 0..63 bitmap no
+  longer trigger shift undefined behaviour (they are dropped / read as
+  false), and truncated `position_report`/`asset_command` frames decode their
+  coordinates to NaN — rejected downstream as the honest "unknown" — instead
+  of (0,0), which is Null Island, a legal coordinate that passes validation.
+  Only reachable via a crafted direct `decode()`; the recv path already
+  enforces the declared frame length.
 - Failure-path cleanups: `setenv` in `db_connect` runs only before
   threads exist, DB read errors during identification are logged
   distinctly from "unknown asset", truncated SMM credentials are
