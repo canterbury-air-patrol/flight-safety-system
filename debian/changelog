@@ -1,3 +1,28 @@
+flight-safety-system (1.0.3) stable; urgency=medium
+
+  * Verify client certificates chain to the configured CA during the TLS
+    handshake (closes a self-signed-certificate authentication bypass).
+  * Fix an out-of-bounds read decoding a string field whose alignment padding
+    overshoots the declared buffer length.
+  * Bound unacked sends with TCP_USER_TIMEOUT and stop holding the global
+    client lock across blocking sends, so a black-holed client can no longer
+    stall command dispatch.
+  * Keep all synchronous DB reads off the main loop; fix the ~server_clients
+    shutdown deadlock.
+  * Refuse commands built from NULL position/altitude rows instead of
+    dispatching Null Island / descend-to-ground.
+  * Make transport_ssl's usable flag atomic and the client reconnect backoff
+    thread-safe; retry EINTR on recv instead of dropping the peer.
+  * Contain gnutls and jsoncpp exceptions from bad config/credentials; never
+    append a NULL entry to the active-server list.
+  * Ignore duplicate protocol-version messages (no mid-session downgrade or
+    sequence re-anchor); throttle the undecodable-frame and duplicate-version
+    warnings.
+  * Harden message decode: guard capability-id shift UB; decode truncated
+    coordinate frames to NaN rather than (0,0).
+
+ -- Scott Parlane <sjp@canterburyairpatrol.org>  Sat, 13 Jun 2026 00:00:00 +0000
+
 flight-safety-system (1.0.2) stable; urgency=medium
 
   * Fix data race on fss_message_cb::conn between reconnect and send paths.
