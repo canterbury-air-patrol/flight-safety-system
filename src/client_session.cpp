@@ -388,6 +388,21 @@ void fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss
         auto version_msg = std::dynamic_pointer_cast<fss::transport::fss_message_version>(msg);
         if (version_msg != nullptr)
         {
+            if (this->version_received)
+            {
+                /* Duplicate handshake from a buggy peer. Honouring it would
+                 * re-negotiate the protocol version mid-session and re-anchor
+                 * the sequence check; instead advance the sequence (the
+                 * duplicate still consumed a message id on the sender) and
+                 * drop the message. */
+                FSS_LOG_WARN("server", "Ignoring duplicate protocol version message");
+                uint64_t wanted = this->expected_seq.load();
+                if (wanted != 0 && msg->getSeq() == wanted)
+                {
+                    this->expected_seq.fetch_add(1);
+                }
+                return;
+            }
             uint16_t peer_version = version_msg->getProtocolVersion();
             uint16_t peer_min = version_msg->getMinSupportedVersion();
             if (peer_version < fss::transport::FSS_PROTOCOL_MIN_VERSION ||
