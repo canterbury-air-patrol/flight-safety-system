@@ -703,6 +703,45 @@ TEST_CASE("session: duplicate version message is ignored without derailing the s
     REQUIRE(handler.disconnects == 0);
 }
 
+TEST_CASE("session: duplicate version warnings are throttled")
+{
+    /* The duplicate-version branch runs before the rate limiter, so a peer
+     * spamming version messages must not flood the log: warn on the first
+     * and every 100th only. */
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 1;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+
+    uint64_t next_id = 1;
+    establish_v2_session(session, next_id);
+
+    fss_test::capture_cerr capture;
+    fss_test::scoped_log_level level("warn");
+    constexpr int duplicates = 250; /* warns at 1, 100, 200 → 3 lines */
+    for (int i = 0; i < duplicates; i++)
+    {
+        auto dup = std::make_shared<fss::transport::fss_message_version>(1U, 1U, 0U);
+        dup->setId(next_id++);
+        session->processMessage(dup);
+    }
+    REQUIRE(handler.disconnects == 0);
+
+    const std::string logged = capture.str();
+    std::size_t occurrences = 0;
+    for (std::size_t pos = logged.find("duplicate protocol version"); pos != std::string::npos;
+         pos = logged.find("duplicate protocol version", pos + 1))
+    {
+        occurrences++;
+    }
+    REQUIRE(occurrences == 3);
+}
+
 TEST_CASE("session: v2 replayed identity disconnects")
 {
     /* m7.1 phase 2: a replayed (or out-of-order) identity message must

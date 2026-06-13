@@ -394,8 +394,18 @@ void fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss
                  * re-negotiate the protocol version mid-session and re-anchor
                  * the sequence check; instead advance the sequence (the
                  * duplicate still consumed a message id on the sender) and
-                 * drop the message. */
-                FSS_LOG_WARN("server", "Ignoring duplicate protocol version message");
+                 * drop the message. This path runs before the rate limiter,
+                 * so throttle the warning (first, then every 100th, with the
+                 * running count) so a peer spamming version messages cannot
+                 * flood the log. */
+                ++this->duplicate_version_count;
+                constexpr uint64_t log_every = 100;
+                if (this->duplicate_version_count == 1 || (this->duplicate_version_count % log_every) == 0)
+                {
+                    FSS_LOG_WARN("server", "Ignoring duplicate protocol version message from "
+                                               << this->getName() << " (seq=" << msg->getSeq()
+                                               << ", count=" << this->duplicate_version_count << ")");
+                }
                 uint64_t wanted = this->expected_seq.load();
                 if (wanted != 0 && msg->getSeq() == wanted)
                 {
