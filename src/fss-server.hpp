@@ -182,6 +182,10 @@ private:
     rate_limiter msg_rate{100, 20};
     uint64_t rate_limit_rejects{0};
     uint64_t last_rate_limit_log_ms{0};
+    /* Cumulative duplicate protocol-version messages seen this session
+     * (never reset); touched only on the recv thread (processMessage), used
+     * to throttle the warning. */
+    uint64_t duplicate_version_count{0};
 public:
     fss_client(std::shared_ptr<transport::fss_connection> conn, IDatabase *t_dbc,
                std::shared_ptr<db_write_queue> t_writer, fss_client_handler *t_handler);
