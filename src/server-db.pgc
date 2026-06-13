@@ -318,21 +318,24 @@ db_active_fss_servers_get(const char *conn_arg)
                 s->port = server_port;
             }
         }
-        struct fss_server_s **old = res;
-        res = (struct fss_server_s **)realloc(res, sizeof(struct fss_server_s *) * (len + 2));
-        if (res)
+        /* Only append a real entry: writing a NULL s into the middle of the
+         * array would act as a premature terminator for the caller, silently
+         * truncating the list and leaking everything appended after it. */
+        if (s != NULL)
         {
-            res[len] = s;
-            len++;
-            res[len] = NULL;
-        } else {
-            res = old;
-            if (s != NULL)
+            struct fss_server_s **old = res;
+            res = (struct fss_server_s **)realloc(res, sizeof(struct fss_server_s *) * (len + 2));
+            if (res)
             {
+                res[len] = s;
+                len++;
+                res[len] = NULL;
+            } else {
+                res = old;
                 free (s->address);
                 free (s);
+                s = NULL;
             }
-            s = NULL;
         }
     }
     EXEC SQL WHENEVER NOT FOUND CONTINUE;
