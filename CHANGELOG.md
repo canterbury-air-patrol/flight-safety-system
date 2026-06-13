@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- The server now verifies that a client certificate chains to the configured
+  CA (and is unexpired/unrevoked) during the TLS handshake. Previously
+  `GNUTLS_CERT_REQUIRE` only forced the client to *present* a certificate
+  without validating it, so a self-signed certificate carrying a known asset
+  CN would pass the handshake and satisfy the CN-based identity check — an
+  authentication bypass. Legitimate clients signed by the project CA are
+  unaffected.
+- Fixed an out-of-bounds read decoding a message whose length-prefixed string
+  field is positioned so its 8-byte alignment padding runs past the declared
+  buffer length; the subsequent field read could pass a wrapped size_t bounds
+  check and read past the buffer.
+
 ### Fixed
 - A black-holed client connection (radio dropout with unacked data in
   flight) could stall a blocking send for the kernel's ~15-minute
