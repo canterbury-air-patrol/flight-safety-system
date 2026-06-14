@@ -351,6 +351,30 @@ TEST_CASE("session: server list sent on identify contains seeded servers")
     CHECK(servers[1].second == 9090);
 }
 
+TEST_CASE("session: identify surfaces a mid-cursor server-list failure instead of a partial list")
+{
+    /* getActiveServers throws when the cursor is cut short by a mid-iteration
+     * error. The throw must propagate out of processMessage (where production
+     * wraps it in an exception_guard) rather than a truncated server list
+     * reaching the wire. */
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 1;
+    mock.active_servers.emplace_back("10.0.0.1", uint16_t{8080});
+    mock.active_servers_fail = true;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    REQUIRE_THROWS_AS(session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft")),
+                      fss::server::database_error);
+
+    /* No server list was sent: the partial result was discarded, not shipped. */
+    REQUIRE(find_sent<fss::transport::fss_message_server_list>(conn->sent) == nullptr);
+}
+
 TEST_CASE("session: rapid sendCommand does not duplicate a single pending command")
 {
     /* sendCommand is called every 100ms to minimise command delivery
