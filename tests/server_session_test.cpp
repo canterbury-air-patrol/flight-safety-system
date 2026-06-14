@@ -833,6 +833,41 @@ TEST_CASE("session: stale position report is discarded")
     REQUIRE(handler.broadcasts.size() == 1);
 }
 
+TEST_CASE("session: no-fix (NaN) position report is discarded, not stored or broadcast")
+{
+    /* Phase 07: a client with no GPS fix sends a NaN position. It decodes to
+     * NaN (the wire sentinel), and must be discarded distinctly from a
+     * malformed coordinate — never stored or broadcast as a real position. */
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 1;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+    REQUIRE(handler.disconnects == 0);
+
+    fss_test::capture_cerr cap;
+    auto no_fix = std::make_shared<fss::transport::fss_message_position_report>(
+        std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::quiet_NaN(), 0U, 0U, 0U, int16_t{0}, 0U,
+        std::string{}, 0U, uint8_t{0}, 0U, uint8_t{0}, uint8_t{0}, fss::fss_current_timestamp());
+    session->processMessage(no_fix);
+
+    REQUIRE(mock.positions.empty());     // not stored
+    REQUIRE(handler.broadcasts.empty()); // not broadcast
+    /* Logged distinctly as a no-fix, not the generic invalid-coordinate path. */
+    REQUIRE(cap.str().find("no GPS fix") != std::string::npos);
+
+    /* A subsequent real fix is still accepted, proving the session is healthy. */
+    auto fresh = make_position_msg(fss::fss_current_timestamp());
+    session->processMessage(fresh);
+    REQUIRE(handler.broadcasts.size() == 1);
+}
+
 TEST_CASE("smm_settings: ctor and accessors")
 {
     fss::server::smm_settings s("https://smm.example", fss::secure_string{"user"}, fss::secure_string{"pass"});

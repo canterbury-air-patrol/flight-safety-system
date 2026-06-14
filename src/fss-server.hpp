@@ -182,6 +182,10 @@ private:
     rate_limiter msg_rate{100, 20};
     uint64_t rate_limit_rejects{0};
     uint64_t last_rate_limit_log_ms{0};
+    /* Cumulative position reports discarded for having no GPS fix (NaN
+     * coordinates) this session; touched only on the recv thread
+     * (processMessage), used to throttle the warning. */
+    uint64_t no_fix_reports{0};
     /* Cumulative duplicate protocol-version messages seen this session
      * (never reset); touched only on the recv thread (processMessage), used
      * to throttle the warning. */

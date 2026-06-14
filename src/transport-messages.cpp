@@ -16,19 +16,23 @@ using flight_safety_system::transport::FSS_COORD_SCALE;
 using flight_safety_system::transport::FSS_VOLTAGE_SCALE;
 
 /* Guard a double->int32_t conversion against NaN, Inf, and out-of-range values.
- * NaN maps to 0 (the defined sentinel — decodes back to 0.0 degrees/volts).
- * Finite values outside [INT32_MIN, INT32_MAX] are clamped rather than
- * allowing undefined behaviour in the cast. */
+ * Non-finite input (NaN/Inf) maps to INT32_MIN, the on-wire "no fix" sentinel:
+ * it lies outside the encodable coordinate range (±180° -> ±1.8e9, INT32_MIN
+ * ~= -2.147e9) so it can never alias a real position. The receiver decodes
+ * INT32_MIN back to NaN (see assign_coordinates), keeping "we don't know where
+ * the aircraft is" distinct from (0,0) — Null Island, a legal coordinate.
+ * Finite values are clamped into [INT32_MIN + 1, INT32_MAX] (the low side stops
+ * one above the sentinel) so a clamped real value can never collide with it. */
 static auto pack_scaled_coord(double value, double scale) -> int32_t
 {
     if (!std::isfinite(value))
     {
-        return 0;
+        return std::numeric_limits<int32_t>::min();
     }
     const double scaled = value / scale;
-    if (scaled <= static_cast<double>(std::numeric_limits<int32_t>::min()))
+    if (scaled <= static_cast<double>(std::numeric_limits<int32_t>::min() + 1))
     {
-        return std::numeric_limits<int32_t>::min();
+        return std::numeric_limits<int32_t>::min() + 1;
     }
     if (scaled >= static_cast<double>(std::numeric_limits<int32_t>::max()))
     {
@@ -38,7 +42,9 @@ static auto pack_scaled_coord(double value, double scale) -> int32_t
 }
 
 /* Like pack_scaled_coord but clamps the low side at 0, for non-negative
- * quantities such as battery voltage so a stray negative never wraps. */
+ * quantities such as battery voltage so a stray negative never wraps. This also
+ * deliberately collapses the no-fix sentinel (INT32_MIN, which is < 0) to 0:
+ * voltage uses 0 as its own "unknown" convention and has no NaN sentinel. */
 static auto pack_scaled_nonneg(double value, double scale) -> int32_t
 {
     const int32_t packed = pack_scaled_coord(value, scale);
@@ -234,17 +240,29 @@ public:
     }
 };
 
+/* Decode one fixed-point coordinate, mapping the INT32_MIN "no fix" sentinel
+ * (see pack_scaled_coord) back to NaN so it is never read as a real position. */
+static auto decode_coord(int32_t raw) -> double
+{
+    if (raw == std::numeric_limits<int32_t>::min())
+    {
+        return NAN;
+    }
+    return static_cast<double>(raw) * FSS_COORD_SCALE;
+}
+
 /* Apply decoded fixed-point lat/lng to a message, but only if the buffer was
  * fully read: a truncated frame must decode to NaN, never to (0,0) — Null
- * Island is a legal coordinate that passes validation. Shared by the
- * position-report and asset-command decoders so the policy stays in one place. */
+ * Island is a legal coordinate that passes validation. The INT32_MIN no-fix
+ * sentinel likewise decodes to NaN. Shared by the position-report and
+ * asset-command decoders so the policy stays in one place. */
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
 void assign_coordinates(const BufferReader &reader, int32_t lat, int32_t lng, double &out_lat, double &out_lng)
 {
     if (reader.ok())
     {
-        out_lat = static_cast<double>(lat) * FSS_COORD_SCALE;
-        out_lng = static_cast<double>(lng) * FSS_COORD_SCALE;
+        out_lat = decode_coord(lat);
+        out_lng = decode_coord(lng);
     }
     else
     {
