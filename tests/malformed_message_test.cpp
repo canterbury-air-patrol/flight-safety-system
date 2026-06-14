@@ -34,6 +34,7 @@ using flight_safety_system::transport::fss_message_smm_settings;
 using flight_safety_system::transport::fss_message_system_status;
 using flight_safety_system::transport::asset_command_rtl;
 using flight_safety_system::transport::asset_command_unknown;
+using flight_safety_system::transport::message_type_closed;
 using flight_safety_system::transport::message_type_command;
 using flight_safety_system::transport::message_type_identity;
 using flight_safety_system::transport::message_type_identity_non_aircraft;
@@ -147,6 +148,128 @@ TEST_CASE("malformed: valid message mid-stream re-arms the log throttle")
         occurrences++;
     }
     REQUIRE(occurrences == 4);
+}
+
+/* The disconnect threshold lives in src/fss-transport.hpp as a private
+ * static constexpr (null_msg_disconnect_threshold). It is not part of the
+ * public surface, so mirror its value here; if it changes, these tests must
+ * be updated alongside it. */
+static constexpr uint64_t kNullMsgDisconnectThreshold = 1000;
+
+TEST_CASE("malformed: a garbage-only stream is disconnected after the threshold")
+{
+    /* A peer streaming nothing but undecodable frames must be closed once it
+     * crosses null_msg_disconnect_threshold consecutive nulls, rather than
+     * being logged at line rate forever. With no handler installed the
+     * synthesised close is delivered via the message queue. */
+    fss_test::capture_cerr capture;
+    int fds[2];
+    REQUIRE(::socketpair(AF_UNIX, SOCK_STREAM, 0, fds) == 0);
+    fss_test::scoped_fd peer(fds[1]);
+    auto conn = flight_safety_system::transport::fss_connection::create(fds[0]);
+
+    /* Write the whole burst up front (threshold worth of 16-byte frames is a
+     * few KiB, well within the socketpair buffer) so the recv thread can drain
+     * it without the writer blocking. The recv thread closes our fd at the
+     * threshold, so later writes may fail with EPIPE - SIGPIPE is ignored in
+     * tests/main.cpp, so tolerate that rather than REQUIRE-ing each write. */
+    auto garbage = fss_test::make_framed_buffer(0x00FFU, 1, std::string(4, '\0'), 16);
+    for (uint64_t i = 0; i < kNullMsgDisconnectThreshold + 16; i++)
+    {
+        if (::write(peer.get(), garbage->getData(), garbage->getLength()) != static_cast<ssize_t>(garbage->getLength()))
+        {
+            break; /* recv side closed the connection - threshold reached */
+        }
+    }
+
+    std::shared_ptr<fss_message> msg;
+    REQUIRE(fss_test::wait_for([&]() {
+        msg = conn->getMsg();
+        return msg != nullptr;
+    }));
+    REQUIRE(msg->getType() == message_type_closed);
+
+    /* One ERROR line announces the close; the WARN throttle keeps the rest
+     * bounded (it does not grow with the number of frames). */
+    const std::string logged = capture.str();
+    REQUIRE(logged.find("consecutive undecodable frames, closing") != std::string::npos);
+}
+
+TEST_CASE("malformed: a peer just below the threshold is not disconnected")
+{
+    /* Boundary: threshold - 1 consecutive nulls must leave the session up,
+     * and a following valid message resets the counter and is delivered. */
+    fss_test::capture_cerr capture;
+    int fds[2];
+    REQUIRE(::socketpair(AF_UNIX, SOCK_STREAM, 0, fds) == 0);
+    fss_test::scoped_fd peer(fds[1]);
+    auto conn = flight_safety_system::transport::fss_connection::create(fds[0]);
+
+    constexpr uint64_t nulls = kNullMsgDisconnectThreshold - 1;
+    auto garbage = fss_test::make_framed_buffer(0x00FFU, 1, std::string(4, '\0'), 16);
+    for (uint64_t i = 0; i < nulls; i++)
+    {
+        REQUIRE(::write(peer.get(), garbage->getData(), garbage->getLength()) ==
+                static_cast<ssize_t>(garbage->getLength()));
+    }
+    REQUIRE(fss_test::wait_for([&]() { return conn->getNullMsgCount() >= nulls; }));
+    REQUIRE(conn->getNullMsgCount() == nulls);
+
+    auto ident = std::make_shared<fss_message_identity>("survivor");
+    ident->setId(2);
+    auto good = ident->getPacked();
+    REQUIRE(::write(peer.get(), good->getData(), good->getLength()) == static_cast<ssize_t>(good->getLength()));
+    std::shared_ptr<fss_message> msg;
+    REQUIRE(fss_test::wait_for([&]() {
+        msg = conn->getMsg();
+        return msg != nullptr;
+    }));
+    REQUIRE(msg->getType() == message_type_identity);
+    REQUIRE(conn->getNullMsgCount() == 0);
+
+    conn->disconnect();
+    REQUIRE(capture.str().find("consecutive undecodable frames, closing") == std::string::npos);
+}
+
+TEST_CASE("malformed: valid traffic interleaved with garbage keeps the session alive")
+{
+    /* Forward-compat: a version-skewed peer sends the odd unknown message type
+     * interleaved with valid traffic. Each valid message resets the
+     * consecutive-null counter, so two near-threshold bursts separated by a
+     * valid message never trip the disconnect even though their sum far
+     * exceeds the threshold. */
+    fss_test::capture_cerr capture;
+    int fds[2];
+    REQUIRE(::socketpair(AF_UNIX, SOCK_STREAM, 0, fds) == 0);
+    fss_test::scoped_fd peer(fds[1]);
+    auto conn = flight_safety_system::transport::fss_connection::create(fds[0]);
+
+    constexpr uint64_t burst = kNullMsgDisconnectThreshold - 1;
+    auto garbage = fss_test::make_framed_buffer(0x00FFU, 1, std::string(4, '\0'), 16);
+    auto send_garbage_then_valid = [&](const std::string &name, uint64_t id) -> void {
+        for (uint64_t i = 0; i < burst; i++)
+        {
+            REQUIRE(::write(peer.get(), garbage->getData(), garbage->getLength()) ==
+                    static_cast<ssize_t>(garbage->getLength()));
+        }
+        auto ident = std::make_shared<fss_message_identity>(name);
+        ident->setId(id);
+        auto good = ident->getPacked();
+        REQUIRE(::write(peer.get(), good->getData(), good->getLength()) == static_cast<ssize_t>(good->getLength()));
+        std::shared_ptr<fss_message> msg;
+        REQUIRE(fss_test::wait_for([&]() {
+            msg = conn->getMsg();
+            return msg != nullptr;
+        }));
+        REQUIRE(msg->getType() == message_type_identity);
+    };
+
+    send_garbage_then_valid("first", 2);
+    send_garbage_then_valid("second", 3);
+
+    conn->disconnect();
+    /* 2 * (threshold - 1) nulls total, but never threshold consecutive. */
+    REQUIRE(capture.str().find("consecutive undecodable frames, closing") == std::string::npos);
 }
 
 TEST_CASE("malformed: decode returns nullptr for buffer shorter than header")
