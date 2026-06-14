@@ -306,25 +306,31 @@ TEST_CASE("ssl: a silent peer does not block other clients' handshakes", "[ssl_h
     accepted = nullptr;
     const uint16_t port = fss_test::pick_port();
     REQUIRE(port != 0);
-    constexpr unsigned int short_handshake_ms = 500;
+    /* Use the default (generous) handshake timeout. The same timeout applies to
+     * the legitimate client's server-side handshake, and under a slow build
+     * (e.g. valgrind) a real TLS handshake can take seconds — a short timeout
+     * would spuriously time out the good client. The silent peer is drained
+     * promptly at teardown by closing it (the EOF aborts its handshake), so the
+     * generous timeout does not slow the test down. */
     auto listen = std::make_shared<flight_safety_system::transport_ssl::fss_listen>(
-        port, accept_cb, CA_PUBLIC_FILE, SERVER_PRIVATE_FILE, SERVER_PUBLIC_FILE, std::string{}, short_handshake_ms);
+        port, accept_cb, CA_PUBLIC_FILE, SERVER_PRIVATE_FILE, SERVER_PUBLIC_FILE);
     REQUIRE(listen != nullptr);
+    constexpr auto generous = std::chrono::milliseconds(15000); // tolerate valgrind slowdown
 
     int silent = connect_silent_peer(port);
     REQUIRE(silent >= 0);
     /* The silent peer should occupy a setup worker (mid-handshake). */
-    REQUIRE(fss_test::wait_for([&]() { return listen->getActiveSetupCount() >= 1; }));
+    REQUIRE(fss_test::wait_for([&]() { return listen->getActiveSetupCount() >= 1; }, generous));
 
-    /* A well-behaved client must still complete its handshake promptly while
-     * the silent peer is stuck — proving the accept thread is not blocked. */
+    /* A well-behaved client must still complete its handshake while the silent
+     * peer is stuck — proving the accept thread is not blocked. */
     auto client = std::make_shared<flight_safety_system::transport_ssl::fss_connection_client>(
         CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE);
     REQUIRE(client->connectTo("localhost", port));
-    REQUIRE(fss_test::wait_for([]() { return accepted != nullptr; }));
+    REQUIRE(fss_test::wait_for([]() { return accepted != nullptr; }, generous));
 
     ::close(silent);
-    listen = nullptr; // drains the (timed-out) silent worker before clearing globals
+    listen = nullptr; // close() above aborts the silent worker's handshake, draining it
     accepted = nullptr;
 }
 
@@ -336,12 +342,17 @@ TEST_CASE("ssl: concurrent handshakes are bounded and excess connections shed", 
     accepted = nullptr;
     const uint16_t port = fss_test::pick_port();
     REQUIRE(port != 0);
-    constexpr unsigned int short_handshake_ms = 1000;
     constexpr size_t max_handshakes = 2;
+    /* Generous handshake timeout so the silent peers reliably hold their slots
+     * for the duration (the bound is what's under test, not the timeout); they
+     * are drained by close() at teardown. A short timeout would let the slots
+     * free mid-test under a slow build and the excess connection would not be
+     * shed. */
     auto listen = std::make_shared<flight_safety_system::transport_ssl::fss_listen>(
-        port, accept_cb, CA_PUBLIC_FILE, SERVER_PRIVATE_FILE, SERVER_PUBLIC_FILE, std::string{}, short_handshake_ms,
-        max_handshakes);
+        port, accept_cb, CA_PUBLIC_FILE, SERVER_PRIVATE_FILE, SERVER_PUBLIC_FILE, std::string{},
+        flight_safety_system::transport_ssl::default_handshake_timeout_ms, max_handshakes);
     REQUIRE(listen != nullptr);
+    constexpr auto generous = std::chrono::milliseconds(15000); // tolerate valgrind slowdown
 
     /* Fill every setup slot with silent peers. */
     std::array<int, max_handshakes> silent{};
@@ -350,13 +361,13 @@ TEST_CASE("ssl: concurrent handshakes are bounded and excess connections shed", 
         fd = connect_silent_peer(port);
         REQUIRE(fd >= 0);
     }
-    REQUIRE(fss_test::wait_for([&]() { return listen->getActiveSetupCount() >= max_handshakes; }));
+    REQUIRE(fss_test::wait_for([&]() { return listen->getActiveSetupCount() >= max_handshakes; }, generous));
 
     /* An additional connection is accepted at the TCP layer but must be shed:
      * the rejected counter advances and the peer observes an immediate EOF. */
     int extra = connect_silent_peer(port);
     REQUIRE(extra >= 0);
-    REQUIRE(fss_test::wait_for([&]() { return listen->getRejectedSetupCount() >= 1; }));
+    REQUIRE(fss_test::wait_for([&]() { return listen->getRejectedSetupCount() >= 1; }, generous));
     char buf = 0;
     REQUIRE(::recv(extra, &buf, 1, 0) == 0); // orderly close from the server side
 
@@ -403,17 +414,20 @@ TEST_CASE("ssl: client handshake times out against a silent server", "[ssl_hands
         }
     });
 
-    constexpr unsigned int short_handshake_ms = 500;
+    constexpr unsigned int client_handshake_ms = 1000;
     auto client = std::make_shared<flight_safety_system::transport_ssl::fss_connection_client>(
-        CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE, short_handshake_ms);
+        CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE, client_handshake_ms);
 
     auto start = std::chrono::steady_clock::now();
     bool connected = client->connectTo("localhost", port);
     auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start);
 
     REQUIRE_FALSE(connected);
-    /* Must give up near the timeout, not hang. Generous upper bound for CI. */
-    REQUIRE(elapsed < std::chrono::milliseconds(short_handshake_ms * 8));
+    /* It must wait for (roughly) the injected timeout, not fail instantly... */
+    REQUIRE(elapsed >= std::chrono::milliseconds(client_handshake_ms / 2));
+    /* ...and give up well before the 10 s default — proving the injected timeout
+     * took effect — with slack for valgrind's setup/teardown overhead. */
+    REQUIRE(elapsed < std::chrono::milliseconds(8000));
 
     stop.store(true);
     ::close(listen_fd); // also unblocks accept() if the client never connected
