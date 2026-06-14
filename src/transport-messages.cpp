@@ -15,24 +15,28 @@ using flight_safety_system::fss_be64toh;
 using flight_safety_system::transport::FSS_COORD_SCALE;
 using flight_safety_system::transport::FSS_VOLTAGE_SCALE;
 
+/* On-wire "no fix" sentinel for a scaled coordinate. INT32_MIN lies outside the
+ * encodable coordinate range (±180° -> ±1.8e9, INT32_MIN ~= -2.147e9) so it can
+ * never alias a real position; the receiver decodes it back to NaN (see
+ * decode_coord), keeping "we don't know where the aircraft is" distinct from
+ * (0,0) — Null Island, a legal coordinate. Finite values are clamped into
+ * [coord_min_encodable, INT32_MAX], the low side stopping one above the
+ * sentinel so a clamped real value can never collide with it. */
+static constexpr int32_t coord_no_fix_sentinel = std::numeric_limits<int32_t>::min();
+static constexpr int32_t coord_min_encodable = coord_no_fix_sentinel + 1;
+
 /* Guard a double->int32_t conversion against NaN, Inf, and out-of-range values.
- * Non-finite input (NaN/Inf) maps to INT32_MIN, the on-wire "no fix" sentinel:
- * it lies outside the encodable coordinate range (±180° -> ±1.8e9, INT32_MIN
- * ~= -2.147e9) so it can never alias a real position. The receiver decodes
- * INT32_MIN back to NaN (see assign_coordinates), keeping "we don't know where
- * the aircraft is" distinct from (0,0) — Null Island, a legal coordinate.
- * Finite values are clamped into [INT32_MIN + 1, INT32_MAX] (the low side stops
- * one above the sentinel) so a clamped real value can never collide with it. */
+ * Non-finite input maps to the no-fix sentinel; finite values are clamped. */
 static auto pack_scaled_coord(double value, double scale) -> int32_t
 {
     if (!std::isfinite(value))
     {
-        return std::numeric_limits<int32_t>::min();
+        return coord_no_fix_sentinel;
     }
     const double scaled = value / scale;
-    if (scaled <= static_cast<double>(std::numeric_limits<int32_t>::min() + 1))
+    if (scaled <= static_cast<double>(coord_min_encodable))
     {
-        return std::numeric_limits<int32_t>::min() + 1;
+        return coord_min_encodable;
     }
     if (scaled >= static_cast<double>(std::numeric_limits<int32_t>::max()))
     {
@@ -244,7 +248,7 @@ public:
  * (see pack_scaled_coord) back to NaN so it is never read as a real position. */
 static auto decode_coord(int32_t raw) -> double
 {
-    if (raw == std::numeric_limits<int32_t>::min())
+    if (raw == coord_no_fix_sentinel)
     {
         return NAN;
     }
