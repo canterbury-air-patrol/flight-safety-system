@@ -20,6 +20,7 @@ private:
     std::atomic<bool> shutting_down{false};
     uint64_t client_timeout_ms{30000};
     uint64_t identify_timeout_ms{30000};
+    uint64_t position_staleness_ms{30000};
     uint64_t rate_capacity{100};
     uint64_t rate_refill_per_s{20};
     /* Guarded by lock. Built by the command poller thread (the only place
@@ -107,6 +108,7 @@ public:
     };
     void setClientTimeoutMs(uint64_t ms) { this->client_timeout_ms = ms; }
     void setClientIdentifyTimeoutMs(uint64_t ms) { this->identify_timeout_ms = ms; }
+    void setClientStalenessMs(uint64_t ms) { this->position_staleness_ms = ms; }
     void setClientRateLimits(uint64_t capacity, uint64_t refill_per_s)
     {
         this->rate_capacity = capacity;
@@ -120,6 +122,7 @@ public:
          * limiter is still being reconfigured. */
         client->setTimeoutMs(this->client_timeout_ms);
         client->setIdentifyTimeoutMs(this->identify_timeout_ms);
+        client->setStalenessMs(this->position_staleness_ms);
         client->setRateLimits(this->rate_capacity, this->rate_refill_per_s);
         auto *raw = client.get();
         {

@@ -186,6 +186,19 @@ private:
      * coordinates) this session; touched only on the recv thread
      * (processMessage), used to throttle the warning. */
     uint64_t no_fix_reports{0};
+    /* Position staleness window in ms (0 disables the check). A report whose
+     * timestamp is further than this from the (offset-corrected) server clock
+     * is discarded. Configurable via server.json position_staleness_ms. */
+    uint64_t position_staleness_ms{30000};
+    /* Estimate of (client clock - server clock) in ms: positive if the client
+     * runs ahead. Used only to offset-correct the staleness gate, never to
+     * rewrite stored timestamps. Stays 0 until measured (todo/17 item 3, the
+     * RTT clock-offset feature); 0 makes the gate a plain symmetric window. */
+    int64_t client_clock_offset_ms{0};
+    /* Consecutive staleness discards; reset by the first in-window report.
+     * Drives WARN->ERROR escalation so a skewed client is unmistakable without
+     * a per-message WARN drip. Recv thread only. */
+    uint64_t staleness_discards{0};
     /* Cumulative duplicate protocol-version messages seen this session
      * (never reset); touched only on the recv thread (processMessage), used
      * to throttle the warning. */
@@ -215,6 +228,7 @@ public:
     void setClock(std::shared_ptr<IClock> t_clock);
     void setTimeoutMs(uint64_t ms);
     void setIdentifyTimeoutMs(uint64_t ms);
+    void setStalenessMs(uint64_t ms);
     void setRateLimits(uint64_t capacity, uint64_t refill_per_s); // must be called before any messages are processed
     auto isTimedOut() -> bool;
 };
