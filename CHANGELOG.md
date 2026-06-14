@@ -22,7 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - A position report from an aircraft with no GPS fix is no longer recorded and
-  broadcast as a real position at (0,0) — Null Island. The "no fix" condition
+  broadcast as a real position at (0,0) — Null Island. The "no-fix" condition
   (a NaN coordinate) now travels the wire as an `INT32_MIN` sentinel that
   decodes back to NaN, so the server discards it (with a distinct, throttled
   "no GPS fix" warning) instead of storing a bogus 0°N 0°E telemetry point.
