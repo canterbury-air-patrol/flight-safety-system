@@ -178,11 +178,21 @@ void flight_safety_system::transport::fss_connection::processMessages()
              * every null_msg_log_interval-th after — otherwise a single bad
              * peer floods the log unboundedly. */
             uint64_t nulls = ++this->consecutive_null_msgs;
-            if (nulls == 1 || (nulls % null_msg_log_interval) == 0)
+            if (nulls < null_msg_disconnect_threshold)
             {
-                FSS_LOG_WARN("transport", "Got a null msg (" << nulls << " consecutive undecodable frames)");
+                if (nulls == 1 || (nulls % null_msg_log_interval) == 0)
+                {
+                    FSS_LOG_WARN("transport", "Got a null msg (" << nulls << " consecutive undecodable frames)");
+                }
+                continue;
             }
-            continue;
+            /* Threshold of consecutive garbage frames reached: close the
+             * session loudly, mirroring the oversized-frame defence in
+             * recvMsg(). Synthesise a closed message and fall through so the
+             * normal close-delivery path below notifies the handler. */
+            FSS_LOG_ERROR("transport", "peer sent " << nulls << " consecutive undecodable frames, closing");
+            this->disconnect();
+            msg = std::make_shared<flight_safety_system::transport::fss_message_closed>();
         }
         this->consecutive_null_msgs.store(0);
         if (msg->getType() == message_type_closed)
