@@ -17,6 +17,10 @@ namespace server {
 
 constexpr int command_poll_ms = 100;
 
+/* Default position-staleness window (ms). Shared so the fss_client member,
+ * server_clients, and server.cpp config default cannot drift apart. */
+constexpr uint64_t default_position_staleness_ms = 30000;
+
 class smm_settings {
 private:
     std::string address;
@@ -189,7 +193,7 @@ private:
     /* Position staleness window in ms (0 disables the check). A report whose
      * timestamp is further than this from the (offset-corrected) server clock
      * is discarded. Configurable via server.json position_staleness_ms. */
-    uint64_t position_staleness_ms{30000};
+    uint64_t position_staleness_ms{default_position_staleness_ms};
     /* Estimate of (client clock - server clock) in ms: positive if the client
      * runs ahead. Used only to offset-correct the staleness gate, never to
      * rewrite stored timestamps. Stays 0 until measured (todo/17 item 3, the

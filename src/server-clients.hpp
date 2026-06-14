@@ -20,7 +20,7 @@ private:
     std::atomic<bool> shutting_down{false};
     uint64_t client_timeout_ms{30000};
     uint64_t identify_timeout_ms{30000};
-    uint64_t position_staleness_ms{30000};
+    uint64_t position_staleness_ms{flight_safety_system::server::default_position_staleness_ms};
     uint64_t rate_capacity{100};
     uint64_t rate_refill_per_s{20};
     /* Guarded by lock. Built by the command poller thread (the only place
