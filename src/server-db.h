@@ -45,6 +45,9 @@ struct fss_server_s {
     int port;
 };
 
-struct fss_server_s **db_active_fss_servers_get(const char *conn);
+/* On return *error_out is non-zero if the cursor was cut short by a
+ * mid-iteration error (the returned list is then partial and must not be
+ * treated as complete); zero on a clean read. error_out may be NULL. */
+struct fss_server_s **db_active_fss_servers_get(const char *conn, int *error_out);
 
 void db_free_fss_servers(struct fss_server_s **servers);

@@ -195,9 +195,10 @@ auto flight_safety_system::server::db_connection::getActiveServers() -> std::vec
 {
     std::vector<fss_server_details> res;
     struct fss_server_s **servers = nullptr;
+    int fetch_error = 0;
     {
         std::scoped_lock guard(this->read_lock);
-        servers = db_active_fss_servers_get(read_conn_name);
+        servers = db_active_fss_servers_get(read_conn_name, &fetch_error);
     }
     if (servers)
     {
@@ -208,6 +209,14 @@ auto flight_safety_system::server::db_connection::getActiveServers() -> std::vec
             free(servers[i]);
         }
         db_free_fss_servers(servers);
+    }
+    /* A mid-cursor failure leaves res holding only the rows read before the
+     * error. Discard it: shipping a truncated list to aircraft would drop
+     * servers that are actually active. The caller's exception_guard retains
+     * the previous good cache. */
+    if (fetch_error != 0)
+    {
+        throw database_error("active FSS server list read failed mid-cursor; partial result discarded");
     }
     return res;
 }
