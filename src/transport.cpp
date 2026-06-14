@@ -536,7 +536,6 @@ static void listen_thread(flight_safety_system::transport::fss_listen *listen)
 
 void flight_safety_system::transport::fss_listen::processMessages()
 {
-    flight_safety_system::exception_guard accept_guard("transport", "new connection");
     while (this->getFd() >= 0)
     {
         struct sockaddr_storage sa = {};
@@ -569,19 +568,85 @@ void flight_safety_system::transport::fss_listen::processMessages()
         std::cout << "New client from " << addr_str << ":" << client_port << " as " << newfd << std::endl;
 #endif
         set_tcp_keepalive(newfd);
-        if (this->cb != nullptr)
-        {
-            accept_guard.run([&]() -> void {
-                auto conn = this->newConnection(newfd);
-                this->cb(conn);
-            });
-        }
-        else
+        if (this->cb == nullptr)
         {
             /* Thanks for your call, unfortunately we don't know how to deal with it */
             safe_close_fd(newfd, "transport/accept");
+            continue;
         }
+        /* Reserve a setup slot, or shed load if we are at the bound / shutting
+         * down. Closing the fd here lets the peer observe the rejection
+         * immediately rather than queueing unboundedly. */
+        {
+            std::scoped_lock setup_holder(this->setup_lock);
+            if (!this->accepting_setups || this->active_setups >= this->max_concurrent_setups)
+            {
+                uint64_t rejected = ++this->rejected_setups;
+                if (rejected == 1 || (rejected % 100) == 0)
+                {
+                    FSS_LOG_WARN("transport", "Connection setup slots exhausted ("
+                                                  << this->active_setups << "/" << this->max_concurrent_setups
+                                                  << "), dropping connection. Total dropped: " << rejected);
+                }
+                safe_close_fd(newfd, "transport/accept");
+                continue;
+            }
+            ++this->active_setups;
+        }
+        /* Run newConnection() (the blocking TLS handshake for the SSL listener)
+         * and the connect callback off the accept thread, so a slow or silent
+         * peer cannot block accept() for other clients. The worker is detached;
+         * disconnect() drains in-flight workers before this object dies, so the
+         * raw `this` capture stays valid for the worker's lifetime. */
+        std::thread([this, newfd]() -> void {
+            flight_safety_system::exception_guard setup_guard("transport", "new connection setup");
+            setup_guard.run([&]() -> void {
+                auto conn = this->newConnection(newfd);
+                if (conn != nullptr && this->cb != nullptr)
+                {
+                    this->cb(conn);
+                }
+            });
+            /* Final action: release the slot and wake the drain. notify_all()
+             * runs while the lock is held so disconnect() cannot wake (re-lock),
+             * see active_setups==0, and destroy setup_cv before this notify
+             * completes. Touch no other `this` state afterwards. */
+            {
+                std::scoped_lock setup_holder(this->setup_lock);
+                --this->active_setups;
+                this->setup_cv.notify_all();
+            }
+        }).detach();
     }
+}
+
+void flight_safety_system::transport::fss_listen::disconnect()
+{
+    /* Stop the accept loop and join the accept thread first, so no new setup
+     * workers can be spawned, then drain the ones already in flight. They read
+     * members of derived listeners (e.g. the SSL cert/key paths), so this must
+     * complete before those members are destroyed. */
+    flight_safety_system::transport::fss_connection::disconnect();
+    std::unique_lock setup_holder(this->setup_lock);
+    this->accepting_setups = false;
+    this->setup_cv.wait(setup_holder, [this]() -> bool { return this->active_setups == 0; });
+}
+
+void flight_safety_system::transport::fss_listen::setMaxConcurrentSetups(size_t t_max)
+{
+    std::scoped_lock setup_holder(this->setup_lock);
+    this->max_concurrent_setups = t_max;
+}
+
+auto flight_safety_system::transport::fss_listen::getActiveSetupCount() -> size_t
+{
+    std::scoped_lock setup_holder(this->setup_lock);
+    return this->active_setups;
+}
+
+auto flight_safety_system::transport::fss_listen::getRejectedSetupCount() -> uint64_t
+{
+    return this->rejected_setups.load();
 }
 
 auto flight_safety_system::transport::fss_listen::newConnection(int t_newfd)

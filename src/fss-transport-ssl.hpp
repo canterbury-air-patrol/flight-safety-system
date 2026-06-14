@@ -11,6 +11,12 @@ class session;
 
 namespace flight_safety_system {
 namespace transport_ssl {
+
+/* Default bound on a single TLS handshake. Passed to
+ * gnutls_handshake_set_timeout() so a peer that stalls mid-handshake is
+ * dropped rather than holding a setup worker indefinitely. */
+constexpr unsigned int default_handshake_timeout_ms = 10000;
+
 /* Exception contract: no gnutls::exception escapes this library's public
  * entry points. Misconfiguration (missing/unreadable CA, key, cert, or CRL
  * files) and TLS setup failures surface as fss_connection_client::create()
@@ -80,8 +86,9 @@ public:
 class fss_connection_server : public fss_connection {
 private:
     std::list<std::string> possible_names{};
+    unsigned int handshake_timeout_ms{default_handshake_timeout_ms};
     fss_connection_server(int t_fd, std::string t_ca, std::string t_private_key, std::string t_public_key,
-                          std::string t_crl = {});
+                          std::string t_crl, unsigned int t_handshake_timeout_ms);
 protected:
     auto setupSSL() -> bool;
 public:
@@ -90,8 +97,11 @@ public:
     auto operator=(fss_connection_server&) -> fss_connection_server& = delete;
     auto operator=(fss_connection_server&&) -> fss_connection_server& = delete;
     ~fss_connection_server() override;
+    /* Returns nullptr if the handshake fails or times out (the connection
+     * destructor closes the fd) so the caller never wires up a dead peer. */
     static auto create(int t_fd, std::string t_ca, std::string t_private_key, std::string t_public_key,
-                       std::string t_crl) -> std::shared_ptr<fss_connection_server>;
+                       std::string t_crl, unsigned int t_handshake_timeout_ms = default_handshake_timeout_ms)
+        -> std::shared_ptr<fss_connection_server>;
     auto getClientNames() -> std::list<std::string> override;
     auto isPeerCertRevoked(const std::string& t_crl_file) const -> bool override;
 };
@@ -102,11 +112,14 @@ private:
     std::string private_key_file;
     std::string public_key_file;
     std::string crl_file;
+    unsigned int handshake_timeout_ms;
 protected:
     auto newConnection(int fd) -> std::shared_ptr<flight_safety_system::transport::fss_connection> override;
 public:
     fss_listen(uint16_t t_port, flight_safety_system::transport::fss_connect_cb t_cb, std::string t_ca,
-               std::string t_private_key, std::string t_public_key, std::string t_crl = {});
+               std::string t_private_key, std::string t_public_key, std::string t_crl = {},
+               unsigned int t_handshake_timeout_ms = default_handshake_timeout_ms,
+               size_t t_max_concurrent_handshakes = 0);
     /* Copy/move are already deleted via the base class. */
     /* Joins the accept thread before this class's members are destroyed:
      * that thread reads the cert/key path strings above in newConnection(),

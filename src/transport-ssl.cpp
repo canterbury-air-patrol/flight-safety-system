@@ -87,9 +87,11 @@ flight_safety_system::transport_ssl::fss_connection_server::~fss_connection_serv
 flight_safety_system::transport_ssl::fss_connection_server::fss_connection_server(int t_fd, std::string t_ca,
                                                                                   std::string t_private_key,
                                                                                   std::string t_public_key,
-                                                                                  std::string t_crl)
+                                                                                  std::string t_crl,
+                                                                                  unsigned int t_handshake_timeout_ms)
     : flight_safety_system::transport_ssl::fss_connection(std::move(t_ca), std::move(t_private_key),
-                                                          std::move(t_public_key), std::move(t_crl))
+                                                          std::move(t_public_key), std::move(t_crl)),
+      handshake_timeout_ms(t_handshake_timeout_ms)
 {
     this->setFd(t_fd);
     this->usable.store(this->setupSSL());
@@ -97,15 +99,21 @@ flight_safety_system::transport_ssl::fss_connection_server::fss_connection_serve
 
 auto flight_safety_system::transport_ssl::fss_connection_server::create(int t_fd, std::string t_ca,
                                                                         std::string t_private_key,
-                                                                        std::string t_public_key, std::string t_crl)
+                                                                        std::string t_public_key, std::string t_crl,
+                                                                        unsigned int t_handshake_timeout_ms)
     -> std::shared_ptr<fss_connection_server>
 {
-    auto conn = std::shared_ptr<fss_connection_server>(new fss_connection_server(
-        t_fd, std::move(t_ca), std::move(t_private_key), std::move(t_public_key), std::move(t_crl)));
-    if (conn->usable.load())
+    auto conn = std::shared_ptr<fss_connection_server>(
+        new fss_connection_server(t_fd, std::move(t_ca), std::move(t_private_key), std::move(t_public_key),
+                                  std::move(t_crl), t_handshake_timeout_ms));
+    if (!conn->usable.load())
     {
-        conn->startRecvThread(std::thread([conn]() -> void { conn->processMessages(); }));
+        /* Handshake failed or timed out: drop the dead connection (its
+         * destructor closes the fd) rather than handing a zombie peer to the
+         * accept callback. */
+        return nullptr;
     }
+    conn->startRecvThread(std::thread([conn]() -> void { conn->processMessages(); }));
     return conn;
 }
 
@@ -293,6 +301,10 @@ auto flight_safety_system::transport_ssl::fss_connection_client::setupSSL() -> b
 
     clientSession->set_verify_cert(this->hostname.c_str(), 0);
 
+    /* Bound the handshake so a server that accepts the TCP connection but
+     * stalls the TLS handshake cannot hang connectTo() indefinitely. */
+    gnutls_handshake_set_timeout(this->session->ptr(), default_handshake_timeout_ms);
+
     int ret = -2;
     try
     {
@@ -338,6 +350,13 @@ auto flight_safety_system::transport_ssl::fss_connection_server::setupSSL() -> b
      * via set_verify_cert). NULL hostname: a client certificate's identity
      * is its CN, matched at the application layer, not a hostname. */
     gnutls_session_set_verify_cert(this->session->ptr(), nullptr, 0);
+
+    /* Bound the handshake so a peer that completes the TCP connection but then
+     * stalls (sends no/partial ClientHello) cannot occupy this setup worker
+     * indefinitely. With the default int transport (gnutls_transport_set_int
+     * in setupSession), gnutls drives the handshake against its system
+     * pull-timeout function and returns GNUTLS_E_TIMEDOUT at the deadline. */
+    gnutls_handshake_set_timeout(this->session->ptr(), this->handshake_timeout_ms);
 
     int ret = -1;
     try
@@ -463,16 +482,26 @@ auto flight_safety_system::transport_ssl::fss_listen::newConnection(int t_newfd)
     -> std::shared_ptr<flight_safety_system::transport::fss_connection>
 {
     return flight_safety_system::transport_ssl::fss_connection_server::create(
-        t_newfd, this->ca_file, this->private_key_file, this->public_key_file, this->crl_file);
+        t_newfd, this->ca_file, this->private_key_file, this->public_key_file, this->crl_file,
+        this->handshake_timeout_ms);
 }
 
 flight_safety_system::transport_ssl::fss_listen::fss_listen(uint16_t t_port,
                                                             flight_safety_system::transport::fss_connect_cb t_cb,
                                                             std::string t_ca, std::string t_private_key,
-                                                            std::string t_public_key, std::string t_crl)
+                                                            std::string t_public_key, std::string t_crl,
+                                                            unsigned int t_handshake_timeout_ms,
+                                                            size_t t_max_concurrent_handshakes)
     : flight_safety_system::transport::fss_listen(t_port, std::move(t_cb), defer_start_t{}), ca_file(std::move(t_ca)),
-      private_key_file(std::move(t_private_key)), public_key_file(std::move(t_public_key)), crl_file(std::move(t_crl))
+      private_key_file(std::move(t_private_key)), public_key_file(std::move(t_public_key)), crl_file(std::move(t_crl)),
+      handshake_timeout_ms(t_handshake_timeout_ms)
 {
+    /* Apply the concurrency bound (0 = keep the base default) before
+     * startListening() so the accept thread reads a settled value. */
+    if (t_max_concurrent_handshakes > 0)
+    {
+        this->setMaxConcurrentSetups(t_max_concurrent_handshakes);
+    }
     /* Start the accept thread only now that this object is fully
      * constructed: the thread virtual-dispatches into newConnection(),
      * which reads the path strings initialised above. Starting it from the

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <condition_variable>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -201,6 +202,19 @@ private:
     fss_connect_cb cb;
     static constexpr int default_max_pending_conns = 10;
     int max_pending_connections{default_max_pending_conns};
+    /* Connection setup (newConnection + cb) runs on detached worker threads,
+     * not inline on the accept thread: for the TLS listener newConnection
+     * performs the blocking handshake, so running it inline let one silent
+     * peer block all new connections. setup_lock guards the bookkeeping
+     * below; the count is bounded so the worker path cannot itself become a
+     * thread/memory-exhaustion vector. */
+    static constexpr size_t default_max_concurrent_setups = 64;
+    std::mutex setup_lock{};
+    std::condition_variable setup_cv{};
+    size_t active_setups{0};
+    bool accepting_setups{true};
+    size_t max_concurrent_setups{default_max_concurrent_setups};
+    std::atomic<uint64_t> rejected_setups{0};
 protected:
     virtual auto newConnection(int fd) -> std::shared_ptr<flight_safety_system::transport::fss_connection>;
     /* Binds, listens, and starts the accept thread. The public constructor
@@ -209,6 +223,9 @@ protected:
      * (which virtual-dispatches processMessages/newConnection and reads
      * derived members) can never observe a partially constructed object. */
     auto startListening() -> bool;
+    /* Bound on concurrent in-progress connection setups. Derived classes set
+     * this before startListening() so the accept thread reads a settled value. */
+    void setMaxConcurrentSetups(size_t t_max);
     struct defer_start_t {};
     fss_listen(uint16_t t_port, fss_connect_cb t_cb, defer_start_t);
 public:
@@ -219,6 +236,11 @@ public:
     auto operator=(fss_listen &&) -> fss_listen & = delete;
     ~fss_listen() override;
     void processMessages() override;
+    /* Stops accepting new setups and drains in-flight setup workers before
+     * returning, so derived members the workers read stay alive until then. */
+    void disconnect() override;
+    auto getActiveSetupCount() -> size_t;
+    auto getRejectedSetupCount() -> uint64_t;
 };
 
 class fss_message {

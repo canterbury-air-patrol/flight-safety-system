@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security
+- The TLS handshake no longer runs inline on the accept thread. A peer that
+  completed the TCP connection but then stalled the handshake (sending no or
+  partial ClientHello) previously blocked the accept thread inside a blocking
+  handshake `recv` with no timeout, halting *all* new connections to the
+  server — a trivial unauthenticated denial of service. Connection setup now
+  runs on a bounded pool of worker threads, each handshake is bounded by
+  `gnutls_handshake_set_timeout` (configurable via `tls_handshake_timeout_ms`,
+  default 10 s), and concurrent in-progress handshakes are capped
+  (`max_concurrent_handshakes`, default 64) so the worker path cannot itself
+  be used to exhaust threads/memory. The client side also bounds its handshake
+  so a stalled server cannot hang `connectTo()`.
+
 ## [1.0.3] - 2026-06-13
 
 ### Security
