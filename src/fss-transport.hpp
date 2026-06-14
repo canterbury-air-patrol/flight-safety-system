@@ -215,6 +215,14 @@ private:
     bool accepting_setups{true};
     size_t max_concurrent_setups{default_max_concurrent_setups};
     std::atomic<uint64_t> rejected_setups{0};
+    /* Spawns the detached worker that runs newConnection()+cb for an admitted
+     * fd; the caller has already reserved the slot. May throw std::system_error
+     * if the thread cannot be created (caller rolls the reservation back). */
+    void startSetupWorker(int t_newfd);
+    /* Releases one reserved setup slot and wakes a draining disconnect(). The
+     * single place the active_setups decrement + notify lives, so the worker
+     * exit path and the thread-creation-failure path stay in lockstep. */
+    void releaseSetupSlot();
 protected:
     virtual auto newConnection(int fd) -> std::shared_ptr<flight_safety_system::transport::fss_connection>;
     /* Binds, listens, and starts the accept thread. The public constructor

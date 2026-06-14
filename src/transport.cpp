@@ -593,49 +593,51 @@ void flight_safety_system::transport::fss_listen::processMessages()
             }
             ++this->active_setups;
         }
-        /* Run newConnection() (the blocking TLS handshake for the SSL listener)
-         * and the connect callback off the accept thread, so a slow or silent
-         * peer cannot block accept() for other clients. The worker is detached;
-         * disconnect() drains in-flight workers before this object dies, so the
-         * raw `this` capture stays valid for the worker's lifetime.
-         *
-         * The slot was reserved above; if the thread cannot be created the
-         * worker never runs to release it, so roll the reservation back here
-         * (and wake any waiting drain) — otherwise disconnect() would block
-         * forever waiting for active_setups to reach 0. */
+        /* The slot is reserved; hand the fd to a worker. If the worker thread
+         * cannot be created it never runs to release the slot, so roll the
+         * reservation back here (and wake any waiting drain) and drop the fd —
+         * otherwise disconnect() would block forever on active_setups != 0. */
         try
         {
-            std::thread([this, newfd]() -> void {
-                flight_safety_system::exception_guard setup_guard("transport", "new connection setup");
-                setup_guard.run([&]() -> void {
-                    auto conn = this->newConnection(newfd);
-                    if (conn != nullptr && this->cb != nullptr)
-                    {
-                        this->cb(conn);
-                    }
-                });
-                /* Final action: release the slot and wake the drain. notify_all()
-                 * runs while the lock is held so disconnect() cannot wake (re-lock),
-                 * see active_setups==0, and destroy setup_cv before this notify
-                 * completes. Touch no other `this` state afterwards. */
-                {
-                    std::scoped_lock setup_holder(this->setup_lock);
-                    --this->active_setups;
-                    this->setup_cv.notify_all();
-                }
-            }).detach();
+            this->startSetupWorker(newfd);
         }
         catch (const std::system_error &e)
         {
             FSS_LOG_ERROR("transport", "Failed to start connection setup worker: " << e.what());
-            {
-                std::scoped_lock setup_holder(this->setup_lock);
-                --this->active_setups;
-                this->setup_cv.notify_all();
-            }
+            this->releaseSetupSlot();
             safe_close_fd(newfd, "transport/accept");
         }
     }
+}
+
+void flight_safety_system::transport::fss_listen::startSetupWorker(int t_newfd)
+{
+    /* Run newConnection() (the blocking TLS handshake for the SSL listener) and
+     * the connect callback off the accept thread, so a slow or silent peer
+     * cannot block accept() for other clients. The worker is detached;
+     * disconnect() drains in-flight workers before this object dies, so the raw
+     * `this` capture stays valid for the worker's lifetime. */
+    std::thread([this, t_newfd]() -> void {
+        flight_safety_system::exception_guard setup_guard("transport", "new connection setup");
+        setup_guard.run([&]() -> void {
+            auto conn = this->newConnection(t_newfd);
+            if (conn != nullptr && this->cb != nullptr)
+            {
+                this->cb(conn);
+            }
+        });
+        this->releaseSetupSlot();
+    }).detach();
+}
+
+void flight_safety_system::transport::fss_listen::releaseSetupSlot()
+{
+    /* notify_all() runs while the lock is held so disconnect() cannot wake
+     * (re-lock), see active_setups==0, and destroy setup_cv before this notify
+     * completes. The worker must touch no other `this` state afterwards. */
+    std::scoped_lock setup_holder(this->setup_lock);
+    --this->active_setups;
+    this->setup_cv.notify_all();
 }
 
 void flight_safety_system::transport::fss_listen::disconnect()
@@ -652,6 +654,14 @@ void flight_safety_system::transport::fss_listen::disconnect()
 
 void flight_safety_system::transport::fss_listen::setMaxConcurrentSetups(size_t t_max)
 {
+    if (t_max == 0)
+    {
+        /* A bound of 0 would refuse every connection (active_setups >= 0 is
+         * always true). That is never intended, so ignore it and keep the
+         * current bound rather than silently bricking the listener. */
+        FSS_LOG_WARN("transport", "setMaxConcurrentSetups(0) ignored: a zero bound would refuse all connections");
+        return;
+    }
     std::scoped_lock setup_holder(this->setup_lock);
     this->max_concurrent_setups = t_max;
 }
