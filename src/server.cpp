@@ -83,7 +83,8 @@ auto main(int argc, char *argv[]) -> int
     constexpr int default_identify_timeout_sec = 30;
     constexpr uint64_t default_rate_capacity = 100;
     constexpr uint64_t default_rate_refill_per_s = 20;
-    constexpr unsigned int default_tls_handshake_timeout_ms = flight_safety_system::transport_ssl::default_handshake_timeout_ms;
+    constexpr unsigned int default_tls_handshake_timeout_ms =
+        flight_safety_system::transport_ssl::default_handshake_timeout_ms;
     constexpr std::size_t default_max_concurrent_handshakes = 64;
     int listen_port = 0;
     int pg_port = default_pg_port;
@@ -171,9 +172,25 @@ auto main(int argc, char *argv[]) -> int
         {
             tls_handshake_timeout_ms = config["tls_handshake_timeout_ms"].asUInt();
         }
+        if (tls_handshake_timeout_ms == 0)
+        {
+            /* gnutls treats a 0 ms handshake timeout as "never time out", which
+             * re-opens the stalled-handshake DoS this setting exists to close. */
+            FSS_LOG_WARN("server",
+                         "tls_handshake_timeout_ms must be > 0 (0 disables the handshake timeout); using default "
+                             << default_tls_handshake_timeout_ms);
+            tls_handshake_timeout_ms = default_tls_handshake_timeout_ms;
+        }
         if (config.isMember("max_concurrent_handshakes"))
         {
             max_concurrent_handshakes = config["max_concurrent_handshakes"].asUInt();
+        }
+        if (max_concurrent_handshakes == 0)
+        {
+            /* A bound of 0 would refuse every incoming connection. */
+            FSS_LOG_WARN("server",
+                         "max_concurrent_handshakes must be > 0; using default " << default_max_concurrent_handshakes);
+            max_concurrent_handshakes = default_max_concurrent_handshakes;
         }
         ca_public_key = config["ssl"]["ca_public_key"].asString();
         server_private_key = config["ssl"]["server_private_key"].asString();
