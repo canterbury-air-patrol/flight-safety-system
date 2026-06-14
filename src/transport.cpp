@@ -597,26 +597,44 @@ void flight_safety_system::transport::fss_listen::processMessages()
          * and the connect callback off the accept thread, so a slow or silent
          * peer cannot block accept() for other clients. The worker is detached;
          * disconnect() drains in-flight workers before this object dies, so the
-         * raw `this` capture stays valid for the worker's lifetime. */
-        std::thread([this, newfd]() -> void {
-            flight_safety_system::exception_guard setup_guard("transport", "new connection setup");
-            setup_guard.run([&]() -> void {
-                auto conn = this->newConnection(newfd);
-                if (conn != nullptr && this->cb != nullptr)
+         * raw `this` capture stays valid for the worker's lifetime.
+         *
+         * The slot was reserved above; if the thread cannot be created the
+         * worker never runs to release it, so roll the reservation back here
+         * (and wake any waiting drain) — otherwise disconnect() would block
+         * forever waiting for active_setups to reach 0. */
+        try
+        {
+            std::thread([this, newfd]() -> void {
+                flight_safety_system::exception_guard setup_guard("transport", "new connection setup");
+                setup_guard.run([&]() -> void {
+                    auto conn = this->newConnection(newfd);
+                    if (conn != nullptr && this->cb != nullptr)
+                    {
+                        this->cb(conn);
+                    }
+                });
+                /* Final action: release the slot and wake the drain. notify_all()
+                 * runs while the lock is held so disconnect() cannot wake (re-lock),
+                 * see active_setups==0, and destroy setup_cv before this notify
+                 * completes. Touch no other `this` state afterwards. */
                 {
-                    this->cb(conn);
+                    std::scoped_lock setup_holder(this->setup_lock);
+                    --this->active_setups;
+                    this->setup_cv.notify_all();
                 }
-            });
-            /* Final action: release the slot and wake the drain. notify_all()
-             * runs while the lock is held so disconnect() cannot wake (re-lock),
-             * see active_setups==0, and destroy setup_cv before this notify
-             * completes. Touch no other `this` state afterwards. */
+            }).detach();
+        }
+        catch (const std::system_error &e)
+        {
+            FSS_LOG_ERROR("transport", "Failed to start connection setup worker: " << e.what());
             {
                 std::scoped_lock setup_holder(this->setup_lock);
                 --this->active_setups;
                 this->setup_cv.notify_all();
             }
-        }).detach();
+            safe_close_fd(newfd, "transport/accept");
+        }
     }
 }
 

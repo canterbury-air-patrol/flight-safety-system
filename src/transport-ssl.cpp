@@ -119,8 +119,10 @@ auto flight_safety_system::transport_ssl::fss_connection_server::create(int t_fd
 
 flight_safety_system::transport_ssl::fss_connection_client::fss_connection_client(std::string t_ca,
                                                                                   std::string t_private_key,
-                                                                                  std::string t_public_key)
-    : fss_connection(std::move(t_ca), std::move(t_private_key), std::move(t_public_key))
+                                                                                  std::string t_public_key,
+                                                                                  unsigned int t_handshake_timeout_ms)
+    : fss_connection(std::move(t_ca), std::move(t_private_key), std::move(t_public_key)),
+      handshake_timeout_ms(t_handshake_timeout_ms)
 {
 }
 
@@ -303,7 +305,7 @@ auto flight_safety_system::transport_ssl::fss_connection_client::setupSSL() -> b
 
     /* Bound the handshake so a server that accepts the TCP connection but
      * stalls the TLS handshake cannot hang connectTo() indefinitely. */
-    gnutls_handshake_set_timeout(this->session->ptr(), default_handshake_timeout_ms);
+    gnutls_handshake_set_timeout(this->session->ptr(), this->handshake_timeout_ms);
 
     int ret = -2;
     try

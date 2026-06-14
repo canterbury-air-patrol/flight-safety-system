@@ -368,3 +368,54 @@ TEST_CASE("ssl: concurrent handshakes are bounded and excess connections shed", 
     listen = nullptr;
     accepted = nullptr;
 }
+
+TEST_CASE("ssl: client handshake times out against a silent server", "[ssl_handshake_dos]")
+{
+    /* Client side of the same DoS: a server that completes the TCP connection
+     * but never performs the TLS handshake must not hang connectTo()
+     * indefinitely. fss_connection_client bounds its handshake via
+     * gnutls_handshake_set_timeout; a short injected timeout keeps this fast. */
+    const uint16_t port = fss_test::pick_port();
+    REQUIRE(port != 0);
+
+    /* A raw TCP server that accepts one connection and then stays silent. */
+    int listen_fd = ::socket(AF_INET6, SOCK_STREAM, IPPROTO_TCP);
+    REQUIRE(listen_fd >= 0);
+    int reuse = 1;
+    (void)::setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+    struct sockaddr_in6 addr{};
+    addr.sin6_family = AF_INET6;
+    addr.sin6_port = htons(port);
+    addr.sin6_addr = in6addr_any;
+    REQUIRE(::bind(listen_fd, reinterpret_cast<struct sockaddr *>(&addr), sizeof(addr)) == 0);
+    REQUIRE(::listen(listen_fd, 1) == 0);
+
+    std::atomic<bool> stop{false};
+    std::thread silent_server([&]() {
+        int peer = ::accept(listen_fd, nullptr, nullptr); // unblocked by closing listen_fd below
+        while (!stop.load())
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        if (peer >= 0)
+        {
+            ::close(peer);
+        }
+    });
+
+    constexpr unsigned int short_handshake_ms = 500;
+    auto client = std::make_shared<flight_safety_system::transport_ssl::fss_connection_client>(
+        CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE, short_handshake_ms);
+
+    auto start = std::chrono::steady_clock::now();
+    bool connected = client->connectTo("localhost", port);
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start);
+
+    REQUIRE_FALSE(connected);
+    /* Must give up near the timeout, not hang. Generous upper bound for CI. */
+    REQUIRE(elapsed < std::chrono::milliseconds(short_handshake_ms * 8));
+
+    stop.store(true);
+    ::close(listen_fd); // also unblocks accept() if the client never connected
+    silent_server.join();
+}

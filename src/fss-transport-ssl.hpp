@@ -68,10 +68,12 @@ public:
 class fss_connection_client : public fss_connection {
 private:
     std::string hostname{};
+    unsigned int handshake_timeout_ms{default_handshake_timeout_ms};
 protected:
     auto setupSSL() -> bool;
 public:
-    fss_connection_client(std::string t_ca, std::string t_private_key, std::string t_public_key);
+    fss_connection_client(std::string t_ca, std::string t_private_key, std::string t_public_key,
+                          unsigned int t_handshake_timeout_ms = default_handshake_timeout_ms);
     fss_connection_client(fss_connection_client&) = delete;
     fss_connection_client(fss_connection_client&&) = delete;
     auto operator=(fss_connection_client&) -> fss_connection& = delete;
