@@ -488,6 +488,7 @@ auto flight_safety_system::transport_ssl::fss_listen::newConnection(int t_newfd)
         this->handshake_timeout_ms);
 }
 
+// NOLINTBEGIN(bugprone-easily-swappable-parameters)
 flight_safety_system::transport_ssl::fss_listen::fss_listen(uint16_t t_port,
                                                             flight_safety_system::transport::fss_connect_cb t_cb,
                                                             std::string t_ca, std::string t_private_key,
@@ -497,6 +498,7 @@ flight_safety_system::transport_ssl::fss_listen::fss_listen(uint16_t t_port,
     : flight_safety_system::transport::fss_listen(t_port, std::move(t_cb), defer_start_t{}), ca_file(std::move(t_ca)),
       private_key_file(std::move(t_private_key)), public_key_file(std::move(t_public_key)), crl_file(std::move(t_crl)),
       handshake_timeout_ms(t_handshake_timeout_ms)
+// NOLINTEND(bugprone-easily-swappable-parameters)
 {
     /* Apply the concurrency bound (0 = keep the base default) before
      * startListening() so the accept thread reads a settled value. */
@@ -513,11 +515,13 @@ flight_safety_system::transport_ssl::fss_listen::fss_listen(uint16_t t_port,
 
 flight_safety_system::transport_ssl::fss_listen::~fss_listen()
 {
-    /* Join the accept thread while the cert/key path strings it reads in
-     * newConnection() are still alive; the base destructor's disconnect()
-     * would run only after they are destroyed. disconnect() is idempotent,
-     * so the base's call becomes a no-op. */
-    this->disconnect();
+    /* Join the accept thread and drain setup workers while the cert/key path
+     * strings they read in newConnection() are still alive; the base
+     * destructor's disconnect() would run only after they are destroyed.
+     * Qualified (non-virtual) call: avoids a virtual dispatch from a
+     * destructor, and disconnect() is idempotent so the base's later call is a
+     * no-op. */
+    flight_safety_system::transport::fss_listen::disconnect();
 }
 
 auto flight_safety_system::transport_ssl::fss_connection_server::getClientNames() -> std::list<std::string>

@@ -526,7 +526,11 @@ flight_safety_system::transport::fss_listen::fss_listen(uint16_t t_port, fss_con
 
 flight_safety_system::transport::fss_listen::~fss_listen()
 {
-    this->disconnect();
+    /* Qualified (non-virtual) call: invoke this class's own disconnect during
+     * destruction. A plain this->disconnect() is a virtual call in a
+     * destructor — flagged by clang-analyzer and pointless here since the
+     * derived part is already gone. */
+    flight_safety_system::transport::fss_listen::disconnect();
 }
 
 static void listen_thread(flight_safety_system::transport::fss_listen *listen)
