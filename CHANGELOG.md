@@ -20,6 +20,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   be used to exhaust threads/memory. The client side also bounds its handshake
   so a stalled server cannot hang `connectTo()`.
 
+### Fixed
+- A position report from an aircraft with no GPS fix is no longer recorded and
+  broadcast as a real position at (0,0) — Null Island. The "no fix" condition
+  (a NaN coordinate) now travels the wire as an `INT32_MIN` sentinel that
+  decodes back to NaN, so the server discards it (with a distinct, throttled
+  "no GPS fix" warning) instead of storing a bogus 0°N 0°E telemetry point.
+  Framing is unchanged, so no protocol-version bump is required; interop
+  degrades safely (a new sender's no-fix sentinel is rejected as out-of-range
+  by an old receiver, and an old sender's no-fix still arrives as (0,0) until
+  the fleet upgrades).
+
 ## [1.0.3] - 2026-06-13
 
 ### Security

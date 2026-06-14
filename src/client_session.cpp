@@ -636,6 +636,21 @@ void fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss
                         return;
                     }
                 }
+                if (std::isnan(msg->getLatitude()) || std::isnan(msg->getLongitude()))
+                {
+                    /* NaN coordinates are the wire sentinel for "no GPS fix"
+                     * (see pack_scaled_coord). This is operationally distinct
+                     * from a malformed coordinate, so log it as such — but a
+                     * persistent no-fix arrives every report, so throttle to
+                     * first + every 100th to avoid flooding the log. */
+                    uint64_t no_fix = ++this->no_fix_reports;
+                    if (no_fix == 1 || (no_fix % 100) == 0)
+                    {
+                        FSS_LOG_WARN("server", "Position report with no GPS fix from "
+                                                   << this->name << " (count=" << no_fix << "), discarding");
+                    }
+                    return;
+                }
                 if (!is_valid_coordinate(msg->getLatitude(), msg->getLongitude()))
                 {
                     FSS_LOG_WARN("server", "Invalid position report coordinates (lat=" << msg->getLatitude()

@@ -138,46 +138,44 @@ TEST_CASE("coord: 7-decimal-place precision preserved")
 
 /* Regression for pack_scaled_coord NaN/Inf/out-of-range guard.
  *
- * Before the fix, passing NaN or Inf lat/long to pack_scaled_coord triggered
- * undefined behaviour in the double->int32_t cast.  After the fix NaN/Inf map
- * to 0 on the wire (decoding to 0.0), and finite out-of-range values are
- * clamped to INT32_MIN / INT32_MAX rather than wrapping.
+ * Originally, passing NaN or Inf lat/long to pack_scaled_coord triggered
+ * undefined behaviour in the double->int32_t cast; the first fix mapped them to
+ * 0 (decoding to 0.0). As of the no-fix-sentinel change, non-finite input maps
+ * to INT32_MIN on the wire and decodes back to NaN — "no GPS fix" must stay
+ * distinct from (0,0), a legal coordinate (Null Island). Finite out-of-range
+ * values are clamped into [INT32_MIN + 1, INT32_MAX] (the low side stops one
+ * above the sentinel) so a clamped real value can never alias it.
  */
 
-TEST_CASE("coord: asset_command RTL (NaN lat/lng) packs and decodes to defined value")
+TEST_CASE("coord: asset_command RTL (NaN lat/lng) round-trips to NaN, not Null Island")
 {
     /* RTL constructed with (command, timestamp) leaves latitude and longitude
-     * as NaN.  Before the fix this was UB; after the fix 0 is placed on the
-     * wire and the decoded coordinates must be exactly 0.0. */
+     * as NaN (it carries no position). That must decode back to NaN, not to
+     * (0,0) which would look like a real coordinate. */
     auto orig = std::make_shared<fss_message_asset_command>(asset_command_rtl, /*timestamp*/ 0ULL);
     orig->setId(1);
     auto bl = orig->getPacked();
     auto decoded = std::dynamic_pointer_cast<fss_message_asset_command>(fss_message::decode(bl));
     REQUIRE(decoded != nullptr);
-    /* Round-tripped coordinates must be a defined, finite value. */
-    REQUIRE(std::isfinite(decoded->getLatitude()));
-    REQUIRE(std::isfinite(decoded->getLongitude()));
-    /* The sentinel value for NaN input is 0.0. */
-    REQUIRE(decoded->getLatitude() == 0.0);
-    REQUIRE(decoded->getLongitude() == 0.0);
+    REQUIRE(std::isnan(decoded->getLatitude()));
+    REQUIRE(std::isnan(decoded->getLongitude()));
 }
 
-TEST_CASE("coord: asset_command HOLD (NaN lat/lng) packs and decodes to defined value")
+TEST_CASE("coord: asset_command HOLD (NaN lat/lng) round-trips to NaN, not Null Island")
 {
     auto orig = std::make_shared<fss_message_asset_command>(asset_command_hold, /*timestamp*/ 12345ULL);
     orig->setId(2);
     auto bl = orig->getPacked();
     auto decoded = std::dynamic_pointer_cast<fss_message_asset_command>(fss_message::decode(bl));
     REQUIRE(decoded != nullptr);
-    REQUIRE(std::isfinite(decoded->getLatitude()));
-    REQUIRE(std::isfinite(decoded->getLongitude()));
-    REQUIRE(decoded->getLatitude() == 0.0);
-    REQUIRE(decoded->getLongitude() == 0.0);
+    REQUIRE(std::isnan(decoded->getLatitude()));
+    REQUIRE(std::isnan(decoded->getLongitude()));
 }
 
-TEST_CASE("coord: position_report NaN lat/lng packs and decodes to defined value")
+TEST_CASE("coord: position_report NaN lat/lng round-trips to NaN, not Null Island")
 {
-    /* NAN passed as latitude and longitude must not trigger UB on pack. */
+    /* A client with no GPS fix sends the default-NaN position. It must not be
+     * indistinguishable from a real report at 0N 0E. */
     auto orig = std::make_shared<fss_message_position_report>(
         std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::quiet_NaN(),
         /*altitude*/ 0U, /*heading*/ 0U, /*hor_vel*/ 0U, /*ver_vel*/ 0,
@@ -188,15 +186,13 @@ TEST_CASE("coord: position_report NaN lat/lng packs and decodes to defined value
     auto bl = orig->getPacked();
     auto decoded = std::dynamic_pointer_cast<fss_message_position_report>(fss_message::decode(bl));
     REQUIRE(decoded != nullptr);
-    REQUIRE(std::isfinite(decoded->getLatitude()));
-    REQUIRE(std::isfinite(decoded->getLongitude()));
-    REQUIRE(decoded->getLatitude() == 0.0);
-    REQUIRE(decoded->getLongitude() == 0.0);
+    REQUIRE(std::isnan(decoded->getLatitude()));
+    REQUIRE(std::isnan(decoded->getLongitude()));
 }
 
-TEST_CASE("coord: position_report Inf lat/lng packs and decodes to defined value")
+TEST_CASE("coord: position_report Inf lat/lng round-trips to NaN, not Null Island")
 {
-    /* Positive infinity must also map to a defined (finite) wire value. */
+    /* Infinity is also non-finite and maps to the no-fix sentinel. */
     auto orig = std::make_shared<fss_message_position_report>(
         std::numeric_limits<double>::infinity(), -std::numeric_limits<double>::infinity(),
         /*altitude*/ 0U, /*heading*/ 0U, /*hor_vel*/ 0U, /*ver_vel*/ 0,
@@ -207,10 +203,8 @@ TEST_CASE("coord: position_report Inf lat/lng packs and decodes to defined value
     auto bl = orig->getPacked();
     auto decoded = std::dynamic_pointer_cast<fss_message_position_report>(fss_message::decode(bl));
     REQUIRE(decoded != nullptr);
-    REQUIRE(std::isfinite(decoded->getLatitude()));
-    REQUIRE(std::isfinite(decoded->getLongitude()));
-    REQUIRE(decoded->getLatitude() == 0.0);
-    REQUIRE(decoded->getLongitude() == 0.0);
+    REQUIRE(std::isnan(decoded->getLatitude()));
+    REQUIRE(std::isnan(decoded->getLongitude()));
 }
 
 TEST_CASE("coord: out-of-range latitude clamps rather than wrapping")
@@ -232,8 +226,11 @@ TEST_CASE("coord: large negative out-of-range latitude clamps rather than wrappi
     double neg_large = -1e12;
     double lat = 0.0, lng = 0.0;
     std::tie(lat, lng) = round_trip(neg_large, 0.0);
+    /* Clamps to INT32_MIN + 1, one above the no-fix sentinel, so the result
+     * stays finite (isfinite) and must NOT alias the sentinel and decode to
+     * NaN. This is what keeps a clamped real value distinct from "no fix". */
     REQUIRE(std::isfinite(lat));
-    REQUIRE(lat >= static_cast<double>(std::numeric_limits<int32_t>::min()) * FSS_COORD_SCALE);
+    REQUIRE(lat >= static_cast<double>(std::numeric_limits<int32_t>::min() + 1) * FSS_COORD_SCALE);
     REQUIRE(lat < 0.0);
 }
 
