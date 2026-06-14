@@ -132,14 +132,22 @@ auto flight_safety_system::server::db_connection::getCommand(uint64_t asset_id) 
     std::shared_ptr<asset_command> res = nullptr;
     {
         std::scoped_lock guard(this->read_lock);
-        struct asset_command_s *command = db_asset_command_get(read_conn_name, asset_id);
+        // Own the malloc'd C struct via RAII so it is freed on every exit
+        // path, including a bad_alloc thrown by make_shared below.
+        auto cmd_deleter = [](struct asset_command_s *cmd) -> void {
+            if (cmd != nullptr)
+            {
+                free(cmd->command);
+                free(cmd);
+            }
+        };
+        std::unique_ptr<struct asset_command_s, decltype(cmd_deleter)> command(
+            db_asset_command_get(read_conn_name, asset_id), cmd_deleter);
         if (command)
         {
             res = std::make_shared<asset_command>(command->dbid, command->timestamp, std::string(command->command),
                                                   command->latitude, command->longitude, command->altitude,
                                                   command->altitude_null == 0);
-            free(command->command);
-            free(command);
         }
     }
     return res;
@@ -150,19 +158,34 @@ auto flight_safety_system::server::db_connection::getSmmSettings(uint64_t asset_
     std::shared_ptr<smm_settings> res = nullptr;
     {
         std::scoped_lock guard(this->read_lock);
-        struct smm_settings_s *settings = db_asset_smm_settings_get(read_conn_name, asset_id);
+        // Own the malloc'd C struct via RAII so it is freed -- and the
+        // credential bytes wiped -- on every exit path, including a bad_alloc
+        // thrown while constructing the result below.
+        auto settings_deleter = [](struct smm_settings_s *settings) -> void {
+            if (settings != nullptr)
+            {
+                free(settings->address);
+                if (settings->username != nullptr)
+                {
+                    explicit_bzero(settings->username, strlen(settings->username));
+                    free(settings->username);
+                }
+                if (settings->password != nullptr)
+                {
+                    explicit_bzero(settings->password, strlen(settings->password));
+                    free(settings->password);
+                }
+                free(settings);
+            }
+        };
+        std::unique_ptr<struct smm_settings_s, decltype(settings_deleter)> settings(
+            db_asset_smm_settings_get(read_conn_name, asset_id), settings_deleter);
         if (settings)
         {
             res = std::make_shared<smm_settings>(
                 std::string(settings->address),
                 flight_safety_system::secure_string(std::string_view(settings->username)),
                 flight_safety_system::secure_string(std::string_view(settings->password)));
-            free(settings->address);
-            explicit_bzero(settings->username, strlen(settings->username));
-            free(settings->username);
-            explicit_bzero(settings->password, strlen(settings->password));
-            free(settings->password);
-            free(settings);
         }
     }
     return res;
