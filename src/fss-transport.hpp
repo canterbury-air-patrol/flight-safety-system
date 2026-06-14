@@ -160,6 +160,12 @@ class fss_connection {
      * another thread. */
     std::atomic<uint64_t> consecutive_null_msgs{0};
     static constexpr uint64_t null_msg_log_interval = 100;
+    /* A peer that streams this many consecutive undecodable frames without a
+     * single decodable one in between is compromised or badly broken; close
+     * the session rather than logging at line rate forever. Interleaved valid
+     * traffic resets the counter, so a version-skewed-but-honest peer sending
+     * the odd unknown message type is never disconnected. */
+    static constexpr uint64_t null_msg_disconnect_threshold = 1000;
     std::atomic<uint16_t> negotiated_version{FSS_PROTOCOL_VERSION_LEGACY};
 protected:
     auto recvMsg() -> std::shared_ptr<fss_message>;
