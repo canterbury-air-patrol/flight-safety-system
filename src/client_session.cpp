@@ -644,9 +644,14 @@ void fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss
                      * offset-corrected (client_clock_offset_ms is 0 until the
                      * RTT clock-offset feature measures it). The window is
                      * symmetric: a clock ahead of the server is as wrong as one
-                     * behind, so future-dated reports are rejected too. */
-                    int64_t skew = static_cast<int64_t>(now) - static_cast<int64_t>(report_ts) +
-                                   this->client_clock_offset_ms;
+                     * behind, so future-dated reports are rejected too.
+                     *
+                     * Take the signed difference from the unsigned subtraction so
+                     * the two epoch-ms values are never narrowed to int64 (the
+                     * difference itself is small and always fits). */
+                    int64_t diff = now >= report_ts ? static_cast<int64_t>(now - report_ts)
+                                                    : -static_cast<int64_t>(report_ts - now);
+                    int64_t skew = diff + this->client_clock_offset_ms;
                     int64_t magnitude = skew < 0 ? -skew : skew;
                     if (magnitude > static_cast<int64_t>(this->position_staleness_ms))
                     {

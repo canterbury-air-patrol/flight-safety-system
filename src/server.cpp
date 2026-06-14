@@ -81,7 +81,7 @@ auto main(int argc, char *argv[]) -> int
     constexpr std::size_t default_db_queue_depth = 10000;
     constexpr int default_client_timeout_sec = 30;
     constexpr int default_identify_timeout_sec = 30;
-    constexpr uint64_t default_position_staleness_ms = 30000;
+    constexpr uint64_t default_position_staleness_ms = flight_safety_system::server::default_position_staleness_ms;
     constexpr uint64_t default_rate_capacity = 100;
     constexpr uint64_t default_rate_refill_per_s = 20;
     constexpr unsigned int default_tls_handshake_timeout_ms =
