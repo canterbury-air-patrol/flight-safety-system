@@ -16,6 +16,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <list>
@@ -56,6 +57,28 @@ auto accept_cb(std::shared_ptr<flight_safety_system::transport::fss_connection> 
 {
     accepted = std::move(new_conn);
     return true;
+}
+
+/* Open a raw TCP connection to the listener (IPv6 loopback) and send nothing
+ * — a "silent peer" that completes the TCP handshake but never starts the TLS
+ * handshake. Returns the fd (caller closes it) or -1 on failure. */
+auto connect_silent_peer(uint16_t port) -> int
+{
+    int sock = ::socket(AF_INET6, SOCK_STREAM, IPPROTO_TCP);
+    if (sock < 0)
+    {
+        return -1;
+    }
+    struct sockaddr_in6 addr{};
+    addr.sin6_family = AF_INET6;
+    addr.sin6_port = htons(port);
+    addr.sin6_addr = in6addr_loopback;
+    if (::connect(sock, reinterpret_cast<struct sockaddr *>(&addr), sizeof(addr)) < 0)
+    {
+        ::close(sock);
+        return -1;
+    }
+    return sock;
 }
 
 } // namespace
@@ -170,11 +193,14 @@ TEST_CASE("ssl: server rejects a client cert signed by an untrusted CA", "[ssl_f
      * result, only that the server never accepts the foreign identity. */
     client->connectTo("localhost", port);
 
-    /* The SSL listener runs the handshake synchronously before invoking the
-     * accept callback, so once accepted is set the server has finished (and
-     * rejected) verification; a correctly verifying server surfaces no CN. */
-    REQUIRE(fss_test::wait_for([]() { return accepted != nullptr; }));
-    REQUIRE(accepted->getClientNames().empty());
+    /* The server-side handshake must fail verification, so create() returns
+     * nullptr and the accept callback is never invoked — the untrusted cert
+     * yields no connection at all (a strictly stronger guarantee than the
+     * pre-1.1.0 behaviour, which surfaced a nameless connection). If the
+     * server regressed and accepted the foreign cert, the callback would fire
+     * and `accepted` would become non-null within the grace window. */
+    REQUIRE_FALSE(fss_test::wait_for([]() { return accepted != nullptr; }, std::chrono::milliseconds(500)));
+    listen = nullptr;
     accepted = nullptr;
 }
 
@@ -270,10 +296,75 @@ TEST_CASE("ssl: isPeerCertRevoked with non-existent CRL file returns false")
     server_conn = nullptr;
 }
 
-/* Deliberately omitted: a "silent raw-TCP peer blocks the accept thread"
- * regression test. The current server architecture performs the TLS
- * handshake inline on the accept thread, which means a single silent
- * peer wedges the listener indefinitely. Exercising that would deadlock
- * the test binary. Capturing this as a regression requires the
- * server-side refactor tracked in Phase 4 (move handshake off the
- * accept thread). */
+TEST_CASE("ssl: a silent peer does not block other clients' handshakes", "[ssl_handshake_dos]")
+{
+    /* Regression for the accept-thread DoS: a peer that completes the TCP
+     * connection but never sends a ClientHello must not block new
+     * connections. Before the off-accept-thread refactor the listener ran the
+     * TLS handshake inline, so this test would have wedged the accept thread
+     * and hung the suite. A short handshake timeout keeps teardown quick. */
+    accepted = nullptr;
+    const uint16_t port = fss_test::pick_port();
+    REQUIRE(port != 0);
+    constexpr unsigned int short_handshake_ms = 500;
+    auto listen = std::make_shared<flight_safety_system::transport_ssl::fss_listen>(
+        port, accept_cb, CA_PUBLIC_FILE, SERVER_PRIVATE_FILE, SERVER_PUBLIC_FILE, std::string{}, short_handshake_ms);
+    REQUIRE(listen != nullptr);
+
+    int silent = connect_silent_peer(port);
+    REQUIRE(silent >= 0);
+    /* The silent peer should occupy a setup worker (mid-handshake). */
+    REQUIRE(fss_test::wait_for([&]() { return listen->getActiveSetupCount() >= 1; }));
+
+    /* A well-behaved client must still complete its handshake promptly while
+     * the silent peer is stuck — proving the accept thread is not blocked. */
+    auto client = std::make_shared<flight_safety_system::transport_ssl::fss_connection_client>(
+        CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE);
+    REQUIRE(client->connectTo("localhost", port));
+    REQUIRE(fss_test::wait_for([]() { return accepted != nullptr; }));
+
+    ::close(silent);
+    listen = nullptr; // drains the (timed-out) silent worker before clearing globals
+    accepted = nullptr;
+}
+
+TEST_CASE("ssl: concurrent handshakes are bounded and excess connections shed", "[ssl_handshake_bound]")
+{
+    /* The setup-worker pool is bounded so the off-thread handshake path cannot
+     * itself be used to exhaust threads/memory: once the bound is reached,
+     * further accepted connections are closed immediately rather than queued. */
+    accepted = nullptr;
+    const uint16_t port = fss_test::pick_port();
+    REQUIRE(port != 0);
+    constexpr unsigned int short_handshake_ms = 1000;
+    constexpr size_t max_handshakes = 2;
+    auto listen = std::make_shared<flight_safety_system::transport_ssl::fss_listen>(
+        port, accept_cb, CA_PUBLIC_FILE, SERVER_PRIVATE_FILE, SERVER_PUBLIC_FILE, std::string{}, short_handshake_ms,
+        max_handshakes);
+    REQUIRE(listen != nullptr);
+
+    /* Fill every setup slot with silent peers. */
+    std::array<int, max_handshakes> silent{};
+    for (auto &fd : silent)
+    {
+        fd = connect_silent_peer(port);
+        REQUIRE(fd >= 0);
+    }
+    REQUIRE(fss_test::wait_for([&]() { return listen->getActiveSetupCount() >= max_handshakes; }));
+
+    /* An additional connection is accepted at the TCP layer but must be shed:
+     * the rejected counter advances and the peer observes an immediate EOF. */
+    int extra = connect_silent_peer(port);
+    REQUIRE(extra >= 0);
+    REQUIRE(fss_test::wait_for([&]() { return listen->getRejectedSetupCount() >= 1; }));
+    char buf = 0;
+    REQUIRE(::recv(extra, &buf, 1, 0) == 0); // orderly close from the server side
+
+    ::close(extra);
+    for (auto fd : silent)
+    {
+        ::close(fd);
+    }
+    listen = nullptr;
+    accepted = nullptr;
+}

@@ -83,6 +83,8 @@ auto main(int argc, char *argv[]) -> int
     constexpr int default_identify_timeout_sec = 30;
     constexpr uint64_t default_rate_capacity = 100;
     constexpr uint64_t default_rate_refill_per_s = 20;
+    constexpr unsigned int default_tls_handshake_timeout_ms = flight_safety_system::transport_ssl::default_handshake_timeout_ms;
+    constexpr std::size_t default_max_concurrent_handshakes = 64;
     int listen_port = 0;
     int pg_port = default_pg_port;
     std::string pg_host;
@@ -94,6 +96,8 @@ auto main(int argc, char *argv[]) -> int
     uint64_t identify_timeout_sec = default_identify_timeout_sec;
     uint64_t rate_capacity = default_rate_capacity;
     uint64_t rate_refill = default_rate_refill_per_s;
+    unsigned int tls_handshake_timeout_ms = default_tls_handshake_timeout_ms;
+    std::size_t max_concurrent_handshakes = default_max_concurrent_handshakes;
     std::string ca_public_key;
     std::string server_private_key;
     std::string server_public_key;
@@ -163,6 +167,14 @@ auto main(int argc, char *argv[]) -> int
         {
             rate_refill = config["message_rate_refill"].asUInt64();
         }
+        if (config.isMember("tls_handshake_timeout_ms"))
+        {
+            tls_handshake_timeout_ms = config["tls_handshake_timeout_ms"].asUInt();
+        }
+        if (config.isMember("max_concurrent_handshakes"))
+        {
+            max_concurrent_handshakes = config["max_concurrent_handshakes"].asUInt();
+        }
         ca_public_key = config["ssl"]["ca_public_key"].asString();
         server_private_key = config["ssl"]["server_private_key"].asString();
         server_public_key = config["ssl"]["server_public_key"].asString();
@@ -226,7 +238,8 @@ auto main(int argc, char *argv[]) -> int
         return true;
     };
     listen = std::make_shared<flight_safety_system::transport_ssl::fss_listen>(
-        listen_port, connect_cb, ca_public_key, server_private_key, server_public_key, crl_file);
+        listen_port, connect_cb, ca_public_key, server_private_key, server_public_key, crl_file,
+        tls_handshake_timeout_ms, max_concurrent_handshakes);
 
     /* Main-loop DB contract: the loop below must make NO synchronous DB
      * reads. Reads are handled exclusively by the command_poller thread
