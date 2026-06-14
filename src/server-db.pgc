@@ -279,9 +279,13 @@ db_asset_smm_settings_get(const char *conn_arg, unsigned long long asset_id_arg)
 }
 
 struct fss_server_s **
-db_active_fss_servers_get(const char *conn_arg)
+db_active_fss_servers_get(const char *conn_arg, int *error_out)
 {
     size_t len = 0;
+    if (error_out != NULL)
+    {
+        *error_out = 0;
+    }
     struct fss_server_s **res = (struct fss_server_s **)malloc(sizeof(struct fss_server_s *) * (len + 1));
     if (res != NULL)
     {
@@ -341,6 +345,15 @@ db_active_fss_servers_get(const char *conn_arg)
     EXEC SQL WHENEVER NOT FOUND CONTINUE;
     EXEC SQL WHENEVER SQLERROR CONTINUE;
     EXEC SQL WHENEVER SQLWARNING CONTINUE;
+
+    /* sqlca still reflects the FETCH that ended the loop. A negative sqlcode
+     * means a mid-cursor error (e.g. the read connection dropped) rather than
+     * the normal NOT FOUND (100) end of cursor: the list accumulated so far is
+     * partial. Capture it before CLOSE / SET AUTOCOMMIT overwrite sqlca. */
+    if (error_out != NULL && sqlca.sqlcode < 0)
+    {
+        *error_out = 1;
+    }
 
     EXEC SQL AT :conn CLOSE cur1;
     EXEC SQL AT :conn SET AUTOCOMMIT TO ON;

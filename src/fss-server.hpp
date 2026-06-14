@@ -7,6 +7,7 @@
 
 #include <atomic>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <list>
 #include <mutex>
@@ -65,6 +66,15 @@ public:
     auto getLongitude() -> double;
     auto getAltitude() -> uint32_t;
     auto isAltitudeValid() -> bool;
+};
+
+/* Thrown by a database read that could only return a partial, misleading
+ * result. getActiveServers raises it when the cursor is cut short by a
+ * mid-iteration error so the caller discards the truncated list rather than
+ * mistaking it for the complete set of active servers. */
+class database_error : public std::runtime_error {
+public:
+    explicit database_error(const std::string &what) : std::runtime_error(what) {}
 };
 
 /* Pure-virtual database seam: lets ClientSession be unit-tested against
