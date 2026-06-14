@@ -425,9 +425,12 @@ TEST_CASE("ssl: client handshake times out against a silent server", "[ssl_hands
     REQUIRE_FALSE(connected);
     /* It must wait for (roughly) the injected timeout, not fail instantly... */
     REQUIRE(elapsed >= std::chrono::milliseconds(client_handshake_ms / 2));
-    /* ...and give up well before the 10 s default — proving the injected timeout
-     * took effect — with slack for valgrind's setup/teardown overhead. */
-    REQUIRE(elapsed < std::chrono::milliseconds(8000));
+    /* ...and give up clearly before the default handshake timeout — proving the
+     * injected timeout took effect — derived from the real constant (not a
+     * literal) so it tracks the default, with 10% slack for valgrind overhead. */
+    constexpr auto default_handshake_timeout =
+        std::chrono::milliseconds(flight_safety_system::transport_ssl::default_handshake_timeout_ms);
+    REQUIRE(elapsed < default_handshake_timeout * 9 / 10);
 
     stop.store(true);
     ::close(listen_fd); // also unblocks accept() if the client never connected
