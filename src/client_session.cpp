@@ -20,6 +20,11 @@ static auto is_valid_coordinate(double latitude, double longitude) -> bool
 
 constexpr uint64_t sec_to_msec = 1000;
 constexpr uint64_t rtt_retry_interval = 10 * sec_to_msec;
+/* Staleness-discard escalation: first discard logs WARN; the Nth consecutive
+ * (and every Mth after) logs an ERROR naming the suspected clock skew, so a
+ * persistently skewed client is unmistakable without a per-message WARN drip. */
+constexpr uint64_t staleness_escalation_threshold = 10;
+constexpr uint64_t staleness_escalation_interval = 100;
 
 fss::server::smm_settings::smm_settings(std::string t_address, fss::secure_string t_username,
                                         fss::secure_string t_password)
@@ -262,6 +267,12 @@ void fss::server::fss_client::setIdentifyTimeoutMs(uint64_t ms)
 {
     std::scoped_lock guard(this->client_lock);
     this->identify_timeout_ms = ms;
+}
+
+void fss::server::fss_client::setStalenessMs(uint64_t ms)
+{
+    std::scoped_lock guard(this->client_lock);
+    this->position_staleness_ms = ms;
 }
 
 void fss::server::fss_client::setRateLimits(uint64_t capacity, uint64_t refill_per_s)
@@ -625,16 +636,38 @@ void fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss
             }
             break;
             case fss::transport::message_type_position_report: {
-                constexpr uint64_t staleness_limit_ms = 30000;
                 uint64_t report_ts = msg->getTimeStamp();
-                if (report_ts > 0)
+                if (this->position_staleness_ms != 0 && report_ts > 0)
                 {
                     uint64_t now = fss::fss_current_timestamp();
-                    if (now > report_ts + staleness_limit_ms)
+                    /* Compare the client-stamped time against the server clock,
+                     * offset-corrected (client_clock_offset_ms is 0 until the
+                     * RTT clock-offset feature measures it). The window is
+                     * symmetric: a clock ahead of the server is as wrong as one
+                     * behind, so future-dated reports are rejected too. */
+                    int64_t skew = static_cast<int64_t>(now) - static_cast<int64_t>(report_ts) +
+                                   this->client_clock_offset_ms;
+                    int64_t magnitude = skew < 0 ? -skew : skew;
+                    if (magnitude > static_cast<int64_t>(this->position_staleness_ms))
                     {
-                        FSS_LOG_WARN("server", "Stale position report (age=" << (now - report_ts) << "ms), discarding");
+                        uint64_t discards = ++this->staleness_discards;
+                        if (discards == 1)
+                        {
+                            FSS_LOG_WARN("server", "Stale position report from " << this->name << " (skew=" << skew
+                                                                                 << "ms), discarding");
+                        }
+                        else if (discards == staleness_escalation_threshold ||
+                                 discards % staleness_escalation_interval == 0)
+                        {
+                            FSS_LOG_ERROR("server", "Client " << this->name << " clock skew suspected (skew=" << skew
+                                                              << "ms, " << discards
+                                                              << " consecutive), discarding all positions");
+                        }
                         return;
                     }
+                    /* In-window: the clock is fine, so clear the skew streak
+                     * even if the coordinate below is later rejected. */
+                    this->staleness_discards = 0;
                 }
                 if (std::isnan(msg->getLatitude()) || std::isnan(msg->getLongitude()))
                 {

@@ -868,6 +868,93 @@ TEST_CASE("session: no-fix (NaN) position report is discarded, not stored or bro
     REQUIRE(handler.broadcasts.size() == 1);
 }
 
+TEST_CASE("session: future-dated position report is discarded (symmetric window)")
+{
+    /* Phase 08: the staleness window is symmetric — a client clock ahead of the
+     * server is as wrong as one behind. Previously a future timestamp passed
+     * the one-sided check unconditionally. */
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 1;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+    REQUIRE(handler.disconnects == 0);
+
+    constexpr uint64_t sixty_seconds_ms = 60000;
+    auto future = make_position_msg(fss::fss_current_timestamp() + sixty_seconds_ms);
+    session->processMessage(future);
+    REQUIRE(handler.broadcasts.empty());
+
+    /* An in-window report is still accepted. */
+    auto fresh = make_position_msg(fss::fss_current_timestamp());
+    session->processMessage(fresh);
+    REQUIRE(handler.broadcasts.size() == 1);
+}
+
+TEST_CASE("session: position_staleness_ms = 0 disables the staleness gate")
+{
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 1;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    session->setStalenessMs(0); // escape hatch for fleets with undisciplined clocks
+
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+    REQUIRE(handler.disconnects == 0);
+
+    constexpr uint64_t sixty_seconds_ms = 60000;
+    auto old = make_position_msg(fss::fss_current_timestamp() - sixty_seconds_ms);
+    session->processMessage(old);
+    REQUIRE(handler.broadcasts.size() == 1); // accepted despite being well outside the window
+}
+
+TEST_CASE("session: repeated clock skew escalates WARN -> ERROR and resets on recovery")
+{
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 1;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+    REQUIRE(handler.disconnects == 0);
+
+    constexpr uint64_t sixty_seconds_ms = 60000;
+    fss_test::capture_cerr cap;
+    /* Ten consecutive stale reports — the escalation fires an ERROR. */
+    for (int i = 0; i < 10; ++i)
+    {
+        session->processMessage(make_position_msg(fss::fss_current_timestamp() - sixty_seconds_ms));
+    }
+    REQUIRE(handler.broadcasts.empty());
+    REQUIRE(cap.str().find("clock skew suspected") != std::string::npos);
+
+    /* An in-window report resets the streak. */
+    session->processMessage(make_position_msg(fss::fss_current_timestamp()));
+    REQUIRE(handler.broadcasts.size() == 1);
+
+    /* A single subsequent stale report logs only WARN, not another ERROR. */
+    cap.clear();
+    session->processMessage(make_position_msg(fss::fss_current_timestamp() - sixty_seconds_ms));
+    REQUIRE(cap.str().find("Stale position report") != std::string::npos);
+    REQUIRE(cap.str().find("clock skew suspected") == std::string::npos);
+}
+
 TEST_CASE("smm_settings: ctor and accessors")
 {
     fss::server::smm_settings s("https://smm.example", fss::secure_string{"user"}, fss::secure_string{"pass"});

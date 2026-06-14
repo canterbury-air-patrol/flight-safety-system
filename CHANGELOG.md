@@ -30,6 +30,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   degrades safely (a new sender's no-fix sentinel is rejected as out-of-range
   by an old receiver, and an old sender's no-fix still arrives as (0,0) until
   the fleet upgrades).
+- The position-report staleness check is now symmetric and skew-aware. It
+  previously compared the client-stamped time one-sidedly against the server
+  clock, so a client whose clock lagged >30 s had *every* position silently
+  discarded (a healthy-looking link with a frozen track) while a client whose
+  clock ran *ahead* bypassed the check entirely. The window now rejects
+  future-dated reports too, escalates from a single WARN to an ERROR naming the
+  suspected skew once a client trips it repeatedly (instead of a per-message
+  WARN drip), and is configurable via `position_staleness_ms` (default 30000,
+  0 disables). The gate carries a per-client clock-offset correction that is
+  currently 0 — a later change will measure it so a skewed-but-healthy client's
+  positions are accepted rather than dropped.
 
 ## [1.0.3] - 2026-06-13
 

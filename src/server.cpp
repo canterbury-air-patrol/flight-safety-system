@@ -81,6 +81,7 @@ auto main(int argc, char *argv[]) -> int
     constexpr std::size_t default_db_queue_depth = 10000;
     constexpr int default_client_timeout_sec = 30;
     constexpr int default_identify_timeout_sec = 30;
+    constexpr uint64_t default_position_staleness_ms = 30000;
     constexpr uint64_t default_rate_capacity = 100;
     constexpr uint64_t default_rate_refill_per_s = 20;
     constexpr unsigned int default_tls_handshake_timeout_ms =
@@ -95,6 +96,7 @@ auto main(int argc, char *argv[]) -> int
     std::size_t db_queue_depth = default_db_queue_depth;
     uint64_t client_timeout_sec = default_client_timeout_sec;
     uint64_t identify_timeout_sec = default_identify_timeout_sec;
+    uint64_t position_staleness_ms = default_position_staleness_ms;
     uint64_t rate_capacity = default_rate_capacity;
     uint64_t rate_refill = default_rate_refill_per_s;
     unsigned int tls_handshake_timeout_ms = default_tls_handshake_timeout_ms;
@@ -159,6 +161,10 @@ auto main(int argc, char *argv[]) -> int
         if (config.isMember("identify_timeout"))
         {
             identify_timeout_sec = config["identify_timeout"].asUInt64();
+        }
+        if (config.isMember("position_staleness_ms"))
+        {
+            position_staleness_ms = config["position_staleness_ms"].asUInt64();
         }
         if (config.isMember("message_rate_capacity"))
         {
@@ -237,6 +243,7 @@ auto main(int argc, char *argv[]) -> int
     constexpr int msec_per_sec = 1000;
     clients->setClientTimeoutMs(client_timeout_sec * msec_per_sec);
     clients->setClientIdentifyTimeoutMs(identify_timeout_sec * msec_per_sec);
+    clients->setClientStalenessMs(position_staleness_ms);
     clients->setClientRateLimits(rate_capacity, rate_refill);
 
     std::shared_ptr<flight_safety_system::transport::fss_listen> listen;
