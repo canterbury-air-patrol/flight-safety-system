@@ -104,8 +104,12 @@ class small_queue_listen : public flight_safety_system::transport::fss_listen {
 public:
     static constexpr size_t queue_limit = 5;
     small_queue_listen(uint16_t t_port, flight_safety_system::transport::fss_connect_cb t_cb)
-        : fss_listen(t_port, std::move(t_cb))
+        : fss_listen(t_port, std::move(t_cb), defer_start_t{})
     {
+        /* Start the accept thread only once this derived object is fully
+         * constructed; the auto-starting base constructor would let the thread
+         * virtual-dispatch into newConnection() before the vptr settles. */
+        this->startListening();
     }
 protected:
     auto newConnection(int t_fd) -> std::shared_ptr<flight_safety_system::transport::fss_connection> override
