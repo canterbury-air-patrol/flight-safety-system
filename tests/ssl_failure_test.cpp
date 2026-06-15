@@ -21,6 +21,7 @@
 #include <chrono>
 #include <list>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 
@@ -51,12 +52,31 @@ constexpr const char *EXPIRED_CLIENT_PUBLIC_FILE = "certs/expired/client.public.
 constexpr const char *GHOST_CLIENT_PRIVATE_FILE = "certs/ghost/client.private.pem";
 constexpr const char *GHOST_CLIENT_PUBLIC_FILE = "certs/ghost/client.public.pem";
 
-std::shared_ptr<flight_safety_system::transport::fss_connection> accepted;
+/* The accept thread writes `accepted` from its callback while the main test
+ * thread reads and clears it. Funnel every access through accepted_mutex so the
+ * two cannot race (TSan, todo/13.2) — the grace-window sleeps only shrank the
+ * window, they did not remove it. Tests must use get_accepted()/reset_accepted()
+ * rather than touching the global directly. */
+std::mutex accepted_mutex;
+std::shared_ptr<flight_safety_system::transport::fss_connection> accepted; // guarded by accepted_mutex
 
 auto accept_cb(std::shared_ptr<flight_safety_system::transport::fss_connection> new_conn) -> bool
 {
+    const std::scoped_lock lock(accepted_mutex);
     accepted = std::move(new_conn);
     return true;
+}
+
+auto get_accepted() -> std::shared_ptr<flight_safety_system::transport::fss_connection>
+{
+    const std::scoped_lock lock(accepted_mutex);
+    return accepted;
+}
+
+void reset_accepted()
+{
+    const std::scoped_lock lock(accepted_mutex);
+    accepted = nullptr;
 }
 
 /* Open a raw TCP connection to the listener (IPv6 loopback) and send nothing
@@ -85,7 +105,7 @@ auto connect_silent_peer(uint16_t port) -> int
 
 TEST_CASE("ssl: client rejects server cert signed by a different CA")
 {
-    accepted = nullptr;
+    reset_accepted();
     constexpr uint16_t port = 20512;
     auto listen = std::make_shared<flight_safety_system::transport_ssl::fss_listen>(
         port, accept_cb, CA_PUBLIC_FILE, SERVER_PRIVATE_FILE, SERVER_PUBLIC_FILE);
@@ -102,16 +122,16 @@ TEST_CASE("ssl: client rejects server cert signed by a different CA")
      * handshake result is what matters; no identity message should
      * ever arrive. */
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
-    if (accepted != nullptr)
+    if (auto conn = get_accepted())
     {
-        REQUIRE(accepted->getMsg() == nullptr);
+        REQUIRE(conn->getMsg() == nullptr);
     }
-    accepted = nullptr;
+    reset_accepted();
 }
 
 TEST_CASE("ssl: server rejects client presenting an expired certificate", "[ssl_expired]")
 {
-    accepted = nullptr;
+    reset_accepted();
     constexpr uint16_t port = 20513;
     auto listen = std::make_shared<flight_safety_system::transport_ssl::fss_listen>(
         port, accept_cb, CA_PUBLIC_FILE, SERVER_PRIVATE_FILE, SERVER_PUBLIC_FILE);
@@ -126,13 +146,13 @@ TEST_CASE("ssl: server rejects client presenting an expired certificate", "[ssl_
     /* Either the client observes the rejection locally, or the
      * server-side handshake fails and no usable session appears. */
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
-    if (connected && accepted != nullptr)
+    if (auto conn = get_accepted(); connected && conn != nullptr)
     {
         /* No application message should pass across an expired
          * handshake. */
-        REQUIRE(accepted->getMsg() == nullptr);
+        REQUIRE(conn->getMsg() == nullptr);
     }
-    accepted = nullptr;
+    reset_accepted();
 }
 
 TEST_CASE("ssl: server surfaces wrong-CN-but-CA-signed cert via getClientNames", "[ssl_wrong_cn]")
@@ -149,7 +169,7 @@ TEST_CASE("ssl: server surfaces wrong-CN-but-CA-signed cert via getClientNames",
      * Without this integration test, getClientNames() could regress
      * silently and leave the asset-name check working only against the
      * synthetic FakeConnection used in unit tests. */
-    accepted = nullptr;
+    reset_accepted();
     constexpr uint16_t port = 20514;
     auto listen = std::make_shared<flight_safety_system::transport_ssl::fss_listen>(
         port, accept_cb, CA_PUBLIC_FILE, SERVER_PRIVATE_FILE, SERVER_PUBLIC_FILE);
@@ -159,14 +179,16 @@ TEST_CASE("ssl: server surfaces wrong-CN-but-CA-signed cert via getClientNames",
         CA_PUBLIC_FILE, GHOST_CLIENT_PRIVATE_FILE, GHOST_CLIENT_PUBLIC_FILE);
     REQUIRE(client->connectTo("localhost", port));
 
-    REQUIRE(fss_test::wait_for([]() { return accepted != nullptr; }));
+    REQUIRE(fss_test::wait_for([]() { return get_accepted() != nullptr; }));
 
-    std::list<std::string> names = accepted->getClientNames();
+    auto conn = get_accepted();
+    REQUIRE(conn != nullptr);
+    std::list<std::string> names = conn->getClientNames();
     REQUIRE_FALSE(names.empty());
     bool found = std::any_of(names.begin(), names.end(), [](const std::string &n) { return n == "ghost-asset"; });
     REQUIRE(found);
 
-    accepted = nullptr;
+    reset_accepted();
 }
 
 TEST_CASE("ssl: server rejects a client cert signed by an untrusted CA", "[ssl_foreign_client_cert]")
@@ -179,7 +201,7 @@ TEST_CASE("ssl: server rejects a client cert signed by an untrusted CA", "[ssl_f
      * authenticate. The client trusts the main CA (so it accepts the
      * server); it presents an alt-CA client cert the server does not trust.
      * A correctly verifying server must surface NO client name. */
-    accepted = nullptr;
+    reset_accepted();
     const uint16_t port = fss_test::pick_port();
     REQUIRE(port != 0);
     auto listen = std::make_shared<flight_safety_system::transport_ssl::fss_listen>(
@@ -199,9 +221,9 @@ TEST_CASE("ssl: server rejects a client cert signed by an untrusted CA", "[ssl_f
      * pre-1.1.0 behaviour, which surfaced a nameless connection). If the
      * server regressed and accepted the foreign cert, the callback would fire
      * and `accepted` would become non-null within the grace window. */
-    REQUIRE_FALSE(fss_test::wait_for([]() { return accepted != nullptr; }, std::chrono::milliseconds(500)));
+    REQUIRE_FALSE(fss_test::wait_for([]() { return get_accepted() != nullptr; }, std::chrono::milliseconds(500)));
     listen = nullptr;
-    accepted = nullptr;
+    reset_accepted();
 }
 
 TEST_CASE("ssl: misconfigured cert paths fail without throwing")
@@ -213,7 +235,7 @@ TEST_CASE("ssl: misconfigured cert paths fail without throwing")
      * gnutls exception escapes: connectTo() returns false and create()
      * returns nullptr.  A live listener is required so the TCP connect
      * succeeds and the failure happens in TLS setup, not before it. */
-    accepted = nullptr;
+    reset_accepted();
     const uint16_t port = fss_test::pick_port();
     REQUIRE(port != 0);
     auto listen = std::make_shared<flight_safety_system::transport_ssl::fss_listen>(
@@ -246,10 +268,12 @@ TEST_CASE("ssl: misconfigured cert paths fail without throwing")
         REQUIRE(client == nullptr);
     }
 
-    /* Join the accept thread (which assigns the `accepted` global from its
-     * callback) before clearing the global, so the two writes can't race. */
+    /* Tear the listener down (joining the accept thread) before clearing, so a
+     * late callback cannot resurrect `accepted` after the reset. The mutex
+     * already makes the accesses themselves race-free; this just keeps the
+     * end-state deterministic. */
     listen = nullptr;
-    accepted = nullptr;
+    reset_accepted();
 }
 
 TEST_CASE("ssl: getSessionDesc on unconnected client returns empty string")
@@ -303,7 +327,7 @@ TEST_CASE("ssl: a silent peer does not block other clients' handshakes", "[ssl_h
      * connections. Before the off-accept-thread refactor the listener ran the
      * TLS handshake inline, so this test would have wedged the accept thread
      * and hung the suite. A short handshake timeout keeps teardown quick. */
-    accepted = nullptr;
+    reset_accepted();
     const uint16_t port = fss_test::pick_port();
     REQUIRE(port != 0);
     /* Use the default (generous) handshake timeout. The same timeout applies to
@@ -327,11 +351,11 @@ TEST_CASE("ssl: a silent peer does not block other clients' handshakes", "[ssl_h
     auto client = std::make_shared<flight_safety_system::transport_ssl::fss_connection_client>(
         CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE);
     REQUIRE(client->connectTo("localhost", port));
-    REQUIRE(fss_test::wait_for([]() { return accepted != nullptr; }, generous));
+    REQUIRE(fss_test::wait_for([]() { return get_accepted() != nullptr; }, generous));
 
     ::close(silent);
     listen = nullptr; // close() above aborts the silent worker's handshake, draining it
-    accepted = nullptr;
+    reset_accepted();
 }
 
 TEST_CASE("ssl: concurrent handshakes are bounded and excess connections shed", "[ssl_handshake_bound]")
@@ -339,7 +363,7 @@ TEST_CASE("ssl: concurrent handshakes are bounded and excess connections shed", 
     /* The setup-worker pool is bounded so the off-thread handshake path cannot
      * itself be used to exhaust threads/memory: once the bound is reached,
      * further accepted connections are closed immediately rather than queued. */
-    accepted = nullptr;
+    reset_accepted();
     const uint16_t port = fss_test::pick_port();
     REQUIRE(port != 0);
     constexpr size_t max_handshakes = 2;
@@ -377,7 +401,7 @@ TEST_CASE("ssl: concurrent handshakes are bounded and excess connections shed", 
         ::close(fd);
     }
     listen = nullptr;
-    accepted = nullptr;
+    reset_accepted();
 }
 
 TEST_CASE("ssl: client handshake times out against a silent server", "[ssl_handshake_dos]")
