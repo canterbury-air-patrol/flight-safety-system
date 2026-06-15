@@ -509,9 +509,20 @@ void flight_safety_system::client_ssl::fss_server::processMessage(
             }
             break;
             case flight_safety_system::transport::message_type_rtt_request: {
-                /* Send a response */
+                /* Send a response. When the RTT clock-offset capability was
+                 * negotiated, stamp our wall clock so the server can estimate
+                 * our clock offset (todo/17 item 3); otherwise reply in the
+                 * legacy form (no timestamp). getConnection() may be null (e.g.
+                 * mid-teardown), so guard it the same way sendMsg does. */
+                auto active_conn = this->getConnection();
+                bool report_clock =
+                    active_conn != nullptr && (active_conn->getNegotiatedFeatureFlags() &
+                                               flight_safety_system::transport::FSS_FEATURE_RTT_OFFSET) != 0;
                 auto reply_msg =
-                    std::make_shared<flight_safety_system::transport::fss_message_rtt_response>(msg->getId());
+                    report_clock
+                        ? std::make_shared<flight_safety_system::transport::fss_message_rtt_response>(
+                              msg->getId(), flight_safety_system::fss_current_timestamp())
+                        : std::make_shared<flight_safety_system::transport::fss_message_rtt_response>(msg->getId());
                 this->sendMsg(reply_msg);
             }
             break;

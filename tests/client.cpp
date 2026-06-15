@@ -161,6 +161,40 @@ TEST_CASE("client: processMessage rtt_request sends reply (no-op with null conne
     server->processMessage(msg); // sendMsg returns false (conn is null); must not crash
 }
 
+TEST_CASE("client: rtt_request reply carries our clock when rtt-offset negotiated")
+{
+    TrackingClient client;
+    auto server = std::make_shared<ConnInjectableServer>(&client, "localhost", uint16_t{0}, CA_PUBLIC_FILE,
+                                                         CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE);
+    auto conn = std::make_shared<CapturingConnection>();
+    conn->setNegotiatedFeatureFlags(fss::transport::FSS_FEATURE_RTT_OFFSET);
+    server->setConnection(conn);
+
+    server->processMessage(std::make_shared<fss::transport::fss_message_rtt_request>());
+
+    REQUIRE(conn->sent.size() == 1);
+    auto resp = std::dynamic_pointer_cast<fss::transport::fss_message_rtt_response>(conn->sent.front());
+    REQUIRE(resp != nullptr);
+    REQUIRE(resp->getClientTimestamp() != 0); // our wall clock was stamped
+}
+
+TEST_CASE("client: rtt_request reply omits our clock without the negotiated capability")
+{
+    TrackingClient client;
+    auto server = std::make_shared<ConnInjectableServer>(&client, "localhost", uint16_t{0}, CA_PUBLIC_FILE,
+                                                         CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE);
+    auto conn = std::make_shared<CapturingConnection>();
+    /* No capability negotiated (negotiated feature flags left at 0). */
+    server->setConnection(conn);
+
+    server->processMessage(std::make_shared<fss::transport::fss_message_rtt_request>());
+
+    REQUIRE(conn->sent.size() == 1);
+    auto resp = std::dynamic_pointer_cast<fss::transport::fss_message_rtt_response>(conn->sent.front());
+    REQUIRE(resp != nullptr);
+    REQUIRE(resp->getClientTimestamp() == 0); // legacy reply, no timestamp
+}
+
 TEST_CASE("client: processMessage version incompatibility triggers serverRequiresReconnect")
 {
     TrackingClient client;
