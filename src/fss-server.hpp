@@ -161,6 +161,10 @@ class fss_client_handler {
 public:
     virtual ~fss_client_handler() = default;
     virtual void clientDisconnected(fss_client *client) = 0;
+    /* Sends msg to every client (bar `except`). Implementations must iterate
+     * the connections sequentially: fss_connection::sendMsg stamps a
+     * per-connection id into msg, so fanning one instance out concurrently
+     * would race that write (todo/12 C8). */
     virtual void broadcastMsg(const std::shared_ptr<transport::fss_message> &msg, fss_client *except = nullptr) = 0;
 };
 
