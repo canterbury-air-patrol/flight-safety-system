@@ -438,6 +438,8 @@ void fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss
             }
             uint16_t negotiated = std::min(peer_version, fss::transport::FSS_PROTOCOL_VERSION);
             this->getConnection()->setNegotiatedVersion(negotiated);
+            this->getConnection()->setNegotiatedFeatureFlags(
+                fss::transport::negotiateFeatureFlags(version_msg->getFeatureFlags()));
             this->version_received = true;
             if (negotiated >= 2)
             {

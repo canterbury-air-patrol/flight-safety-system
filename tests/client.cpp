@@ -44,6 +44,31 @@ public:
     }
 };
 
+/* A connection that records the messages the client tries to send, by decoding
+ * the framed buffer the base sendMsg(fss_message) hands to sendMsg(buf_len).
+ * Mirrors the FakeConnection used in the server-session tests. */
+class CapturingConnection : public fss::transport::fss_connection {
+public:
+    std::vector<std::shared_ptr<fss::transport::fss_message>> sent{};
+protected:
+    auto sendMsg(const std::shared_ptr<fss::transport::buf_len> &bl) -> bool override
+    {
+        if (auto decoded = fss::transport::fss_message::decode(bl))
+        {
+            sent.push_back(decoded);
+        }
+        return true;
+    }
+};
+
+/* fss_server with the protected setConnection exposed so a test can inject a
+ * CapturingConnection (and preset its negotiated capabilities). */
+class ConnInjectableServer : public fss::client_ssl::fss_server {
+public:
+    using fss::client_ssl::fss_server::fss_server;
+    using fss::transport::fss_message_cb::setConnection;
+};
+
 } // namespace
 
 constexpr const char *CA_PUBLIC_FILE = "certs/ca.public.pem";
@@ -144,6 +169,42 @@ TEST_CASE("client: processMessage version incompatibility triggers serverRequire
     constexpr uint16_t future_min = fss::transport::FSS_PROTOCOL_VERSION + 1;
     auto msg = std::make_shared<fss::transport::fss_message_version>(future_min, future_min, uint32_t{0});
     server->processMessage(msg); // serverRequiresReconnect called; no crash
+}
+
+TEST_CASE("client: version handshake negotiates feature flags as the intersection")
+{
+    /* Client-side mirror of the server-side test: on the client path the
+     * negotiated capability set is also (peer-advertised & FSS_SUPPORTED_FEATURES),
+     * recorded on the connection. */
+    TrackingClient client;
+    auto server = std::make_shared<ConnInjectableServer>(&client, "localhost", uint16_t{0}, CA_PUBLIC_FILE,
+                                                         CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE);
+    auto conn = std::make_shared<CapturingConnection>();
+    server->setConnection(conn);
+
+    REQUIRE(conn->getNegotiatedFeatureFlags() == 0U); // nothing negotiated yet
+
+    constexpr uint32_t all_flags = 0xFFFFFFFFU; // server advertises every bit
+    auto version = std::make_shared<fss::transport::fss_message_version>(
+        fss::transport::FSS_PROTOCOL_VERSION, fss::transport::FSS_PROTOCOL_MIN_VERSION, all_flags);
+    server->processMessage(version);
+
+    REQUIRE(conn->getNegotiatedFeatureFlags() == (all_flags & fss::transport::FSS_SUPPORTED_FEATURES));
+}
+
+TEST_CASE("client: legacy server advertising no feature flags negotiates none")
+{
+    TrackingClient client;
+    auto server = std::make_shared<ConnInjectableServer>(&client, "localhost", uint16_t{0}, CA_PUBLIC_FILE,
+                                                         CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE);
+    auto conn = std::make_shared<CapturingConnection>();
+    server->setConnection(conn);
+
+    auto version = std::make_shared<fss::transport::fss_message_version>(fss::transport::FSS_PROTOCOL_VERSION,
+                                                                         fss::transport::FSS_PROTOCOL_MIN_VERSION, 0U);
+    server->processMessage(version);
+
+    REQUIRE(conn->getNegotiatedFeatureFlags() == 0U);
 }
 
 TEST_CASE("client: JSON config with server entry parses name and creates reconnect entry")
