@@ -36,6 +36,29 @@ static constexpr uint16_t FSS_PROTOCOL_VERSION_LEGACY = 0;
 static constexpr uint16_t FSS_PROTOCOL_VERSION = 2;
 static constexpr uint16_t FSS_PROTOCOL_MIN_VERSION = 1;
 
+/* Optional-capability negotiation. The version handshake's feature_flags is a
+ * bitmask of capabilities each peer supports; the negotiated set is the
+ * intersection (peer's flags & FSS_SUPPORTED_FEATURES), so a feature is only
+ * used when BOTH peers advertise it. This lets old peers interop unchanged
+ * (they advertise 0) without a protocol-version bump — see todo/17. A peer
+ * cannot force on a capability we do not implement: the AND with
+ * FSS_SUPPORTED_FEATURES masks any bit we have not enabled. Each bit is added
+ * to FSS_SUPPORTED_FEATURES only once this build actually implements it. */
+static constexpr uint32_t FSS_FEATURE_RTT_OFFSET = 0x1U;    /* todo/17 item 3 */
+static constexpr uint32_t FSS_FEATURE_COMMAND_ACK = 0x2U;   /* todo/17 item 1 */
+static constexpr uint32_t FSS_FEATURE_SYSTEM_HEALTH = 0x4U; /* todo/17 item 2 */
+static constexpr uint32_t FSS_SUPPORTED_FEATURES = 0U;
+
+/* The capability set to adopt for a peer that advertised peer_flags: the
+ * intersection with what this build implements, so a peer can never enable a
+ * feature we do not support. Both handshake paths (server: client_session.cpp,
+ * client: client-ssl.cpp) negotiate through this one function so the policy
+ * cannot drift between them. */
+inline auto negotiateFeatureFlags(uint32_t peer_flags) -> uint32_t
+{
+    return peer_flags & FSS_SUPPORTED_FEATURES;
+}
+
 /* Maximum payload length accepted from the wire. Anything larger is rejected
  * before allocation to prevent memory exhaustion attacks. Sized well above the
  * largest legitimate message (server_list with many entries) with headroom. */
@@ -167,6 +190,10 @@ class fss_connection {
      * the odd unknown message type is never disconnected. */
     static constexpr uint64_t null_msg_disconnect_threshold = 1000;
     std::atomic<uint16_t> negotiated_version{FSS_PROTOCOL_VERSION_LEGACY};
+    /* Capabilities both peers agreed on at handshake (intersection of the two
+     * advertised feature_flags, masked by FSS_SUPPORTED_FEATURES). 0 until the
+     * version handshake negotiates it; a legacy peer leaves it 0. */
+    std::atomic<uint32_t> negotiated_feature_flags{0};
 protected:
     auto recvMsg() -> std::shared_ptr<fss_message>;
     auto getMessageId() -> uint64_t;
@@ -194,6 +221,8 @@ public:
     virtual auto connectTo(const std::string &address, uint16_t port) -> bool;
     auto getNegotiatedVersion() -> uint16_t { return this->negotiated_version.load(); }
     void setNegotiatedVersion(uint16_t v) { this->negotiated_version.store(v); }
+    auto getNegotiatedFeatureFlags() -> uint32_t { return this->negotiated_feature_flags.load(); }
+    void setNegotiatedFeatureFlags(uint32_t f) { this->negotiated_feature_flags.store(f); }
     auto sendMsg(const std::shared_ptr<fss_message> &msg) -> bool;
     auto getMsg() -> std::shared_ptr<fss_message>;
     virtual void processMessages();
@@ -475,7 +504,9 @@ class fss_message_version : public fss_message {
 private:
     uint16_t protocol_version{FSS_PROTOCOL_VERSION};
     uint16_t min_supported_version{FSS_PROTOCOL_MIN_VERSION};
-    uint32_t feature_flags{0};
+    /* A default-constructed version message (the one each peer sends at
+     * handshake) advertises exactly the capabilities this build implements. */
+    uint32_t feature_flags{FSS_SUPPORTED_FEATURES};
 protected:
     void unpackData(const std::shared_ptr<buf_len> &bl);
     void packData(std::shared_ptr<buf_len> bl) override;

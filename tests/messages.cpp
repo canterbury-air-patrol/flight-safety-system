@@ -583,7 +583,9 @@ TEST_CASE("Version Message Defaults")
     REQUIRE(msg->getType() == flight_safety_system::transport::message_type_version);
     REQUIRE(msg->getProtocolVersion() == flight_safety_system::transport::FSS_PROTOCOL_VERSION);
     REQUIRE(msg->getMinSupportedVersion() == flight_safety_system::transport::FSS_PROTOCOL_MIN_VERSION);
-    REQUIRE(msg->getFeatureFlags() == 0);
+    /* A default-constructed version message advertises exactly the capabilities
+     * this build implements. */
+    REQUIRE(msg->getFeatureFlags() == flight_safety_system::transport::FSS_SUPPORTED_FEATURES);
 }
 
 TEST_CASE("messages: identity_required round-trip")

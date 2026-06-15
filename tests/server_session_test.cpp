@@ -502,6 +502,55 @@ TEST_CASE("session: version handshake stores negotiated version and replies")
     REQUIRE(saw_version_response);
 }
 
+TEST_CASE("session: version handshake negotiates feature flags as the intersection")
+{
+    /* The negotiated capability set is (peer-advertised & FSS_SUPPORTED_FEATURES):
+     * a peer cannot enable a feature this build does not implement, and the
+     * value is recorded on the connection for the rest of the session. */
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 1;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+
+    /* No capabilities negotiated until the handshake. */
+    REQUIRE(conn->getNegotiatedFeatureFlags() == 0U);
+
+    /* Peer advertises every bit; we must mask down to what we support. */
+    constexpr uint32_t all_flags = 0xFFFFFFFFU;
+    auto version = std::make_shared<fss::transport::fss_message_version>(
+        fss::transport::FSS_PROTOCOL_VERSION, fss::transport::FSS_PROTOCOL_MIN_VERSION, all_flags);
+    session->processMessage(version);
+
+    REQUIRE(conn->getNegotiatedFeatureFlags() == (all_flags & fss::transport::FSS_SUPPORTED_FEATURES));
+    REQUIRE(handler.disconnects == 0);
+}
+
+TEST_CASE("session: legacy peer advertising no feature flags negotiates none")
+{
+    /* A peer advertising 0 (an old client, or one with no optional features)
+     * leaves the negotiated capability set empty regardless of what we support. */
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 1;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+
+    auto version = std::make_shared<fss::transport::fss_message_version>(fss::transport::FSS_PROTOCOL_VERSION,
+                                                                         fss::transport::FSS_PROTOCOL_MIN_VERSION, 0U);
+    session->processMessage(version);
+
+    REQUIRE(conn->getNegotiatedFeatureFlags() == 0U);
+}
+
 TEST_CASE("session: version handshake rejects incompatible peer")
 {
     /* When the client's max version is below our minimum, the server
@@ -633,7 +682,8 @@ auto make_position_msg(uint64_t ts) -> std::shared_ptr<fss::transport::fss_messa
 auto establish_v2_session(std::shared_ptr<fss::server::fss_client> &session, uint64_t &next_id) -> void
 {
     auto version = std::make_shared<fss::transport::fss_message_version>(fss::transport::FSS_PROTOCOL_VERSION,
-                                                                         fss::transport::FSS_PROTOCOL_MIN_VERSION, 0U);
+                                                                         fss::transport::FSS_PROTOCOL_MIN_VERSION,
+                                                                         fss::transport::FSS_SUPPORTED_FEATURES);
     version->setId(next_id++);
     session->processMessage(version);
 
@@ -695,17 +745,21 @@ TEST_CASE("session: duplicate version message is ignored without derailing the s
 
     uint64_t next_id = 1;
     establish_v2_session(session, next_id);
+    /* Capabilities negotiated at handshake; a duplicate must not disturb them. */
+    uint32_t negotiated_features = conn->getNegotiatedFeatureFlags();
 
     auto pos = make_position_msg(fss::fss_current_timestamp());
     pos->setId(next_id++);
     session->processMessage(pos);
     REQUIRE(handler.broadcasts.size() == 1);
 
-    /* In-sequence duplicate offering a lower version: must not downgrade. */
+    /* In-sequence duplicate offering a lower version and no capabilities: must
+     * neither downgrade the version nor clear the negotiated feature flags. */
     auto dup = std::make_shared<fss::transport::fss_message_version>(1U, 1U, 0U);
     dup->setId(next_id++);
     session->processMessage(dup);
     REQUIRE(conn->getNegotiatedVersion() == fss::transport::FSS_PROTOCOL_VERSION);
+    REQUIRE(conn->getNegotiatedFeatureFlags() == negotiated_features);
     REQUIRE(handler.disconnects == 0);
 
     /* The duplicate consumed a sequence id; the stream must continue. */

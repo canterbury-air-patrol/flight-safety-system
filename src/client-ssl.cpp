@@ -503,6 +503,8 @@ void flight_safety_system::client_ssl::fss_server::processMessage(
                     }
                     uint16_t negotiated = std::min(peer_version, flight_safety_system::transport::FSS_PROTOCOL_VERSION);
                     this->getConnection()->setNegotiatedVersion(negotiated);
+                    this->getConnection()->setNegotiatedFeatureFlags(
+                        flight_safety_system::transport::negotiateFeatureFlags(version_msg->getFeatureFlags()));
                 }
             }
             break;

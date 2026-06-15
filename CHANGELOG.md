@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Optional-capability negotiation in the protocol version handshake. The
+  handshake's `feature_flags` field is now a bitmask of capabilities each peer
+  supports; the negotiated set is the intersection of the two, recorded on the
+  connection. This lets new optional features (see todo/17) be added without a
+  protocol-version bump — a peer that does not advertise a capability never has
+  it used, and a peer cannot enable one this build does not implement. No
+  capability bits are enabled yet, so this is wire-compatible with existing
+  peers (which advertise none).
+
 ### Security
 - The TLS handshake no longer runs inline on the accept thread. A peer that
   completed the TCP connection but then stalled the handshake (sending no or
