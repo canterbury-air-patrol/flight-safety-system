@@ -997,6 +997,161 @@ TEST_CASE("session: position_staleness_ms = 0 disables the staleness gate")
     REQUIRE(handler.broadcasts.size() == 1); // accepted despite being well outside the window
 }
 
+TEST_CASE("session: RTT clock-offset measurement shifts the staleness gate")
+{
+    /* Phase 17.3: a client whose clock is skewed but whose link is healthy must
+     * not have its positions dropped. An RTT response carrying the client's
+     * clock lets the server measure the offset and shift the gate by it. */
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 1;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+
+    /* The peer negotiated the RTT clock-offset capability. */
+    conn->setNegotiatedFeatureFlags(fss::transport::FSS_FEATURE_RTT_OFFSET);
+    session->setStalenessMs(5000);
+
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+    REQUIRE(handler.disconnects == 0);
+
+    /* The client's clock runs 60 s ahead of the server — well outside the 5 s
+     * window, so absent any correction every report it sends is discarded. */
+    constexpr int64_t client_ahead_ms = 60000;
+
+    /* Drive one RTT round trip whose response carries the client's skewed clock.
+     * sendMsg assigns the request its id; the response echoes it back. */
+    auto rtt_req = std::make_shared<fss::transport::fss_message_rtt_request>();
+    session->sendRTTRequest(rtt_req);
+    uint64_t client_now = fss::fss_current_timestamp() + static_cast<uint64_t>(client_ahead_ms);
+    auto rtt_resp = std::make_shared<fss::transport::fss_message_rtt_response>(rtt_req->getId(), client_now);
+    session->processMessage(rtt_resp);
+
+    /* Offset measured at ~ +60 s (generous slop for test wall-clock drift and
+     * half-RTT rounding; the round trip here is sub-millisecond). */
+    constexpr int64_t slop_ms = 2000;
+    REQUIRE(session->getClockOffsetMs() > client_ahead_ms - slop_ms);
+    REQUIRE(session->getClockOffsetMs() < client_ahead_ms + slop_ms);
+
+    /* A report stamped with the client's skewed-but-fresh clock is now accepted
+     * rather than discarded as stale. */
+    auto skewed = make_position_msg(fss::fss_current_timestamp() + static_cast<uint64_t>(client_ahead_ms));
+    session->processMessage(skewed);
+    REQUIRE(handler.broadcasts.size() == 1);
+}
+
+TEST_CASE("session: RTT clock-offset is ignored without the negotiated capability")
+{
+    /* The offset must only be trusted when the peer negotiated the capability:
+     * a stray client timestamp on the wire from a peer that did not negotiate
+     * it must leave the gate a plain symmetric window. */
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 1;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+
+    /* No capability negotiated (negotiated feature flags left at 0). */
+    session->setStalenessMs(5000);
+
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+    REQUIRE(handler.disconnects == 0);
+
+    constexpr int64_t client_ahead_ms = 60000;
+    auto rtt_req = std::make_shared<fss::transport::fss_message_rtt_request>();
+    session->sendRTTRequest(rtt_req);
+    uint64_t client_now = fss::fss_current_timestamp() + static_cast<uint64_t>(client_ahead_ms);
+    auto rtt_resp = std::make_shared<fss::transport::fss_message_rtt_response>(rtt_req->getId(), client_now);
+    session->processMessage(rtt_resp);
+
+    REQUIRE(session->getClockOffsetMs() == 0); // never measured
+
+    /* So the skewed report is still discarded as stale. */
+    auto skewed = make_position_msg(fss::fss_current_timestamp() + static_cast<uint64_t>(client_ahead_ms));
+    session->processMessage(skewed);
+    REQUIRE(handler.broadcasts.empty());
+}
+
+TEST_CASE("session: RTT clock-offset ignores samples from a slow link")
+{
+    /* A sample's error is bounded by half the round trip, so a response that
+     * took longer than max_rtt_for_clock_offset_ms (5 s) is too coarse to trust
+     * and must not move the offset. */
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 1;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+
+    auto clock = std::make_shared<FakeClock>(); // drives the monotonic RTT timing
+    session->setClock(clock);
+    conn->setNegotiatedFeatureFlags(fss::transport::FSS_FEATURE_RTT_OFFSET);
+
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+
+    auto rtt_req = std::make_shared<fss::transport::fss_message_rtt_request>();
+    session->sendRTTRequest(rtt_req); // recorded at monotonic t=0
+    clock->advance(6000);             // a 6 s round trip — beyond the 5 s cap
+    auto rtt_resp = std::make_shared<fss::transport::fss_message_rtt_response>(rtt_req->getId(),
+                                                                               fss::fss_current_timestamp() + 60000);
+    session->processMessage(rtt_resp);
+
+    REQUIRE(session->getClockOffsetMs() == 0); // sample dropped, offset untouched
+}
+
+TEST_CASE("session: RTT clock-offset smooths across samples")
+{
+    /* The first sample seeds the offset directly; subsequent samples move it by
+     * 1/divisor of the gap (EWMA), so a later sample at a different offset pulls
+     * the estimate partway rather than replacing it. */
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 1;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+
+    auto clock = std::make_shared<FakeClock>(); // keep every round trip at 0 ms
+    session->setClock(clock);
+    conn->setNegotiatedFeatureFlags(fss::transport::FSS_FEATURE_RTT_OFFSET);
+
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+
+    /* Sample 1: client 60 s ahead → seeds the offset at ~ +60 s. */
+    auto req1 = std::make_shared<fss::transport::fss_message_rtt_request>();
+    session->sendRTTRequest(req1);
+    auto resp1 =
+        std::make_shared<fss::transport::fss_message_rtt_response>(req1->getId(), fss::fss_current_timestamp() + 60000);
+    session->processMessage(resp1);
+
+    /* Sample 2: client now matches the server (offset 0). With divisor 4 the
+     * estimate moves to 60000 + (0 - 60000)/4 = 45000, not all the way to 0. */
+    auto req2 = std::make_shared<fss::transport::fss_message_rtt_request>();
+    session->sendRTTRequest(req2);
+    auto resp2 =
+        std::make_shared<fss::transport::fss_message_rtt_response>(req2->getId(), fss::fss_current_timestamp());
+    session->processMessage(resp2);
+
+    constexpr int64_t slop_ms = 2000;
+    REQUIRE(session->getClockOffsetMs() > 45000 - slop_ms);
+    REQUIRE(session->getClockOffsetMs() < 45000 + slop_ms);
+}
+
 TEST_CASE("session: repeated clock skew escalates WARN -> ERROR and resets on recovery")
 {
     fss_test::MockDatabase mock;

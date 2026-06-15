@@ -47,7 +47,7 @@ static constexpr uint16_t FSS_PROTOCOL_MIN_VERSION = 1;
 static constexpr uint32_t FSS_FEATURE_RTT_OFFSET = 0x1U;    /* todo/17 item 3 */
 static constexpr uint32_t FSS_FEATURE_COMMAND_ACK = 0x2U;   /* todo/17 item 1 */
 static constexpr uint32_t FSS_FEATURE_SYSTEM_HEALTH = 0x4U; /* todo/17 item 2 */
-static constexpr uint32_t FSS_SUPPORTED_FEATURES = 0U;
+static constexpr uint32_t FSS_SUPPORTED_FEATURES = FSS_FEATURE_RTT_OFFSET;
 
 /* The capability set to adopt for a peer that advertised peer_flags: the
  * intersection with what this build implements, so a peer can never enable a

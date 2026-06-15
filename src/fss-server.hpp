@@ -180,6 +180,16 @@ private:
     std::mutex client_lock{};
     std::list<std::shared_ptr<fss_client_rtt>> outstanding_rtt_requests{};
     auto getName() -> std::string;
+    /* Fold one RTT round trip into the smoothed client↔server clock offset that
+     * feeds the staleness gate (todo/17 item 3). client_timestamp is the peer's
+     * wall clock from the response (0 = not reported); rtt_ms is the measured
+     * round-trip duration, which bounds the estimate's error; recv_wall is the
+     * server wall clock captured at receive, adjacent to the monotonic receive
+     * time rtt_ms is derived from, so the two refer to the same instant and an
+     * NTP step cannot land between them. The client timestamp is trusted data
+     * from an authenticated peer — this is a healthy-link correction, not an
+     * adversarial defence (see todo/17). Recv thread only. */
+    void updateClockOffset(uint64_t client_timestamp, uint64_t rtt_ms, uint64_t recv_wall);
     uint64_t last_command_send_ts{0};
     uint64_t last_command_dbid{0};
     bool liveness_active{false};
@@ -206,9 +216,16 @@ private:
     uint64_t position_staleness_ms{default_position_staleness_ms};
     /* Estimate of (client clock - server clock) in ms: positive if the client
      * runs ahead. Used only to offset-correct the staleness gate, never to
-     * rewrite stored timestamps. Stays 0 until measured (todo/17 item 3, the
-     * RTT clock-offset feature); 0 makes the gate a plain symmetric window. */
+     * rewrite stored timestamps. Measured from RTT responses that carry the
+     * client's clock (todo/17 item 3, via updateClockOffset); stays 0 — making
+     * the gate a plain symmetric window — until a peer that negotiated the
+     * capability reports its clock. */
     int64_t client_clock_offset_ms{0};
+    /* False until the first usable RTT clock-offset sample arrives; gates
+     * whether client_clock_offset_ms is a measurement or the unmeasured-0
+     * default, so the first sample seeds the smoother directly instead of being
+     * averaged against a meaningless 0. Recv thread only. */
+    bool clock_offset_measured{false};
     /* Consecutive staleness discards; reset by the first in-window report.
      * Drives WARN->ERROR escalation so a skewed client is unmistakable without
      * a per-message WARN drip. Recv thread only. */
@@ -238,6 +255,9 @@ public:
     void sendCommand();
     auto isAircraft() -> bool;
     auto getCachedAssetId() -> uint64_t { return this->cached_asset_id.load(); }
+    /* The smoothed client↔server clock offset (ms; positive = client ahead)
+     * currently feeding the staleness gate. 0 until measured. Exposed for tests. */
+    auto getClockOffsetMs() -> int64_t { return this->client_clock_offset_ms; }
     void setPendingCommand(std::shared_ptr<asset_command> cmd);
     void setClock(std::shared_ptr<IClock> t_clock);
     void setTimeoutMs(uint64_t ms);

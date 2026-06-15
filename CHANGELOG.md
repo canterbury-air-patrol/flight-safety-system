@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- The position-staleness gate now corrects for a measured client↔server clock
+  offset, so a client whose clock is skewed but whose link is healthy no longer
+  has all its positions dropped. The offset is estimated from RTT responses: a
+  peer that negotiates the new `rtt-offset` capability stamps its wall clock
+  into each `rtt_response`, and the server folds `client - server` (bounded by
+  half the round trip, smoothed across samples) into the gate. The stored
+  timestamp is never rewritten — only the accept/reject window shifts. A peer
+  that does not negotiate the capability is unaffected and the gate stays a
+  plain symmetric window.
 - Optional-capability negotiation in the protocol version handshake. The
   handshake's `feature_flags` field is now a bitmask of capabilities each peer
   supports; the negotiated set is the intersection of the two, recorded on the
