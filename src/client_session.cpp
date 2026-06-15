@@ -25,6 +25,13 @@ constexpr uint64_t rtt_retry_interval = 10 * sec_to_msec;
  * persistently skewed client is unmistakable without a per-message WARN drip. */
 constexpr uint64_t staleness_escalation_threshold = 10;
 constexpr uint64_t staleness_escalation_interval = 100;
+/* RTT clock-offset smoothing (todo/17 item 3). A sample's error is bounded by
+ * half the round trip, so a link slower than this yields an estimate too coarse
+ * to trust for the staleness window — drop it rather than poison the average. */
+constexpr uint64_t max_rtt_for_clock_offset_ms = 5000;
+/* EWMA weight: each new sample moves the smoothed offset by 1/N of the gap, so
+ * jitter is damped while genuine drift is still tracked. */
+constexpr int64_t clock_offset_smoothing_divisor = 4;
 
 fss::server::smm_settings::smm_settings(std::string t_address, fss::secure_string t_username,
                                         fss::secure_string t_password)
@@ -336,6 +343,43 @@ void fss::server::fss_client::sendRTTRequest(const std::shared_ptr<fss::transpor
     }
 }
 
+// NOLINTBEGIN(bugprone-easily-swappable-parameters)
+void fss::server::fss_client::updateClockOffset(uint64_t client_timestamp, uint64_t rtt_ms, uint64_t recv_wall)
+// NOLINTEND(bugprone-easily-swappable-parameters)
+{
+    /* 0 means the peer did not report its clock (or its clock genuinely reads
+     * the epoch, which we deliberately treat the same — see the field comment
+     * in fss-transport.hpp); either way there is nothing usable to fold in. */
+    if (client_timestamp == 0)
+    {
+        return;
+    }
+    if (rtt_ms > max_rtt_for_clock_offset_ms)
+    {
+        return;
+    }
+    /* The request's midpoint in server wall-clock terms is half a round trip
+     * before we received the response. rtt_ms is a duration, so subtracting it
+     * from recv_wall is sound even though the RTT itself is timed on the
+     * monotonic clock; the caller captures recv_wall adjacent to that monotonic
+     * receive time so the two refer to the same instant. */
+    int64_t midpoint = static_cast<int64_t>(recv_wall) - static_cast<int64_t>(rtt_ms / 2);
+    int64_t sample = static_cast<int64_t>(client_timestamp) - midpoint;
+    if (!this->clock_offset_measured)
+    {
+        this->client_clock_offset_ms = sample;
+        this->clock_offset_measured = true;
+    }
+    else
+    {
+        /* EWMA in integer ms: once the estimate is within
+         * clock_offset_smoothing_divisor-1 ms of a sample the delta truncates to
+         * 0 and the value rests, which is far finer than any sane staleness
+         * window — genuine drift larger than that floor is still tracked. */
+        this->client_clock_offset_ms += (sample - this->client_clock_offset_ms) / clock_offset_smoothing_divisor;
+    }
+}
+
 void fss::server::fss_client::refreshSmmSettings()
 {
     uint64_t asset_id = this->cached_asset_id.load();
@@ -610,6 +654,10 @@ void fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss
             case fss::transport::message_type_rtt_response: {
                 std::shared_ptr<fss_client_rtt> rtt_req = nullptr;
                 uint64_t current_ts = this->clock->now_ms();
+                /* Captured adjacent to the monotonic receive time above so the
+                 * wall and monotonic readings refer to the same instant (see
+                 * updateClockOffset). */
+                uint64_t recv_wall = fss::fss_current_timestamp();
                 auto rtt_resp_msg = std::dynamic_pointer_cast<fss::transport::fss_message_rtt_response>(msg);
                 if (rtt_resp_msg != nullptr)
                 {
@@ -627,13 +675,24 @@ void fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss
                         this->last_rtt_response_time = this->clock->now_ms();
                     }
                 }
-                if (rtt_req != nullptr && asset_id != 0)
+                if (rtt_req != nullptr)
                 {
+                    uint64_t rtt_ms = current_ts - rtt_req->getTimeStamp();
+                    if (asset_id != 0)
+                    {
 #ifdef DEBUG
-                    std::cout << "RTT for " << this->getName() << " is " << (current_ts - rtt_req->getTimeStamp())
-                              << std::endl;
+                        std::cout << "RTT for " << this->getName() << " is " << rtt_ms << std::endl;
 #endif
-                    this->writer->enqueue(rtt_write{asset_id, current_ts - rtt_req->getTimeStamp()});
+                        this->writer->enqueue(rtt_write{asset_id, rtt_ms});
+                    }
+                    /* RTT clock-offset (todo/17 item 3): only when the peer
+                     * negotiated the capability — otherwise any trailing
+                     * timestamp is not part of the agreed dialect and is ignored. */
+                    if ((this->getConnection()->getNegotiatedFeatureFlags() & fss::transport::FSS_FEATURE_RTT_OFFSET) !=
+                        0)
+                    {
+                        this->updateClockOffset(rtt_resp_msg->getClientTimestamp(), rtt_ms, recv_wall);
+                    }
                 }
             }
             break;
@@ -643,10 +702,11 @@ void fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss
                 {
                     uint64_t now = fss::fss_current_timestamp();
                     /* Compare the client-stamped time against the server clock,
-                     * offset-corrected (client_clock_offset_ms is 0 until the
-                     * RTT clock-offset feature measures it). The window is
-                     * symmetric: a clock ahead of the server is as wrong as one
-                     * behind, so future-dated reports are rejected too.
+                     * offset-corrected (client_clock_offset_ms is measured from
+                     * RTT responses that carry the client's clock, else 0). The
+                     * window is symmetric: a clock ahead of the server is as
+                     * wrong as one behind, so future-dated reports are rejected
+                     * too.
                      *
                      * Take the signed difference from the unsigned subtraction so
                      * the two epoch-ms values are never narrowed to int64 (the
