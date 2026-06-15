@@ -587,6 +587,14 @@ flight_safety_system::transport::fss_message_rtt_response::fss_message_rtt_respo
 {
 }
 
+// NOLINTBEGIN(bugprone-easily-swappable-parameters)
+flight_safety_system::transport::fss_message_rtt_response::fss_message_rtt_response(uint64_t t_request_id,
+                                                                                    uint64_t t_client_timestamp)
+    : fss_message(message_type_rtt_response), request_id(t_request_id), client_timestamp(t_client_timestamp)
+// NOLINTEND(bugprone-easily-swappable-parameters)
+{
+}
+
 flight_safety_system::transport::fss_message_rtt_response::fss_message_rtt_response(uint64_t t_id,
                                                                                     const std::shared_ptr<buf_len> &bl)
     : fss_message(t_id, message_type_rtt_response), request_id(0)
@@ -598,6 +606,14 @@ void flight_safety_system::transport::fss_message_rtt_response::packData(std::sh
 {
     uint64_t data = fss_htobe64(this->request_id);
     bl->addData(&data, sizeof(uint64_t));
+    /* The client timestamp is an optional trailing field: omitting it when 0
+     * keeps the wire bytes identical to a legacy response, so a peer that never
+     * reports its clock is unaffected. */
+    if (this->client_timestamp != 0)
+    {
+        uint64_t ts = fss_htobe64(this->client_timestamp);
+        bl->addData(&ts, sizeof(uint64_t));
+    }
 }
 
 void flight_safety_system::transport::fss_message_rtt_response::unpackData(const std::shared_ptr<buf_len> &bl)
@@ -607,11 +623,21 @@ void flight_safety_system::transport::fss_message_rtt_response::unpackData(const
     {
         this->request_id = 0;
     }
+    /* Optional trailing field; left at 0 when absent (legacy response). */
+    if (!reader.readUint64(this->client_timestamp))
+    {
+        this->client_timestamp = 0;
+    }
 }
 
 auto flight_safety_system::transport::fss_message_rtt_response::getRequestId() -> uint64_t
 {
     return this->request_id;
+}
+
+auto flight_safety_system::transport::fss_message_rtt_response::getClientTimestamp() -> uint64_t
+{
+    return this->client_timestamp;
 }
 
 // NOLINTBEGIN(bugprone-easily-swappable-parameters)

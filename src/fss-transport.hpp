@@ -345,13 +345,29 @@ public:
 class fss_message_rtt_response : public fss_message {
 private:
     uint64_t request_id;
+    /* The responder's wall-clock reading (ms since epoch) at the moment it
+     * built this response. 0 means "not reported" — a legacy peer, or one that
+     * has not negotiated the RTT clock-offset capability. Carried as an
+     * optional trailing wire field (see todo/17 item 3); the server uses it to
+     * estimate the client↔server clock offset that feeds the position
+     * staleness gate.
+     *
+     * The 0 sentinel is lossy: it cannot distinguish "not reported" from a
+     * responder whose clock genuinely reads Unix epoch midnight (an unsynced
+     * RTC or a simulator stub). That collision degrades safely — the consumer
+     * treats epoch-0 as "no measurement", so the offset stays 0 and the
+     * staleness gate falls back to a symmetric window; an aircraft with a
+     * frozen 1970 clock has no usable offset to feed it anyway. */
+    uint64_t client_timestamp{0};
 protected:
     void unpackData(const std::shared_ptr<buf_len> &bl);
     void packData(std::shared_ptr<buf_len> bl) override;
 public:
     explicit fss_message_rtt_response(uint64_t t_request_id);
+    fss_message_rtt_response(uint64_t t_request_id, uint64_t t_client_timestamp);
     fss_message_rtt_response(uint64_t t_id, const std::shared_ptr<buf_len> &bl);
     virtual auto getRequestId() -> uint64_t;
+    virtual auto getClientTimestamp() -> uint64_t;
 };
 
 class fss_message_position_report : public fss_message {
