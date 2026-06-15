@@ -124,6 +124,56 @@ TEST_CASE("RTT Response Message Check")
     auto decoded_generic_rtt_resp =
         std::dynamic_pointer_cast<flight_safety_system::transport::fss_message_rtt_response>(decoded_generic);
     REQUIRE((decoded_generic_rtt_resp)->getRequestId() == request_id);
+    /* No client timestamp supplied: defaults to "not reported". */
+    REQUIRE(msg->getClientTimestamp() == 0);
+    REQUIRE(decoded->getClientTimestamp() == 0);
+}
+
+TEST_CASE("RTT Response carries an optional client timestamp")
+{
+    auto msg_id = static_cast<uint64_t>(random());
+    auto request_id = static_cast<uint64_t>(random());
+    constexpr uint64_t client_ts = 0x1122334455667788ULL;
+
+    auto msg = std::make_shared<flight_safety_system::transport::fss_message_rtt_response>(request_id, client_ts);
+    REQUIRE(msg->getRequestId() == request_id);
+    REQUIRE(msg->getClientTimestamp() == client_ts);
+
+    msg->setId(msg_id);
+    auto bl = msg->getPacked();
+    REQUIRE(bl != nullptr);
+
+    auto decoded = std::make_shared<flight_safety_system::transport::fss_message_rtt_response>(msg_id, bl);
+    REQUIRE(decoded->getRequestId() == request_id);
+    REQUIRE(decoded->getClientTimestamp() == client_ts);
+
+    auto decoded_generic = std::dynamic_pointer_cast<flight_safety_system::transport::fss_message_rtt_response>(
+        flight_safety_system::transport::fss_message::decode(bl));
+    REQUIRE(decoded_generic != nullptr);
+    REQUIRE(decoded_generic->getClientTimestamp() == client_ts);
+}
+
+TEST_CASE("RTT Response without a timestamp is byte-identical to a legacy response")
+{
+    /* Backward compatibility: a response whose client timestamp is 0 (not
+     * reported) must pack to exactly the same bytes as before the optional
+     * field existed — request_id only, no trailing 8 bytes. */
+    constexpr uint64_t request_id = 0x0102030405060708ULL;
+    auto without = std::make_shared<flight_safety_system::transport::fss_message_rtt_response>(request_id);
+    auto with_zero = std::make_shared<flight_safety_system::transport::fss_message_rtt_response>(request_id, 0ULL);
+    without->setId(7);
+    with_zero->setId(7);
+    auto bl_without = without->getPacked();
+    auto bl_with_zero = with_zero->getPacked();
+    REQUIRE(bl_without->getLength() == bl_with_zero->getLength());
+    REQUIRE(std::string(bl_without->getData(), bl_without->getLength()) ==
+            std::string(bl_with_zero->getData(), bl_with_zero->getLength()));
+
+    /* And a response that does report a timestamp is exactly 8 bytes longer. */
+    auto with_ts = std::make_shared<flight_safety_system::transport::fss_message_rtt_response>(request_id, 42ULL);
+    with_ts->setId(7);
+    auto bl_with_ts = with_ts->getPacked();
+    REQUIRE(bl_with_ts->getLength() == bl_without->getLength() + sizeof(uint64_t));
 }
 
 TEST_CASE("Position Report Message Check")
