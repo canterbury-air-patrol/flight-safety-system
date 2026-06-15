@@ -223,6 +223,16 @@ public:
     void setNegotiatedVersion(uint16_t v) { this->negotiated_version.store(v); }
     auto getNegotiatedFeatureFlags() -> uint32_t { return this->negotiated_feature_flags.load(); }
     void setNegotiatedFeatureFlags(uint32_t f) { this->negotiated_feature_flags.store(f); }
+    /* Sends one message on this connection. NOTE: this mutates the message —
+     * it stamps the per-connection sequence id into msg (setId) before packing.
+     * Invariant (todo/12 C8): a single fss_message instance must not be sent
+     * concurrently on multiple connections; the id stamp would race. The one
+     * path that fans a shared instance out — broadcastMsg (one msg to every
+     * client) — iterates the connections sequentially on a single thread.
+     * sendRTTRequest sends a single message and then reads its assigned id back
+     * immediately after this returns, so it too relies on the stamp being
+     * synchronous and unraced. (sendSMMSettings builds a fresh message per
+     * client, so it never shares an instance.) */
     auto sendMsg(const std::shared_ptr<fss_message> &msg) -> bool;
     auto getMsg() -> std::shared_ptr<fss_message>;
     virtual void processMessages();
@@ -231,6 +241,12 @@ public:
     virtual auto isPeerCertRevoked(const std::string &) const -> bool { return false; }
 };
 
+/* NOTE (todo/12 C7): a listen socket is-a fss_connection only to reuse the fd +
+ * recv-thread lifecycle; it inherits sendMsg/getMsg/message-queue members that
+ * are meaningless for it. The clean shape is a small fd_owner base shared by
+ * sibling fss_listen / fss_connection. Deferred deliberately: it is an ABI break
+ * (a -version-info bump — all four libs export this header) not worth doing on
+ * its own; fold it into the next transport rework. */
 class fss_listen : public fss_connection {
 private:
     uint16_t port;
