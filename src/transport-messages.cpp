@@ -85,9 +85,26 @@ static auto decode_command_ack_outcome(uint8_t outcome) -> flight_safety_system:
         case static_cast<uint8_t>(command_ack_actioned): return command_ack_actioned;
         case static_cast<uint8_t>(command_ack_superseded): return command_ack_superseded;
         case static_cast<uint8_t>(command_ack_rejected): return command_ack_rejected;
+        case static_cast<uint8_t>(command_ack_noop): return command_ack_noop;
         /* An unrecognised outcome from a newer peer degrades to "received": we
          * know the command reached the asset but cannot interpret the result. */
         default: return command_ack_received;
+    }
+}
+
+static auto decode_command_ack_reason(uint8_t reason) -> flight_safety_system::transport::fss_command_ack_reason
+{
+    using namespace flight_safety_system::transport;
+    switch (reason)
+    {
+        case static_cast<uint8_t>(supersede_none): return supersede_none;
+        case static_cast<uint8_t>(supersede_terminate): return supersede_terminate;
+        case static_cast<uint8_t>(supersede_low_battery): return supersede_low_battery;
+        case static_cast<uint8_t>(supersede_comms_loss): return supersede_comms_loss;
+        case static_cast<uint8_t>(supersede_manual_override): return supersede_manual_override;
+        /* An unrecognised reason from a newer peer degrades to "none" rather
+         * than inventing a cause the operator might act on. */
+        default: return supersede_none;
     }
 }
 
@@ -1005,18 +1022,18 @@ flight_safety_system::transport::fss_message_command_ack::fss_message_command_ac
                                                                                   uint64_t t_timestamp)
     : fss_message(message_type_command_ack), acked_command_id(t_acked_command_id),
       command(static_cast<uint8_t>(t_command)), outcome(static_cast<uint8_t>(t_outcome)),
-      superseding_state(static_cast<uint8_t>(asset_command_unknown)), timestamp(t_timestamp)
+      reason(static_cast<uint8_t>(supersede_none)), timestamp(t_timestamp)
 {
 }
 
 flight_safety_system::transport::fss_message_command_ack::fss_message_command_ack(uint64_t t_acked_command_id,
                                                                                   fss_asset_command t_command,
                                                                                   fss_command_ack_outcome t_outcome,
-                                                                                  fss_asset_command t_superseding_state,
+                                                                                  fss_command_ack_reason t_reason,
                                                                                   uint64_t t_timestamp)
     : fss_message(message_type_command_ack), acked_command_id(t_acked_command_id),
       command(static_cast<uint8_t>(t_command)), outcome(static_cast<uint8_t>(t_outcome)),
-      superseding_state(static_cast<uint8_t>(t_superseding_state)), timestamp(t_timestamp)
+      reason(static_cast<uint8_t>(t_reason)), timestamp(t_timestamp)
 {
 }
 // NOLINTEND(bugprone-easily-swappable-parameters)
@@ -1035,7 +1052,7 @@ void flight_safety_system::transport::fss_message_command_ack::packData(std::sha
     bl->addData(&acked, sizeof(uint64_t));
     bl->addData(&this->command, sizeof(uint8_t));
     bl->addData(&this->outcome, sizeof(uint8_t));
-    bl->addData(&this->superseding_state, sizeof(uint8_t));
+    bl->addData(&this->reason, sizeof(uint8_t));
     bl->addData(&ts, sizeof(uint64_t));
 }
 
@@ -1045,12 +1062,12 @@ void flight_safety_system::transport::fss_message_command_ack::unpackData(const 
     this->acked_command_id = 0;
     this->command = static_cast<uint8_t>(asset_command_unknown);
     this->outcome = static_cast<uint8_t>(command_ack_received);
-    this->superseding_state = static_cast<uint8_t>(asset_command_unknown);
+    this->reason = static_cast<uint8_t>(supersede_none);
     this->timestamp = 0;
     reader.readUint64(this->acked_command_id);
     reader.readUint8(this->command);
     reader.readUint8(this->outcome);
-    reader.readUint8(this->superseding_state);
+    reader.readUint8(this->reason);
     reader.readUint64(this->timestamp);
 }
 
@@ -1069,9 +1086,9 @@ auto flight_safety_system::transport::fss_message_command_ack::getOutcome() -> f
     return decode_command_ack_outcome(this->outcome);
 }
 
-auto flight_safety_system::transport::fss_message_command_ack::getSupersedingState() -> fss_asset_command
+auto flight_safety_system::transport::fss_message_command_ack::getReason() -> fss_command_ack_reason
 {
-    return decode_asset_command(this->superseding_state);
+    return decode_command_ack_reason(this->reason);
 }
 
 auto flight_safety_system::transport::fss_message_command_ack::getTimeStamp() -> uint64_t

@@ -115,13 +115,36 @@ using fss_message_type = enum fss_message_type_e {
  * - actioned:   the FMU state machine transitioned in response to the command.
  * - superseded: received but deliberately not actioned because a higher-priority
  *               latched state is engaged (the FMU prioritises terminate >
- *               low-battery > comms > command); superseding_state names it.
+ *               low-battery > comms > command); the ack's reason names which.
+ * - noop:       the command resolved to the state already current, so nothing
+ *               changed. Operationally distinct from actioned ("already in RTL"
+ *               vs "transitioned to RTL") so the operator is not misled into
+ *               thinking a fresh transition occurred.
  * - rejected:   unactionable command (unknown/malformed/invalid). */
 using fss_command_ack_outcome = enum fss_command_ack_outcome_e {
     command_ack_received = 0,
     command_ack_actioned = 1,
     command_ack_superseded = 2,
     command_ack_rejected = 3,
+    command_ack_noop = 4,
+};
+
+/* Why a command was superseded. The superseding *state* cannot be expressed as
+ * an fss_asset_command value: the FMU's low-battery latch and its comms-failsafe
+ * latch BOTH resolve to RTL, so a command-domain value collapses the very
+ * distinction the operator UI needs ("superseded by LOW-BATTERY RTL" vs comms).
+ * This dedicated enum keeps them apart. supersede_none (0) is the
+ * not-applicable value carried whenever the outcome is not command_ack_superseded. */
+using fss_command_ack_reason = enum fss_command_ack_reason_e {
+    supersede_none = 0,
+    /* Flight-termination latch (highest FMU priority). */
+    supersede_terminate = 1,
+    /* Low-battery return-to-launch latch. */
+    supersede_low_battery = 2,
+    /* Comms-loss failsafe latch (also an RTL, distinct from low-battery). */
+    supersede_comms_loss = 3,
+    /* A manual-override / pilot-in-command state blocking the command. */
+    supersede_manual_override = 4,
 };
 
 using fss_asset_command = enum fss_asset_command_e {
@@ -584,10 +607,11 @@ private:
      * cross-checking and human-readable storage. */
     uint8_t command{asset_command_unknown};
     uint8_t outcome{command_ack_received};
-    /* The fss_asset_command-domain value of the higher-priority state that
-     * blocked actioning; asset_command_unknown (0) unless outcome is
+    /* Why the command was superseded, as a dedicated fss_command_ack_reason
+     * (NOT a command value: low-battery and comms-loss both resolve to RTL and
+     * must stay distinguishable). supersede_none (0) unless outcome is
      * command_ack_superseded. */
-    uint8_t superseding_state{asset_command_unknown};
+    uint8_t reason{supersede_none};
     /* The responder's wall-clock reading (ms since epoch) when it built the ack. */
     uint64_t timestamp{0};
 protected:
@@ -597,12 +621,12 @@ public:
     fss_message_command_ack(uint64_t t_acked_command_id, fss_asset_command t_command, fss_command_ack_outcome t_outcome,
                             uint64_t t_timestamp);
     fss_message_command_ack(uint64_t t_acked_command_id, fss_asset_command t_command, fss_command_ack_outcome t_outcome,
-                            fss_asset_command t_superseding_state, uint64_t t_timestamp);
+                            fss_command_ack_reason t_reason, uint64_t t_timestamp);
     fss_message_command_ack(uint64_t t_id, const std::shared_ptr<buf_len> &bl);
     virtual auto getAckedCommandId() -> uint64_t;
     virtual auto getCommand() -> fss_asset_command;
     virtual auto getOutcome() -> fss_command_ack_outcome;
-    virtual auto getSupersedingState() -> fss_asset_command;
+    virtual auto getReason() -> fss_command_ack_reason;
     auto getTimeStamp() -> uint64_t override;
 };
 } // namespace transport
