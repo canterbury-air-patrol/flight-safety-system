@@ -571,6 +571,11 @@ void flight_safety_system::client_ssl::fss_server::processMessage(
                 }
             }
             break;
+            case flight_safety_system::transport::message_type_command_ack:
+                /* Command acks flow FMU -> server (todo/17 item 1). The bundled
+                 * client is the command sender, not a recipient, so it never
+                 * needs to consume one. */
+                break;
         }
     }
 }

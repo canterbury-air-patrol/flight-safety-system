@@ -100,6 +100,28 @@ using fss_message_type = enum fss_message_type_e {
     /* Protocol version handshake. Sent first by both peers after the TLS
      * handshake; the negotiated version is min(peer max, our max). */
     message_type_version,
+
+    /* Acknowledgement of a server command, sent by an aircraft client (FMU)
+     * back to the server. Optional capability gated by FSS_FEATURE_COMMAND_ACK;
+     * appended last so existing type numbering is unchanged for legacy peers.
+     * See todo/17 item 1. */
+    message_type_command_ack,
+};
+
+/* Outcome carried by a command ack. A command may produce up to two acks with
+ * the same acked-command id: an early command_ack_received on receipt, then a
+ * terminal outcome once the FMU resolves it. The terminal ack is authoritative.
+ * - received:   frame decoded; not yet actioned.
+ * - actioned:   the FMU state machine transitioned in response to the command.
+ * - superseded: received but deliberately not actioned because a higher-priority
+ *               latched state is engaged (the FMU prioritises terminate >
+ *               low-battery > comms > command); superseding_state names it.
+ * - rejected:   unactionable command (unknown/malformed/invalid). */
+using fss_command_ack_outcome = enum fss_command_ack_outcome_e {
+    command_ack_received = 0,
+    command_ack_actioned = 1,
+    command_ack_superseded = 2,
+    command_ack_rejected = 3,
 };
 
 using fss_asset_command = enum fss_asset_command_e {
@@ -549,6 +571,39 @@ public:
     auto getProtocolVersion() const -> uint16_t { return this->protocol_version; }
     auto getMinSupportedVersion() const -> uint16_t { return this->min_supported_version; }
     auto getFeatureFlags() const -> uint32_t { return this->feature_flags; }
+};
+
+class fss_message_command_ack : public fss_message {
+private:
+    /* The header id of the asset_command being acked, echoed back so the server
+     * can match the ack to the specific command it sent rather than "last
+     * command seen" (commands carry a per-connection monotonic header id). */
+    uint64_t acked_command_id{0};
+    /* The fss_asset_command value being acked. Redundant with the command the
+     * server already holds under acked_command_id, but cheap and useful for
+     * cross-checking and human-readable storage. */
+    uint8_t command{asset_command_unknown};
+    uint8_t outcome{command_ack_received};
+    /* The fss_asset_command-domain value of the higher-priority state that
+     * blocked actioning; asset_command_unknown (0) unless outcome is
+     * command_ack_superseded. */
+    uint8_t superseding_state{asset_command_unknown};
+    /* The responder's wall-clock reading (ms since epoch) when it built the ack. */
+    uint64_t timestamp{0};
+protected:
+    void unpackData(const std::shared_ptr<buf_len> &bl);
+    void packData(std::shared_ptr<buf_len> bl) override;
+public:
+    fss_message_command_ack(uint64_t t_acked_command_id, fss_asset_command t_command, fss_command_ack_outcome t_outcome,
+                            uint64_t t_timestamp);
+    fss_message_command_ack(uint64_t t_acked_command_id, fss_asset_command t_command, fss_command_ack_outcome t_outcome,
+                            fss_asset_command t_superseding_state, uint64_t t_timestamp);
+    fss_message_command_ack(uint64_t t_id, const std::shared_ptr<buf_len> &bl);
+    virtual auto getAckedCommandId() -> uint64_t;
+    virtual auto getCommand() -> fss_asset_command;
+    virtual auto getOutcome() -> fss_command_ack_outcome;
+    virtual auto getSupersedingState() -> fss_asset_command;
+    auto getTimeStamp() -> uint64_t override;
 };
 } // namespace transport
 } // namespace flight_safety_system

@@ -459,6 +459,73 @@ TEST_CASE("Asset Command Message Check - Altitude")
     REQUIRE(decoded_generic->getAltitude() == altitude);
 }
 
+TEST_CASE("Command Ack Message Check - Actioned")
+{
+    auto msg_id = static_cast<uint64_t>(random());
+    auto acked_command_id = static_cast<uint64_t>(random());
+    auto timestamp = static_cast<uint64_t>(random());
+
+    /* An ack for a command the FMU actioned. No higher-priority state was
+     * engaged, so the superseding state is unknown (the not-applicable value). */
+    auto msg = std::make_shared<flight_safety_system::transport::fss_message_command_ack>(
+        acked_command_id, flight_safety_system::transport::asset_command_rtl,
+        flight_safety_system::transport::command_ack_actioned, timestamp);
+    REQUIRE(msg->getType() == flight_safety_system::transport::message_type_command_ack);
+    REQUIRE(msg->getAckedCommandId() == acked_command_id);
+    REQUIRE(msg->getCommand() == flight_safety_system::transport::asset_command_rtl);
+    REQUIRE(msg->getOutcome() == flight_safety_system::transport::command_ack_actioned);
+    REQUIRE(msg->getSupersedingState() == flight_safety_system::transport::asset_command_unknown);
+    REQUIRE(msg->getTimeStamp() == timestamp);
+    /* Convert to bl and back */
+    msg->setId(msg_id);
+    auto bl = msg->getPacked();
+    REQUIRE(bl != nullptr);
+    auto decoded = std::make_shared<flight_safety_system::transport::fss_message_command_ack>(msg_id, bl);
+    REQUIRE(decoded->getType() == flight_safety_system::transport::message_type_command_ack);
+    REQUIRE(decoded->getId() == msg_id);
+    REQUIRE(decoded->getAckedCommandId() == acked_command_id);
+    REQUIRE(decoded->getCommand() == flight_safety_system::transport::asset_command_rtl);
+    REQUIRE(decoded->getOutcome() == flight_safety_system::transport::command_ack_actioned);
+    REQUIRE(decoded->getSupersedingState() == flight_safety_system::transport::asset_command_unknown);
+    REQUIRE(decoded->getTimeStamp() == timestamp);
+    auto decoded_generic = flight_safety_system::transport::fss_message::decode(bl);
+    REQUIRE(decoded_generic->getType() == flight_safety_system::transport::message_type_command_ack);
+    REQUIRE(decoded_generic->getId() == msg_id);
+    auto decoded_generic_ack =
+        std::dynamic_pointer_cast<flight_safety_system::transport::fss_message_command_ack>(decoded_generic);
+    REQUIRE(decoded_generic_ack != nullptr);
+    REQUIRE(decoded_generic_ack->getAckedCommandId() == acked_command_id);
+    REQUIRE(decoded_generic_ack->getOutcome() == flight_safety_system::transport::command_ack_actioned);
+    REQUIRE(decoded_generic_ack->getTimeStamp() == timestamp);
+}
+
+TEST_CASE("Command Ack Message Check - Superseded carries the higher-priority state")
+{
+    auto msg_id = static_cast<uint64_t>(random());
+    auto acked_command_id = static_cast<uint64_t>(random());
+    auto timestamp = static_cast<uint64_t>(random());
+
+    /* A manual command was received but not actioned because a low-battery RTL
+     * latch is engaged; the ack names that higher-priority state. */
+    auto msg = std::make_shared<flight_safety_system::transport::fss_message_command_ack>(
+        acked_command_id, flight_safety_system::transport::asset_command_manual,
+        flight_safety_system::transport::command_ack_superseded, flight_safety_system::transport::asset_command_rtl,
+        timestamp);
+    REQUIRE(msg->getCommand() == flight_safety_system::transport::asset_command_manual);
+    REQUIRE(msg->getOutcome() == flight_safety_system::transport::command_ack_superseded);
+    REQUIRE(msg->getSupersedingState() == flight_safety_system::transport::asset_command_rtl);
+
+    msg->setId(msg_id);
+    auto bl = msg->getPacked();
+    REQUIRE(bl != nullptr);
+    auto decoded = std::make_shared<flight_safety_system::transport::fss_message_command_ack>(msg_id, bl);
+    REQUIRE(decoded->getAckedCommandId() == acked_command_id);
+    REQUIRE(decoded->getCommand() == flight_safety_system::transport::asset_command_manual);
+    REQUIRE(decoded->getOutcome() == flight_safety_system::transport::command_ack_superseded);
+    REQUIRE(decoded->getSupersedingState() == flight_safety_system::transport::asset_command_rtl);
+    REQUIRE(decoded->getTimeStamp() == timestamp);
+}
+
 TEST_CASE("SMM Settings Message Check")
 {
     auto msg_id = static_cast<uint64_t>(random());
@@ -852,6 +919,27 @@ TEST_CASE("messages: truncated asset_command decodes coordinates as NaN")
     REQUIRE(decoded != nullptr);
     REQUIRE(std::isnan(decoded->getLatitude()));
     REQUIRE(std::isnan(decoded->getLongitude()));
+}
+
+TEST_CASE("messages: truncated command_ack decodes to safe defaults")
+{
+    using flight_safety_system::transport::message_type_command_ack;
+    /* Only the acked-command id (uint64) is present; the command, outcome and
+     * superseding-state bytes plus the timestamp are absent, so the reader must
+     * stop short rather than over-read and leave those fields at their safe
+     * defaults. */
+    constexpr size_t payload = sizeof(uint64_t);
+    constexpr size_t total = framed_header_len + payload;
+    auto bl = fss_test::make_framed_buffer(static_cast<uint16_t>(message_type_command_ack), 1,
+                                           std::string(payload, '\0'), total);
+    auto decoded = std::dynamic_pointer_cast<flight_safety_system::transport::fss_message_command_ack>(
+        flight_safety_system::transport::fss_message::decode(bl));
+    REQUIRE(decoded != nullptr);
+    REQUIRE(decoded->getAckedCommandId() == 0);
+    REQUIRE(decoded->getCommand() == flight_safety_system::transport::asset_command_unknown);
+    REQUIRE(decoded->getOutcome() == flight_safety_system::transport::command_ack_received);
+    REQUIRE(decoded->getSupersedingState() == flight_safety_system::transport::asset_command_unknown);
+    REQUIRE(decoded->getTimeStamp() == 0);
 }
 
 /* readUint32 failure (line 129): version message truncated after the two
