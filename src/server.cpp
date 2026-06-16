@@ -234,6 +234,12 @@ auto main(int argc, char *argv[]) -> int
                 [&](const flight_safety_system::server::search_status_write &w) -> void {
                     dbc->recordSearchStatus(w.asset_id, w.search_id, w.completed, w.total);
                 },
+                [&](const flight_safety_system::server::command_dispatch_write &w) -> void {
+                    dbc->recordCommandDispatch(w.command_dbid, w.dispatch_id);
+                },
+                [&](const flight_safety_system::server::command_ack_write &w) -> void {
+                    dbc->recordCommandAck(w.dispatch_id, w.ack_state, w.ack_timestamp, w.ack_reason);
+                },
             },
             task);
     };

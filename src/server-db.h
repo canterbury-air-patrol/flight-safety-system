@@ -16,6 +16,20 @@ void db_search_status_create_entry(const char *conn, unsigned long long asset_id
 void db_position_create_entry(const char *conn, unsigned long long asset_id, double latitude, double longitude,
                               int altitude);
 
+/* Records the per-connection message id the server stamped onto the dispatched
+ * command, on the assets_assetcommand row identified by its primary key
+ * (command_dbid). Lets a later command-ack be matched back to this specific
+ * command via dispatch_id == acked_command_id. */
+void db_command_set_dispatch_id(const char *conn, unsigned long long command_dbid, unsigned long long dispatch_id);
+
+/* Updates the ack fields on the assets_assetcommand row whose dispatch_id equals
+ * the acked id. ack_state is the fss_command_ack_outcome int, ack_superseded_by
+ * the fss_command_ack_reason int, ack_timestamp the FMU wall-clock ms. The
+ * update never lowers an already-terminal ack_state back to a non-terminal one
+ * (a late "received" cannot clobber a settled outcome). */
+void db_command_record_ack(const char *conn, unsigned long long dispatch_id, int ack_state,
+                           unsigned long long ack_timestamp, int ack_superseded_by);
+
 struct asset_command_s {
     char *command;
     unsigned long long timestamp;

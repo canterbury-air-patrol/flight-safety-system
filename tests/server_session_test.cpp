@@ -112,6 +112,12 @@ auto make_mock_writer(fss_test::MockDatabase &mock) -> std::shared_ptr<fss::serv
                        [&](const fss::server::search_status_write &w) -> void {
                            mock.recordSearchStatus(w.asset_id, w.search_id, w.completed, w.total);
                        },
+                       [&](const fss::server::command_dispatch_write &w) -> void {
+                           mock.recordCommandDispatch(w.command_dbid, w.dispatch_id);
+                       },
+                       [&](const fss::server::command_ack_write &w) -> void {
+                           mock.recordCommandAck(w.dispatch_id, w.ack_state, w.ack_timestamp, w.ack_reason);
+                       },
                    },
                    task);
     };
@@ -1391,6 +1397,59 @@ TEST_CASE("session: system_status message is forwarded to db writer")
     REQUIRE(fss_test::wait_for([&]() { return !mock.statuses.empty(); }));
     REQUIRE(mock.statuses.front().asset_id == asset_id);
     REQUIRE(mock.statuses.front().bat_percent == 80);
+}
+
+TEST_CASE("session: command_ack is stored when the capability is negotiated")
+{
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 13;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    /* The peer negotiated command-ack, so the server honours the ack. */
+    conn->setNegotiatedFeatureFlags(fss::transport::FSS_FEATURE_COMMAND_ACK);
+    NullClientHandler handler;
+
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+
+    constexpr uint64_t acked_id = 0xABCDEF;
+    constexpr uint64_t ack_ts = 1750000000000ULL;
+    auto ack = std::make_shared<fss::transport::fss_message_command_ack>(acked_id, fss::transport::asset_command_manual,
+                                                                         fss::transport::command_ack_superseded,
+                                                                         fss::transport::supersede_low_battery, ack_ts);
+    session->processMessage(ack);
+
+    REQUIRE(fss_test::wait_for([&]() { return !mock.acks.empty(); }));
+    REQUIRE(mock.acks.front().dispatch_id == acked_id);
+    REQUIRE(mock.acks.front().ack_state == static_cast<uint8_t>(fss::transport::command_ack_superseded));
+    REQUIRE(mock.acks.front().ack_timestamp == ack_ts);
+    REQUIRE(mock.acks.front().ack_reason == static_cast<uint8_t>(fss::transport::supersede_low_battery));
+}
+
+TEST_CASE("session: command_ack is dropped when the capability is not negotiated")
+{
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 13;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    /* No negotiated flags: a conforming client never sends an ack, so one that
+     * arrives is from a misbehaving peer and must be ignored. */
+    NullClientHandler handler;
+
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+
+    auto ack = std::make_shared<fss::transport::fss_message_command_ack>(
+        uint64_t{0xABCDEF}, fss::transport::asset_command_rtl, fss::transport::command_ack_actioned, uint64_t{1});
+    session->processMessage(ack);
+
+    /* Give the async writer a brief chance to run, then confirm nothing was
+     * stored. A short timeout suffices: a real write would land near-instantly. */
+    REQUIRE_FALSE(fss_test::wait_for([&]() { return !mock.acks.empty(); }, std::chrono::milliseconds(200)));
 }
 
 TEST_CASE("session: search_status message is forwarded to db writer")

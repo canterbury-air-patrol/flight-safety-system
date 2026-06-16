@@ -93,6 +93,15 @@ public:
     virtual void recordRtt(uint64_t asset_id, uint64_t rtt_ms) = 0;
     virtual void recordStatus(uint64_t asset_id, uint8_t bat_percent, uint32_t bat_mah_used, double bat_voltage) = 0;
     virtual void recordSearchStatus(uint64_t asset_id, uint64_t search_id, uint64_t completed, uint64_t total) = 0;
+    /* Records the dispatch id (the per-connection message id the server stamped
+     * on the command) against the command row, so a later ack can be matched to
+     * this specific command. */
+    virtual void recordCommandDispatch(uint64_t command_dbid, uint64_t dispatch_id) = 0;
+    /* Stores a command ack against the row whose dispatch id matches; never
+     * regresses an already-terminal outcome. ack_state/ack_reason are the
+     * fss_command_ack_outcome/fss_command_ack_reason ints. */
+    virtual void recordCommandAck(uint64_t dispatch_id, uint8_t ack_state, uint64_t ack_timestamp,
+                                  uint8_t ack_reason) = 0;
     virtual auto getCommand(uint64_t asset_id) -> std::shared_ptr<asset_command> = 0;
     virtual auto getActiveServers() -> std::vector<fss_server_details> = 0;
     virtual auto getSmmSettings(uint64_t asset_id) -> std::shared_ptr<smm_settings> = 0;
@@ -138,6 +147,8 @@ public:
     void recordRtt(uint64_t asset_id, uint64_t rtt_ms) override;
     void recordStatus(uint64_t asset_id, uint8_t bat_percent, uint32_t bat_mah_used, double bat_voltage) override;
     void recordSearchStatus(uint64_t asset_id, uint64_t search_id, uint64_t completed, uint64_t total) override;
+    void recordCommandDispatch(uint64_t command_dbid, uint64_t dispatch_id) override;
+    void recordCommandAck(uint64_t dispatch_id, uint8_t ack_state, uint64_t ack_timestamp, uint8_t ack_reason) override;
     auto getCommand(uint64_t asset_id) -> std::shared_ptr<asset_command> override;
     auto getActiveServers() -> std::vector<fss_server_details> override;
     auto getSmmSettings(uint64_t asset_id) -> std::shared_ptr<smm_settings> override;

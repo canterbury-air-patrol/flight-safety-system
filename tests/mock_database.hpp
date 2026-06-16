@@ -47,11 +47,23 @@ public:
         uint64_t completed;
         uint64_t total;
     };
+    struct recorded_dispatch {
+        uint64_t command_dbid;
+        uint64_t dispatch_id;
+    };
+    struct recorded_ack {
+        uint64_t dispatch_id;
+        uint8_t ack_state;
+        uint64_t ack_timestamp;
+        uint8_t ack_reason;
+    };
 
     std::vector<recorded_rtt> rtts{};
     std::vector<recorded_pos> positions{};
     std::vector<recorded_status> statuses{};
     std::vector<recorded_search> searches{};
+    std::vector<recorded_dispatch> dispatches{};
+    std::vector<recorded_ack> acks{};
 
     MockDatabase() = default;
     MockDatabase(const MockDatabase &) = delete;
@@ -81,6 +93,16 @@ public:
     void recordSearchStatus(uint64_t asset_id, uint64_t search_id, uint64_t completed, uint64_t total) override
     {
         searches.push_back({asset_id, search_id, completed, total});
+    }
+
+    void recordCommandDispatch(uint64_t command_dbid, uint64_t dispatch_id) override
+    {
+        dispatches.push_back({command_dbid, dispatch_id});
+    }
+
+    void recordCommandAck(uint64_t dispatch_id, uint8_t ack_state, uint64_t ack_timestamp, uint8_t ack_reason) override
+    {
+        acks.push_back({dispatch_id, ack_state, ack_timestamp, ack_reason});
     }
 
     auto getCommand(uint64_t asset_id) -> std::shared_ptr<flight_safety_system::server::asset_command> override
