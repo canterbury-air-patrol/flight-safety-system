@@ -251,6 +251,11 @@ void fss::server::fss_client::sendCommand()
                 break;
         }
         this->getConnection()->sendMsg(msg);
+        /* sendMsg stamped the per-connection message id into msg; record it
+         * against the command row (cached_asset_id is non-zero here — the
+         * early return above guarantees it) so a later ack, which echoes this id
+         * as acked_command_id, can be matched back to this specific command. */
+        this->writer->enqueue(command_dispatch_write{ac->getDBId(), msg->getId()});
         FSS_LOG_INFO("server", "dispatched command dbid=" << ac->getDBId() << " to " << this->name);
     }
 }
@@ -785,15 +790,24 @@ void fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss
                 }
             }
             break;
-            /* message_type_command_ack (todo/17 item 1): an aircraft client
-             * acking a command we sent. The message type and wire format exist,
-             * but routing to operators and storage against the asset land in a
-             * follow-up commit (the storage shape is still being agreed). Until
-             * then FSS_FEATURE_COMMAND_ACK is deliberately NOT in
-             * FSS_SUPPORTED_FEATURES, so a conforming client never negotiates the
-             * capability and never sends this; dropping a stray ack is safe and
-             * groups with the other message types the server does not act on. */
-            case fss::transport::message_type_command_ack:
+            case fss::transport::message_type_command_ack: {
+                /* An aircraft client acking a command we sent (todo/17 item 1).
+                 * Only honour it when the peer negotiated the capability — a
+                 * conforming client never sends one otherwise, so an ack without
+                 * the flag is from a misbehaving/forged peer and is dropped. */
+                if ((this->getConnection()->getNegotiatedFeatureFlags() & fss::transport::FSS_FEATURE_COMMAND_ACK) == 0)
+                {
+                    break;
+                }
+                auto ack_msg = std::dynamic_pointer_cast<fss::transport::fss_message_command_ack>(msg);
+                if (ack_msg != nullptr)
+                {
+                    this->writer->enqueue(
+                        command_ack_write{ack_msg->getAckedCommandId(), static_cast<uint8_t>(ack_msg->getOutcome()),
+                                          ack_msg->getTimeStamp(), static_cast<uint8_t>(ack_msg->getReason())});
+                }
+            }
+            break;
             case fss::transport::message_type_command:
             case fss::transport::message_type_server_list:
             case fss::transport::message_type_smm_settings: break;

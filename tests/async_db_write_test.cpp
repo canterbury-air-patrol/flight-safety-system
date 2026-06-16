@@ -41,13 +41,19 @@ struct CapturingSink {
             std::this_thread::sleep_for(delay);
         }
         std::lock_guard<std::mutex> guard(mtx);
-        std::visit(fss::server::overloaded{
-                       [&](const fss::server::rtt_write &w) -> void { asset_ids.push_back(w.asset_id); },
-                       [&](const fss::server::position_write &w) -> void { asset_ids.push_back(w.asset_id); },
-                       [&](const fss::server::status_write &w) -> void { asset_ids.push_back(w.asset_id); },
-                       [&](const fss::server::search_status_write &w) -> void { asset_ids.push_back(w.asset_id); },
-                   },
-                   task);
+        std::visit(
+            fss::server::overloaded{
+                [&](const fss::server::rtt_write &w) -> void { asset_ids.push_back(w.asset_id); },
+                [&](const fss::server::position_write &w) -> void { asset_ids.push_back(w.asset_id); },
+                [&](const fss::server::status_write &w) -> void { asset_ids.push_back(w.asset_id); },
+                [&](const fss::server::search_status_write &w) -> void { asset_ids.push_back(w.asset_id); },
+                /* Command writes are keyed by command/dispatch id, not
+                 * asset id; these tests don't enqueue them, but the visit
+                 * must cover every alternative, so record the id present. */
+                [&](const fss::server::command_dispatch_write &w) -> void { asset_ids.push_back(w.command_dbid); },
+                [&](const fss::server::command_ack_write &w) -> void { asset_ids.push_back(w.dispatch_id); },
+            },
+            task);
         count.fetch_add(1);
     }
 

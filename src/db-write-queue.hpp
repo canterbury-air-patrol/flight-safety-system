@@ -35,8 +35,23 @@ struct search_status_write {
     uint64_t completed;
     uint64_t total;
 };
+/* The dispatch id (per-connection message id) stamped on a command, recorded
+ * against the command row so a later ack can be matched to it. */
+struct command_dispatch_write {
+    uint64_t command_dbid;
+    uint64_t dispatch_id;
+};
+/* A command ack to store against the row whose dispatch id matches. ack_state is
+ * the fss_command_ack_outcome int, ack_reason the fss_command_ack_reason int. */
+struct command_ack_write {
+    uint64_t dispatch_id;
+    uint8_t ack_state;
+    uint64_t ack_timestamp;
+    uint8_t ack_reason;
+};
 
-using db_write_task = std::variant<rtt_write, position_write, status_write, search_status_write>;
+using db_write_task = std::variant<rtt_write, position_write, status_write, search_status_write, command_dispatch_write,
+                                   command_ack_write>;
 using db_write_sink = std::function<void(const db_write_task &)>;
 
 /* C++17 overload helper for std::visit. */

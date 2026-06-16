@@ -45,6 +45,12 @@ auto make_writer(fss_test::MockDatabase &mock) -> std::shared_ptr<fss::server::d
                        [&](const fss::server::search_status_write &w) -> void {
                            mock.recordSearchStatus(w.asset_id, w.search_id, w.completed, w.total);
                        },
+                       [&](const fss::server::command_dispatch_write &w) -> void {
+                           mock.recordCommandDispatch(w.command_dbid, w.dispatch_id);
+                       },
+                       [&](const fss::server::command_ack_write &w) -> void {
+                           mock.recordCommandAck(w.dispatch_id, w.ack_state, w.ack_timestamp, w.ack_reason);
+                       },
                    },
                    task);
     };
