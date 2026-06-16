@@ -51,6 +51,17 @@ public:
     virtual auto getAssetName() -> std::string;
     virtual void serverRequiresReconnect(fss_server *server);
     virtual void updateServers(const std::shared_ptr<flight_safety_system::transport::fss_message_server_list> &msg);
+    /* Called for every command, with the originating server (the connection the
+     * command arrived on). A subclass that needs to reply to that specific
+     * connection — e.g. to send a command-ack, whose id and negotiated feature
+     * flags are per-connection — overrides this and uses
+     * origin->sendMsg()/origin->getConnection(). The default delegates to the
+     * connection-agnostic handleCommand() below, so a subclass that only cares
+     * about the command (the common case) overrides that one and is unaffected.
+     * Distinct name rather than an overload so neither hides the other. */
+    virtual void
+    handleCommandFrom(const std::shared_ptr<flight_safety_system::transport::fss_message_asset_command> &msg,
+                      flight_safety_system::client_ssl::fss_server *origin);
     virtual void handleCommand(const std::shared_ptr<flight_safety_system::transport::fss_message_asset_command> &msg
                                __attribute__((unused)));
     virtual void

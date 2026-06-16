@@ -306,6 +306,16 @@ void flight_safety_system::client_ssl::fss_client::connectionStatusChange(
 {
 }
 
+void flight_safety_system::client_ssl::fss_client::handleCommandFrom(
+    const std::shared_ptr<flight_safety_system::transport::fss_message_asset_command> &msg,
+    flight_safety_system::client_ssl::fss_server *origin __attribute__((unused)))
+{
+    /* Default: ignore the originating connection and fall back to the
+     * connection-agnostic handler, so a subclass that only overrode
+     * handleCommand() still sees the command. */
+    this->handleCommand(msg);
+}
+
 void flight_safety_system::client_ssl::fss_client::handleCommand(
     const std::shared_ptr<flight_safety_system::transport::fss_message_asset_command> &msg __attribute__((unused)))
 {
@@ -549,7 +559,10 @@ void flight_safety_system::client_ssl::fss_server::processMessage(
                     std::dynamic_pointer_cast<flight_safety_system::transport::fss_message_asset_command>(msg);
                 if (command_msg != nullptr)
                 {
-                    this->getClient()->handleCommand(command_msg);
+                    /* Pass the originating server so an override can reply to
+                     * this specific connection (command-ack id and negotiated
+                     * feature flags are per-connection). */
+                    this->getClient()->handleCommandFrom(command_msg, this);
                 }
             }
             break;
