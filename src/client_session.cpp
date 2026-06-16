@@ -785,6 +785,15 @@ void fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss
                 }
             }
             break;
+            /* message_type_command_ack (todo/17 item 1): an aircraft client
+             * acking a command we sent. The message type and wire format exist,
+             * but routing to operators and storage against the asset land in a
+             * follow-up commit (the storage shape is still being agreed). Until
+             * then FSS_FEATURE_COMMAND_ACK is deliberately NOT in
+             * FSS_SUPPORTED_FEATURES, so a conforming client never negotiates the
+             * capability and never sends this; dropping a stray ack is safe and
+             * groups with the other message types the server does not act on. */
+            case fss::transport::message_type_command_ack:
             case fss::transport::message_type_command:
             case fss::transport::message_type_server_list:
             case fss::transport::message_type_smm_settings: break;

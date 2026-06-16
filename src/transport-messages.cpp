@@ -76,6 +76,21 @@ static auto decode_asset_command(uint8_t cmd) -> flight_safety_system::transport
     }
 }
 
+static auto decode_command_ack_outcome(uint8_t outcome) -> flight_safety_system::transport::fss_command_ack_outcome
+{
+    using namespace flight_safety_system::transport;
+    switch (outcome)
+    {
+        case static_cast<uint8_t>(command_ack_received): return command_ack_received;
+        case static_cast<uint8_t>(command_ack_actioned): return command_ack_actioned;
+        case static_cast<uint8_t>(command_ack_superseded): return command_ack_superseded;
+        case static_cast<uint8_t>(command_ack_rejected): return command_ack_rejected;
+        /* An unrecognised outcome from a newer peer degrades to "received": we
+         * know the command reached the asset but cannot interpret the result. */
+        default: return command_ack_received;
+    }
+}
+
 static void packStringRaw(const std::shared_ptr<flight_safety_system::transport::buf_len> &bl, const char *data,
                           size_t str_len)
 {
@@ -983,6 +998,87 @@ auto flight_safety_system::transport::fss_message_asset_command::getTimeStamp() 
     return this->timestamp;
 }
 
+// NOLINTBEGIN(bugprone-easily-swappable-parameters)
+flight_safety_system::transport::fss_message_command_ack::fss_message_command_ack(uint64_t t_acked_command_id,
+                                                                                  fss_asset_command t_command,
+                                                                                  fss_command_ack_outcome t_outcome,
+                                                                                  uint64_t t_timestamp)
+    : fss_message(message_type_command_ack), acked_command_id(t_acked_command_id),
+      command(static_cast<uint8_t>(t_command)), outcome(static_cast<uint8_t>(t_outcome)),
+      superseding_state(static_cast<uint8_t>(asset_command_unknown)), timestamp(t_timestamp)
+{
+}
+
+flight_safety_system::transport::fss_message_command_ack::fss_message_command_ack(uint64_t t_acked_command_id,
+                                                                                  fss_asset_command t_command,
+                                                                                  fss_command_ack_outcome t_outcome,
+                                                                                  fss_asset_command t_superseding_state,
+                                                                                  uint64_t t_timestamp)
+    : fss_message(message_type_command_ack), acked_command_id(t_acked_command_id),
+      command(static_cast<uint8_t>(t_command)), outcome(static_cast<uint8_t>(t_outcome)),
+      superseding_state(static_cast<uint8_t>(t_superseding_state)), timestamp(t_timestamp)
+{
+}
+// NOLINTEND(bugprone-easily-swappable-parameters)
+
+flight_safety_system::transport::fss_message_command_ack::fss_message_command_ack(uint64_t t_id,
+                                                                                  const std::shared_ptr<buf_len> &bl)
+    : fss_message(t_id, message_type_command_ack)
+{
+    this->unpackData(bl);
+}
+
+void flight_safety_system::transport::fss_message_command_ack::packData(std::shared_ptr<buf_len> bl)
+{
+    uint64_t acked = fss_htobe64(this->acked_command_id);
+    uint64_t ts = fss_htobe64(this->timestamp);
+    bl->addData(&acked, sizeof(uint64_t));
+    bl->addData(&this->command, sizeof(uint8_t));
+    bl->addData(&this->outcome, sizeof(uint8_t));
+    bl->addData(&this->superseding_state, sizeof(uint8_t));
+    bl->addData(&ts, sizeof(uint64_t));
+}
+
+void flight_safety_system::transport::fss_message_command_ack::unpackData(const std::shared_ptr<buf_len> &bl)
+{
+    BufferReader reader(bl->getData(), bl->getLength(), this->headerLength());
+    this->acked_command_id = 0;
+    this->command = static_cast<uint8_t>(asset_command_unknown);
+    this->outcome = static_cast<uint8_t>(command_ack_received);
+    this->superseding_state = static_cast<uint8_t>(asset_command_unknown);
+    this->timestamp = 0;
+    reader.readUint64(this->acked_command_id);
+    reader.readUint8(this->command);
+    reader.readUint8(this->outcome);
+    reader.readUint8(this->superseding_state);
+    reader.readUint64(this->timestamp);
+}
+
+auto flight_safety_system::transport::fss_message_command_ack::getAckedCommandId() -> uint64_t
+{
+    return this->acked_command_id;
+}
+
+auto flight_safety_system::transport::fss_message_command_ack::getCommand() -> fss_asset_command
+{
+    return decode_asset_command(this->command);
+}
+
+auto flight_safety_system::transport::fss_message_command_ack::getOutcome() -> fss_command_ack_outcome
+{
+    return decode_command_ack_outcome(this->outcome);
+}
+
+auto flight_safety_system::transport::fss_message_command_ack::getSupersedingState() -> fss_asset_command
+{
+    return decode_asset_command(this->superseding_state);
+}
+
+auto flight_safety_system::transport::fss_message_command_ack::getTimeStamp() -> uint64_t
+{
+    return this->timestamp;
+}
+
 void flight_safety_system::transport::fss_message_smm_settings::packData(std::shared_ptr<buf_len> bl)
 {
     packString(bl, this->getServerURL());
@@ -1221,6 +1317,7 @@ auto flight_safety_system::transport::fss_message::decode(const std::shared_ptr<
             break;
         case message_type_identity_required: msg = std::make_shared<fss_message_identity_required>(msg_id, bl); break;
         case message_type_version: msg = std::make_shared<fss_message_version>(msg_id, bl); break;
+        case message_type_command_ack: msg = std::make_shared<fss_message_command_ack>(msg_id, bl); break;
     }
 
     if (msg != nullptr && msg->getType() != type)
