@@ -129,6 +129,47 @@ TEST_CASE("client: processMessage dispatches command to handleCommand")
     REQUIRE(client.handle_command_called);
 }
 
+TEST_CASE("client: handleCommandFrom receives the originating server")
+{
+    /* A client that overrides the connection-aware handler captures the origin
+     * so it can reply to that specific connection (the command-ack path). */
+    class OriginTrackingClient : public fss::client_ssl::fss_client {
+    public:
+        OriginTrackingClient() : fss_client() {}
+        OriginTrackingClient(const OriginTrackingClient &) = delete;
+        OriginTrackingClient(OriginTrackingClient &&) = delete;
+        auto operator=(const OriginTrackingClient &) -> OriginTrackingClient & = delete;
+        auto operator=(OriginTrackingClient &&) -> OriginTrackingClient & = delete;
+        ~OriginTrackingClient() override = default;
+        fss::client_ssl::fss_server *seen_origin{nullptr};
+        void handleCommandFrom(const std::shared_ptr<fss::transport::fss_message_asset_command> &,
+                               fss::client_ssl::fss_server *origin) override
+        {
+            seen_origin = origin;
+        }
+    };
+    OriginTrackingClient client;
+    auto server = std::make_shared<fss::client_ssl::fss_server>(&client, "localhost", uint16_t{0}, CA_PUBLIC_FILE,
+                                                                CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE);
+    auto msg =
+        std::make_shared<fss::transport::fss_message_asset_command>(fss::transport::asset_command_rtl, uint64_t{0});
+    server->processMessage(msg);
+    REQUIRE(client.seen_origin == server.get());
+}
+
+TEST_CASE("client: handleCommandFrom default delegates to handleCommand")
+{
+    /* A client that only overrides the connection-agnostic handler still sees
+     * commands: the default handleCommandFrom delegates to handleCommand. */
+    TrackingClient client;
+    auto server = std::make_shared<fss::client_ssl::fss_server>(&client, "localhost", uint16_t{0}, CA_PUBLIC_FILE,
+                                                                CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE);
+    auto msg =
+        std::make_shared<fss::transport::fss_message_asset_command>(fss::transport::asset_command_hold, uint64_t{0});
+    server->processMessage(msg);
+    REQUIRE(client.handle_command_called);
+}
+
 TEST_CASE("client: processMessage dispatches smm_settings to handleSMMSettings")
 {
     TrackingClient client;
