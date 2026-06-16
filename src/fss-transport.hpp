@@ -134,17 +134,19 @@ using fss_command_ack_outcome = enum fss_command_ack_outcome_e {
  * latch BOTH resolve to RTL, so a command-domain value collapses the very
  * distinction the operator UI needs ("superseded by LOW-BATTERY RTL" vs comms).
  * This dedicated enum keeps them apart. supersede_none (0) is the
- * not-applicable value carried whenever the outcome is not command_ack_superseded. */
+ * not-applicable value carried whenever the outcome is not command_ack_superseded.
+ *
+ * Only the autonomous safety latches that can pre-empt an operator command are
+ * listed. Flight-termination is deliberately NOT a supersede source: it is an
+ * operator-issued command in its own right, not an automatic latch that quietly
+ * overrides another command — a terminate is acked on its own merits, not as the
+ * reason a different command was dropped. */
 using fss_command_ack_reason = enum fss_command_ack_reason_e {
     supersede_none = 0,
-    /* Flight-termination latch (highest FMU priority). */
-    supersede_terminate = 1,
     /* Low-battery return-to-launch latch. */
-    supersede_low_battery = 2,
+    supersede_low_battery = 1,
     /* Comms-loss failsafe latch (also an RTL, distinct from low-battery). */
-    supersede_comms_loss = 3,
-    /* A manual-override / pilot-in-command state blocking the command. */
-    supersede_manual_override = 4,
+    supersede_comms_loss = 2,
 };
 
 using fss_asset_command = enum fss_asset_command_e {
