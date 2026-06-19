@@ -52,7 +52,15 @@ CREATE TABLE assets_assetcommand (
     command     VARCHAR(8) NOT NULL,
     position    GEOGRAPHY(POINT, 4326),
     altitude    INTEGER,
-    timestamp   TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+    timestamp   TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    -- Command-acknowledgement columns (mirror fss-web migration 0008; the
+    -- server writes these, see todo/17 item 1). dispatch_id is the stamped
+    -- per-connection message id; the ack_* fields are filled when the asset
+    -- acks. All nullable: a command with no ack yet leaves them NULL.
+    dispatch_id       BIGINT,
+    ack_state         SMALLINT,
+    ack_timestamp     BIGINT,
+    ack_superseded_by SMALLINT
 );
 
 CREATE TABLE config_smmconfig (
