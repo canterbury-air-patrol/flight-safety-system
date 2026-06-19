@@ -34,9 +34,27 @@ static auto commandName(fss::transport::fss_asset_command cmd) -> std::string
 class logging_client : public fss::client_ssl::fss_client {
 public:
     using fss::client_ssl::fss_client::fss_client;
-    void handleCommand(const std::shared_ptr<fss::transport::fss_message_asset_command> &msg) override
+    void handleCommandFrom(const std::shared_ptr<fss::transport::fss_message_asset_command> &msg,
+                           fss::client_ssl::fss_server *origin) override
     {
         std::cout << "RCVD_CMD: " << commandName(msg->getCommand()) << std::endl;
+        /* When the server negotiated command-ack, reply on the originating
+         * connection with the two-phase ack (received, then actioned) so the
+         * server's routing+storage path is exercised end to end. A real FMU
+         * picks the terminal outcome from its state machine; this example always
+         * reports "actioned" since it has no flight logic. */
+        auto conn = origin->getConnection();
+        if (conn == nullptr || (conn->getNegotiatedFeatureFlags() & fss::transport::FSS_FEATURE_COMMAND_ACK) == 0)
+        {
+            return;
+        }
+        const uint64_t acked_id = msg->getId();
+        const auto command = msg->getCommand();
+        origin->sendMsg(std::make_shared<fss::transport::fss_message_command_ack>(
+            acked_id, command, fss::transport::command_ack_received, fss::fss_current_timestamp()));
+        origin->sendMsg(std::make_shared<fss::transport::fss_message_command_ack>(
+            acked_id, command, fss::transport::command_ack_actioned, fss::fss_current_timestamp()));
+        std::cout << "SENT_ACK: " << commandName(command) << std::endl;
     }
 };
 
