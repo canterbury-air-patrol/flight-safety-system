@@ -147,6 +147,12 @@ using fss_command_ack_reason = enum fss_command_ack_reason_e {
     supersede_low_battery = 1,
     /* Comms-loss failsafe latch (also an RTL, distinct from low-battery). */
     supersede_comms_loss = 2,
+    /* A newer operator command replaced this one before it was actioned. Unlike
+     * the latches above this is not an autonomous safety override but the normal
+     * "operator changed their mind" case; the FMU acks the stale command with
+     * this reason so the UI shows it was dropped in favour of a later command,
+     * not silently lost. */
+    supersede_newer_command = 3,
 };
 
 using fss_asset_command = enum fss_asset_command_e {

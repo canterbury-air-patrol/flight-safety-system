@@ -528,6 +528,33 @@ TEST_CASE("Command Ack Message Check - Superseded carries the reason")
     REQUIRE(decoded->getTimeStamp() == timestamp);
 }
 
+TEST_CASE("Command Ack Message Check - Superseded by a newer operator command")
+{
+    auto msg_id = static_cast<uint64_t>(random());
+    auto acked_command_id = static_cast<uint64_t>(random());
+    auto timestamp = static_cast<uint64_t>(random());
+
+    /* A stale command was dropped because the operator issued a newer one before
+     * it was actioned. This is the non-latch supersede reason, distinct from the
+     * autonomous safety latches; it must survive the round trip so the UI can
+     * show "replaced by a newer command" rather than a generic drop. */
+    auto msg = std::make_shared<flight_safety_system::transport::fss_message_command_ack>(
+        acked_command_id, flight_safety_system::transport::asset_command_goto,
+        flight_safety_system::transport::command_ack_superseded,
+        flight_safety_system::transport::supersede_newer_command, timestamp);
+    REQUIRE(msg->getOutcome() == flight_safety_system::transport::command_ack_superseded);
+    REQUIRE(msg->getReason() == flight_safety_system::transport::supersede_newer_command);
+
+    msg->setId(msg_id);
+    auto bl = msg->getPacked();
+    REQUIRE(bl != nullptr);
+    auto decoded = std::make_shared<flight_safety_system::transport::fss_message_command_ack>(msg_id, bl);
+    REQUIRE(decoded->getAckedCommandId() == acked_command_id);
+    REQUIRE(decoded->getOutcome() == flight_safety_system::transport::command_ack_superseded);
+    REQUIRE(decoded->getReason() == flight_safety_system::transport::supersede_newer_command);
+    REQUIRE(decoded->getTimeStamp() == timestamp);
+}
+
 TEST_CASE("Command Ack Message Check - No-op (already in the commanded state)")
 {
     auto msg_id = static_cast<uint64_t>(random());

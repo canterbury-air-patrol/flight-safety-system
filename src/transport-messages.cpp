@@ -100,6 +100,7 @@ static auto decode_command_ack_reason(uint8_t reason) -> flight_safety_system::t
         case static_cast<uint8_t>(supersede_none): return supersede_none;
         case static_cast<uint8_t>(supersede_low_battery): return supersede_low_battery;
         case static_cast<uint8_t>(supersede_comms_loss): return supersede_comms_loss;
+        case static_cast<uint8_t>(supersede_newer_command): return supersede_newer_command;
         /* An unrecognised reason from a newer peer degrades to "none" rather
          * than inventing a cause the operator might act on. */
         default: return supersede_none;
