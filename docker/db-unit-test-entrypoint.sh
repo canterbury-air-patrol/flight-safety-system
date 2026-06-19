@@ -25,6 +25,10 @@ INSERT INTO config_assetconfig (asset_id, smm_id, smm_login, smm_password)
 
 INSERT INTO config_serverconfig (address, client_port, active, name, config_port, https)
     VALUES ('fss.example.com', 20202, true, 'test-server', 8090, false);
+
+-- A pending command for test-asset, so the getCommand DB test finds a row.
+INSERT INTO assets_assetcommand (asset_id, command)
+    SELECT a.id, 'RTL' FROM assets_asset a WHERE a.name = 'test-asset';
 SQL
 
 exec /code/tests/all_test "$@"
