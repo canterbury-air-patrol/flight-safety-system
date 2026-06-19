@@ -213,3 +213,89 @@ def test_ack_does_not_cross_assets_on_dispatch_id_collision(
         f"ack_timestamp={a_ts}, ack_superseded_by={a_reason}; server log:\n"
         + server_proc["log"].read_text(errors="replace")
     )
+
+
+@pytest.mark.requires_docker
+def test_ack_updates_only_the_latest_row_on_cross_session_dispatch_id_reuse(
+    db_conn, fake_client, server_proc
+):
+    """Within a single asset, an ack must update only the newest command sharing
+    a dispatch_id, not an old already-settled one from a prior session.
+
+    dispatch_id is the connection's last_msg_id, which resets to 0 on every
+    reconnect, so the same asset accumulates several historical command rows that
+    share a dispatch_id across sessions. The ack is for the command just
+    dispatched on the current connection — the latest row — so the UPDATE targets
+    the newest match. An ack must never reach back and rewrite a long-settled
+    historical row that happens to carry the same dispatch_id.
+
+    We give the asset one live client, seed an OLD command row with a terminal
+    "superseded" sentinel and an old timestamp at the dispatch_id the next live
+    command will use, then dispatch a NEW command that lands on that same
+    dispatch_id. The client's ack must advance only the NEW row and leave the OLD
+    sentinel untouched.
+    """
+    with db_conn.cursor() as cur:
+        cur.execute("INSERT INTO assets_asset (name) VALUES ('test1') RETURNING id")
+        asset = cur.fetchone()[0]
+    db_conn.commit()
+
+    fake_client("test1")
+    time.sleep(5)
+
+    # First dispatch: learn the connection's current dispatch_id.
+    first = _dispatch_rtl(db_conn, asset)
+    first_dispatch = _poll_field(db_conn, first, "dispatch_id", timeout=10.0)
+    assert first_dispatch is not None, (
+        f"first command dbid={first} never recorded a dispatch_id; server log:\n"
+        + server_proc["log"].read_text(errors="replace")
+    )
+    _poll_field(db_conn, first, "ack_state", timeout=10.0)
+
+    # Seed an OLD already-acked row for the SAME asset at the dispatch_id the next
+    # live command will use, with an explicitly older timestamp so the newest-row
+    # subselect must not pick it.
+    collide_dispatch = first_dispatch + 1
+    sentinel_ts = 222
+    sentinel_reason = 3
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO assets_assetcommand "
+            "(asset_id, command, position, altitude, timestamp, dispatch_id, "
+            " ack_state, ack_timestamp, ack_superseded_by) "
+            "VALUES (%s, 'RTL', ST_SetSRID(ST_MakePoint(0, 0), 4326)::geography, 0, "
+            "        NOW() - INTERVAL '1 hour', %s, %s, %s, %s) RETURNING id",
+            (asset, collide_dispatch, ACK_STATE_SUPERSEDED, sentinel_ts, sentinel_reason),
+        )
+        old_dbid = cur.fetchone()[0]
+    db_conn.commit()
+
+    # New dispatch: lands on collide_dispatch with a fresh (newer) timestamp.
+    new_dbid = _dispatch_rtl(db_conn, asset)
+    new_dispatch = _poll_field(db_conn, new_dbid, "dispatch_id", timeout=10.0)
+    new_state = _poll_field(db_conn, new_dbid, "ack_state", timeout=10.0)
+
+    assert new_dispatch == collide_dispatch, (
+        f"setup failed to reuse dispatch_id: old row={collide_dispatch} but the new "
+        f"command got dispatch_id={new_dispatch}"
+    )
+    # The new (latest) row is the one the ack must land on.
+    assert new_state == ACK_STATE_ACTIONED, (
+        f"the new command should have been acked actioned, got {new_state}"
+    )
+
+    # The old, already-settled row must be untouched.
+    db_conn.rollback()
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "SELECT ack_state, ack_timestamp, ack_superseded_by "
+            "FROM assets_assetcommand WHERE id = %s",
+            (old_dbid,),
+        )
+        old_state, old_ts, old_reason = cur.fetchone()
+    assert (old_state, old_ts, old_reason) == (ACK_STATE_SUPERSEDED, sentinel_ts, sentinel_reason), (
+        "the old already-acked command row was rewritten by an ack meant for the "
+        f"newer command sharing dispatch_id={collide_dispatch}: got "
+        f"ack_state={old_state}, ack_timestamp={old_ts}, ack_superseded_by={old_reason}; "
+        "server log:\n" + server_proc["log"].read_text(errors="replace")
+    )
