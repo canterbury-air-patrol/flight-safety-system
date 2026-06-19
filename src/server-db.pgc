@@ -156,24 +156,27 @@ void db_command_set_dispatch_id(const char *conn_arg, unsigned long long command
     EXEC SQL AT :conn UPDATE assets_assetcommand SET dispatch_id = :dispatch_id WHERE id = :command_dbid;
 }
 
-void db_command_record_ack(const char *conn_arg, unsigned long long dispatch_id_arg, int ack_state_arg, unsigned long long ack_timestamp_arg, int ack_superseded_by_arg)
+void db_command_record_ack(const char *conn_arg, unsigned long long asset_id_arg, unsigned long long dispatch_id_arg, int ack_state_arg, unsigned long long ack_timestamp_arg, int ack_superseded_by_arg)
 {
     EXEC SQL BEGIN DECLARE SECTION;
     const char *conn = conn_arg;
+    unsigned long long asset_id = asset_id_arg;
     unsigned long long dispatch_id = dispatch_id_arg;
     int ack_state = ack_state_arg;
     unsigned long long ack_timestamp = ack_timestamp_arg;
     int ack_superseded_by = ack_superseded_by_arg;
     EXEC SQL END DECLARE SECTION;
 
-    /* Match the dispatched row by its stamped id and write the latest ack.
+    /* Match the dispatched row by the acking asset and its stamped id: dispatch_id
+     * is only per-connection unique, so without asset_id this could land on a
+     * different asset's same-dispatch_id row and confirm the wrong command.
      * Never regress an already-terminal outcome: a late "received" (state 0)
      * must not clobber a settled actioned/superseded/rejected/noop. So skip the
      * write when the incoming state is 0 and the stored state is already set and
      * non-zero. ack_superseded_by is only meaningful for the superseded state. */
     EXEC SQL AT :conn UPDATE assets_assetcommand
         SET ack_state = :ack_state, ack_timestamp = :ack_timestamp, ack_superseded_by = :ack_superseded_by
-        WHERE dispatch_id = :dispatch_id
+        WHERE asset_id = :asset_id AND dispatch_id = :dispatch_id
           AND NOT (:ack_state = 0 AND ack_state IS NOT NULL AND ack_state <> 0);
 }
 

@@ -49,7 +49,7 @@ auto make_writer(fss_test::MockDatabase &mock) -> std::shared_ptr<fss::server::d
                            mock.recordCommandDispatch(w.command_dbid, w.dispatch_id);
                        },
                        [&](const fss::server::command_ack_write &w) -> void {
-                           mock.recordCommandAck(w.dispatch_id, w.ack_state, w.ack_timestamp, w.ack_reason);
+                           mock.recordCommandAck(w.asset_id, w.dispatch_id, w.ack_state, w.ack_timestamp, w.ack_reason);
                        },
                    },
                    task);

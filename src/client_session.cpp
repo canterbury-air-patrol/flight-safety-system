@@ -800,11 +800,16 @@ void fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss
                     break;
                 }
                 auto ack_msg = std::dynamic_pointer_cast<fss::transport::fss_message_command_ack>(msg);
-                if (ack_msg != nullptr)
+                /* Scope the stored ack to the acking asset: dispatch_id is only
+                 * per-connection unique, so without asset_id the DB update could
+                 * land on a different asset's same-dispatch_id command row. An
+                 * ack from a connection with no identified asset (asset_id == 0)
+                 * cannot be scoped, so it is dropped. */
+                if (ack_msg != nullptr && asset_id != 0)
                 {
-                    this->writer->enqueue(
-                        command_ack_write{ack_msg->getAckedCommandId(), static_cast<uint8_t>(ack_msg->getOutcome()),
-                                          ack_msg->getTimeStamp(), static_cast<uint8_t>(ack_msg->getReason())});
+                    this->writer->enqueue(command_ack_write{
+                        asset_id, ack_msg->getAckedCommandId(), static_cast<uint8_t>(ack_msg->getOutcome()),
+                        ack_msg->getTimeStamp(), static_cast<uint8_t>(ack_msg->getReason())});
                 }
             }
             break;

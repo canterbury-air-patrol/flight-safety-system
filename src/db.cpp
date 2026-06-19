@@ -120,11 +120,12 @@ void flight_safety_system::server::db_connection::recordCommandDispatch(uint64_t
     db_command_set_dispatch_id(write_conn_name, command_dbid, dispatch_id);
 }
 
-void flight_safety_system::server::db_connection::recordCommandAck(uint64_t dispatch_id, uint8_t ack_state,
-                                                                   uint64_t ack_timestamp, uint8_t ack_reason)
+void flight_safety_system::server::db_connection::recordCommandAck(uint64_t asset_id, uint64_t dispatch_id,
+                                                                   uint8_t ack_state, uint64_t ack_timestamp,
+                                                                   uint8_t ack_reason)
 {
     std::scoped_lock guard(this->write_lock);
-    db_command_record_ack(write_conn_name, dispatch_id, static_cast<int>(ack_state), ack_timestamp,
+    db_command_record_ack(write_conn_name, asset_id, dispatch_id, static_cast<int>(ack_state), ack_timestamp,
                           static_cast<int>(ack_reason));
 }
 

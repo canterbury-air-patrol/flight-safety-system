@@ -52,6 +52,7 @@ public:
         uint64_t dispatch_id;
     };
     struct recorded_ack {
+        uint64_t asset_id;
         uint64_t dispatch_id;
         uint8_t ack_state;
         uint64_t ack_timestamp;
@@ -100,9 +101,10 @@ public:
         dispatches.push_back({command_dbid, dispatch_id});
     }
 
-    void recordCommandAck(uint64_t dispatch_id, uint8_t ack_state, uint64_t ack_timestamp, uint8_t ack_reason) override
+    void recordCommandAck(uint64_t asset_id, uint64_t dispatch_id, uint8_t ack_state, uint64_t ack_timestamp,
+                          uint8_t ack_reason) override
     {
-        acks.push_back({dispatch_id, ack_state, ack_timestamp, ack_reason});
+        acks.push_back({asset_id, dispatch_id, ack_state, ack_timestamp, ack_reason});
     }
 
     auto getCommand(uint64_t asset_id) -> std::shared_ptr<flight_safety_system::server::asset_command> override

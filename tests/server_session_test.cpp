@@ -116,7 +116,7 @@ auto make_mock_writer(fss_test::MockDatabase &mock) -> std::shared_ptr<fss::serv
                            mock.recordCommandDispatch(w.command_dbid, w.dispatch_id);
                        },
                        [&](const fss::server::command_ack_write &w) -> void {
-                           mock.recordCommandAck(w.dispatch_id, w.ack_state, w.ack_timestamp, w.ack_reason);
+                           mock.recordCommandAck(w.asset_id, w.dispatch_id, w.ack_state, w.ack_timestamp, w.ack_reason);
                        },
                    },
                    task);
@@ -1422,6 +1422,9 @@ TEST_CASE("session: command_ack is stored when the capability is negotiated")
     session->processMessage(ack);
 
     REQUIRE(fss_test::wait_for([&]() { return !mock.acks.empty(); }));
+    /* The ack is scoped to the acking asset (the one this connection identified
+     * as), not just the per-connection dispatch_id. */
+    REQUIRE(mock.acks.front().asset_id == 13);
     REQUIRE(mock.acks.front().dispatch_id == acked_id);
     REQUIRE(mock.acks.front().ack_state == static_cast<uint8_t>(fss::transport::command_ack_superseded));
     REQUIRE(mock.acks.front().ack_timestamp == ack_ts);

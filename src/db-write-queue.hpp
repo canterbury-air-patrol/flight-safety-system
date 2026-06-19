@@ -41,9 +41,13 @@ struct command_dispatch_write {
     uint64_t command_dbid;
     uint64_t dispatch_id;
 };
-/* A command ack to store against the row whose dispatch id matches. ack_state is
- * the fss_command_ack_outcome int, ack_reason the fss_command_ack_reason int. */
+/* A command ack to store against the row whose (asset_id, dispatch_id) matches.
+ * dispatch_id is only per-connection unique (see transport::getMessageId), so the
+ * ack must be scoped to the acking asset or it could clobber another asset's row
+ * that happened to be stamped with the same dispatch_id. ack_state is the
+ * fss_command_ack_outcome int, ack_reason the fss_command_ack_reason int. */
 struct command_ack_write {
+    uint64_t asset_id;
     uint64_t dispatch_id;
     uint8_t ack_state;
     uint64_t ack_timestamp;
