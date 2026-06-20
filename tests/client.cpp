@@ -120,6 +120,25 @@ TEST_CASE("client: malformed JSON config leaves client unconfigured")
     std::remove(tmppath);
 }
 
+/* Exposes the protected config setter so a test can drive the programmatic
+ * (non-file) configuration path. */
+class ProgrammaticClient : public fss::client_ssl::fss_client {
+public:
+    using fss::client_ssl::fss_client::setAssetName;
+};
+
+TEST_CASE("client: isConfigured tracks the programmatic setAssetName + connectTo path")
+{
+    /* The file ctor is not the only way to configure a client; isConfigured()
+     * must also reflect a client built via the setAssetName/connectTo setters. */
+    ProgrammaticClient client;
+    REQUIRE_FALSE(client.isConfigured()); // nothing set yet
+    client.setAssetName("test-asset");
+    REQUIRE_FALSE(client.isConfigured());       // a name, but no server yet
+    client.connectTo("127.0.0.1", 9999, false); // adds a reconnect entry; no live connect
+    REQUIRE(client.isConfigured());             // name + at least one server
+}
+
 TEST_CASE("client: processMessage dispatches position_report to handlePositionReport")
 {
     TrackingClient client;

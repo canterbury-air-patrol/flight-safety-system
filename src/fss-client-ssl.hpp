@@ -30,7 +30,12 @@ private:
     std::list<std::shared_ptr<flight_safety_system::client_ssl::fss_server>> servers{};
     std::list<std::shared_ptr<flight_safety_system::client_ssl::fss_server>> reconnect_servers{};
     std::mutex servers_lock{};
-    bool configured{false};
+    std::atomic<bool> configured{false};
+    /* Recompute `configured` from the current asset name + server lists. Called
+     * from every path that sets the name or adds a server so isConfigured()
+     * stays accurate however the client was built, not just the file ctor.
+     * Caller must hold servers_lock. */
+    void updateConfigured();
     void notifyConnectionStatus();
     virtual void connectionStatusChange(flight_safety_system::client_ssl::connection_status status);
 protected:
