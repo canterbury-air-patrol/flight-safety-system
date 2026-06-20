@@ -44,6 +44,10 @@ flight_safety_system::client_ssl::fss_client::fss_client(const std::string &t_fi
                 this->ca_file, this->private_key_file, this->public_key_file);
             this->addServer(server);
         }
+        if (!this->asset_name.empty() && (!this->servers.empty() || !this->reconnect_servers.empty()))
+        {
+            this->configured = true;
+        }
     }
     catch (const Json::Exception &e)
     {
@@ -198,6 +202,11 @@ void flight_safety_system::client_ssl::fss_client::sendMsgAll(
 auto flight_safety_system::client_ssl::fss_client::getAssetName() -> std::string
 {
     return this->asset_name;
+}
+
+auto flight_safety_system::client_ssl::fss_client::isConfigured() const -> bool
+{
+    return this->configured;
 }
 
 void flight_safety_system::client_ssl::fss_client::addServer(
