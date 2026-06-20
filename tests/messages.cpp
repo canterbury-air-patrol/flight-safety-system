@@ -1021,6 +1021,27 @@ TEST_CASE("messages: truncated command_ack decodes to safe defaults")
     REQUIRE(decoded->getTimeStamp() == 0);
 }
 
+TEST_CASE("messages: unknown command_ack reason degrades to supersede_none")
+{
+    using flight_safety_system::transport::message_type_command_ack;
+    /* A newer peer can send a supersede reason this build does not recognise.
+     * Such a code must decode back to supersede_none (the operator is never
+     * shown an invented cause); the raw code is only logged for diagnosis. */
+    std::string payload;
+    payload.append(sizeof(uint64_t), '\0'); // acked_command_id = 0
+    payload.push_back(static_cast<char>(flight_safety_system::transport::asset_command_rtl));
+    payload.push_back(static_cast<char>(flight_safety_system::transport::command_ack_superseded));
+    payload.push_back(static_cast<char>(0xEE)); // a reason code no build assigns
+    payload.append(sizeof(uint64_t), '\0');     // timestamp = 0
+    const size_t total = framed_header_len + payload.size();
+    auto bl = fss_test::make_framed_buffer(static_cast<uint16_t>(message_type_command_ack), 1, payload, total);
+    auto decoded = std::dynamic_pointer_cast<flight_safety_system::transport::fss_message_command_ack>(
+        flight_safety_system::transport::fss_message::decode(bl));
+    REQUIRE(decoded != nullptr);
+    REQUIRE(decoded->getOutcome() == flight_safety_system::transport::command_ack_superseded);
+    REQUIRE(decoded->getReason() == flight_safety_system::transport::supersede_none);
+}
+
 /* readUint32 failure (line 129): version message truncated after the two
  * uint16 version fields, so the uint32_t feature_flags read fails. */
 TEST_CASE("messages: BufferReader readUint32 short-read returns false")
