@@ -579,8 +579,13 @@ TEST_CASE("Command Ack Message Check - No-op (already in the commanded state)")
 
 TEST_CASE("Command Ack Message Check - reason is normalised away for a non-superseded outcome")
 {
-    auto acked_command_id = static_cast<uint64_t>(random());
-    auto timestamp = static_cast<uint64_t>(random());
+    /* Fixed values keep this regression deterministic: the property under test
+     * (reason normalisation) is independent of the id/timestamp, so randomising
+     * them would only make a failure harder to reproduce. The byte patterns
+     * still cross all 8 bytes to exercise the round trip. */
+    constexpr uint64_t msg_id = 0x0102030405060708ULL;
+    constexpr uint64_t acked_command_id = 0x1122334455667788ULL;
+    constexpr uint64_t timestamp = 0x99AABBCCDDEEFF00ULL;
 
     /* A reason is only meaningful alongside a superseded outcome. Even if a
      * caller passes one for any other outcome, the constructor must drop it to
@@ -588,15 +593,15 @@ TEST_CASE("Command Ack Message Check - reason is normalised away for a non-super
      * wire, logs, or UI. */
     auto msg = std::make_shared<flight_safety_system::transport::fss_message_command_ack>(
         acked_command_id, flight_safety_system::transport::asset_command_rtl,
-        flight_safety_system::transport::command_ack_actioned,
-        flight_safety_system::transport::supersede_low_battery, timestamp);
+        flight_safety_system::transport::command_ack_actioned, flight_safety_system::transport::supersede_low_battery,
+        timestamp);
     REQUIRE(msg->getOutcome() == flight_safety_system::transport::command_ack_actioned);
     REQUIRE(msg->getReason() == flight_safety_system::transport::supersede_none);
 
-    msg->setId(static_cast<uint64_t>(random()));
+    msg->setId(msg_id);
     auto bl = msg->getPacked();
     REQUIRE(bl != nullptr);
-    auto decoded = std::make_shared<flight_safety_system::transport::fss_message_command_ack>(msg->getId(), bl);
+    auto decoded = std::make_shared<flight_safety_system::transport::fss_message_command_ack>(msg_id, bl);
     REQUIRE(decoded->getOutcome() == flight_safety_system::transport::command_ack_actioned);
     REQUIRE(decoded->getReason() == flight_safety_system::transport::supersede_none);
 }
