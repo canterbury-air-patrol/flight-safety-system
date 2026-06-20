@@ -14,6 +14,7 @@ from contextlib import contextmanager
 
 import psycopg2
 import pytest
+
 from conftest import wait_for_row
 
 _LOCKABLE_TABLES = frozenset({"assets_assetposition"})

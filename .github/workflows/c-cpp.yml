@@ -139,12 +139,17 @@ jobs:
           libjsoncpp-dev libecpg-dev catch2 libgnutls28-dev gnutls-bin \
           cppcheck clang-tidy bear
 
-    # clang-format output is version-dependent; pin the exact version the
-    # tree is formatted with so the formatting gate is reproducible.
+    # clang-format and ruff output is version-dependent; pin the exact versions
+    # the tree is checked with so the gates are reproducible.
     - name: Install pinned clang-format
       run: |
         python3 -m venv /tmp/clang-format-venv
         /tmp/clang-format-venv/bin/pip install -q clang-format==22.1.5
+
+    - name: Install pinned ruff
+      run: |
+        python3 -m venv /tmp/ruff-venv
+        /tmp/ruff-venv/bin/pip install -q -r e2e/requirements-dev.txt
 
     - name: autogen
       run: ./autogen.sh
@@ -155,8 +160,11 @@ jobs:
     - name: build with compile DB
       run: bear -- make -j$(nproc)
 
-    - name: code checks (clang-format, cppcheck, clang-tidy)
-      run: CLANG_FORMAT=/tmp/clang-format-venv/bin/clang-format ./check-code.sh
+    - name: code checks (clang-format, cppcheck, clang-tidy, ruff)
+      run: |
+        CLANG_FORMAT=/tmp/clang-format-venv/bin/clang-format \
+        RUFF=/tmp/ruff-venv/bin/ruff \
+        ./check-code.sh
 
   # ─── 5. End-to-end tests ─────────────────────────────────────────────────
   e2e:

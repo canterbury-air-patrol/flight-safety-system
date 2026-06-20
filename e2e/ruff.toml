@@ -1,0 +1,19 @@
+# Lint configuration for the e2e Python harness.
+#
+# ruff's rule set drifts between releases, so the version is pinned (see
+# requirements-dev.txt and the static-analysis CI job) the same way clang-format
+# is pinned for the C++ tree — the gate must behave identically locally and in
+# CI.
+line-length = 120
+# The suite carries `from __future__ import annotations`, so PEP 585/604 hints
+# are safe well below this, but keep the floor explicit.
+target-version = "py39"
+
+[lint]
+select = ["E", "W", "F", "I", "B", "C4", "SIM", "RET", "UP", "PT", "S"]
+# This tree is exclusively the test harness, which changes how a few bandit
+# rules should be read:
+#   S101    — asserts are how the tests assert; not a risk here.
+#   S603/S607 — the harness deliberately spawns the server/client binaries with
+#               fixed, in-repo argument lists; there is no untrusted input.
+ignore = ["S101", "S603", "S607"]

@@ -1,0 +1,5 @@
+# Tooling for working on the e2e harness — not needed to run the tests.
+# Pinned because ruff's rule set changes between releases; CI installs this same
+# pin so the lint gate is reproducible. Install into a venv, e.g.:
+#   python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
+ruff==0.15.18
