@@ -34,6 +34,14 @@ SUPERSEDE_NEWER_COMMAND = 3
 SENTINEL_ACK_TIMESTAMP = 111
 SENTINEL_SUPERSEDE_REASON = SUPERSEDE_NEWER_COMMAND
 
+# A connection's dispatch_id (last_msg_id) is bumped by every server->client
+# message, so the once-a-second RTT request can fall between two commands and
+# the next command's id is not reliably +1. The cross-asset collision test
+# seeds asset A across this many candidate dispatch_ids so B's next command
+# reliably collides with one — far wider than any realistic test window's worth
+# of intervening once-a-second traffic.
+COLLISION_BAND = 20
+
 
 def _wait_for_client_ready(server_proc, name: str, timeout: float = 15.0) -> None:
     """Block until the server reports that the aircraft client `name` identified.
@@ -212,12 +220,16 @@ def test_ack_does_not_cross_assets_on_dispatch_id_collision(
     test could not catch.
 
     Construction (no hard-coded dispatch_id): only asset B has a live client.
-    We dispatch one command to B to learn its connection's dispatch_id, then
-    pre-seed asset A's command row at the *next* dispatch_id with a distinct
-    terminal ack (superseded) and no live client of its own. Dispatching a second
-    command to B lands on that same dispatch_id (per-connection ids are
-    contiguous), so B's ack collides with A's row. The asset scoping must leave
-    A's superseded sentinel untouched while B's own row advances to actioned.
+    We dispatch one command to B to learn where its connection's dispatch_id
+    currently sits, then pre-seed asset A with a *band* of database-only command
+    rows spanning the dispatch_ids B's next command might use, each carrying a
+    distinct terminal ack (superseded). dispatch_id is the connection's
+    last_msg_id, bumped by every server->client message — not just commands —
+    so the once-a-second RTT request can land between B's two commands and B's
+    next command is not reliably the very next id. Seeding a band rather than a
+    single guessed id makes the collision deterministic: B's second command
+    lands on one row in the band, and the asset scoping must leave every seeded
+    A row untouched while B's own row advances to actioned.
     """
     with db_conn.cursor() as cur:
         cur.execute("INSERT INTO assets_asset (name) VALUES ('test1') RETURNING id")
@@ -241,56 +253,66 @@ def test_ack_does_not_cross_assets_on_dispatch_id_collision(
     # Let B's own ack for this first command settle so it can't interfere later.
     _poll_field(db_conn, b_first, "ack_state", timeout=10.0)
 
-    # Pre-seed asset A's command at the dispatch_id B's *next* command will use
-    # (per-connection ids are contiguous), with a terminal superseded ack that
-    # the fake client never produces — so any change to it is unambiguous.
-    collide_dispatch = b_first_dispatch + 1
+    # Pre-seed asset A with a band of database-only rows spanning the
+    # dispatch_ids B's next command might use, each with a terminal superseded
+    # ack the fake client never produces — so any change is unambiguous. The
+    # band absorbs RTT/other server->client messages that bump B's id between
+    # commands by an unpredictable (small) amount; B's second command lands on
+    # exactly one of these. The band is wide enough to cover many seconds of
+    # intervening once-a-second RTT traffic.
     sentinel_ts = SENTINEL_ACK_TIMESTAMP
     sentinel_reason = SENTINEL_SUPERSEDE_REASON
+    collision_band = range(b_first_dispatch + 1, b_first_dispatch + 1 + COLLISION_BAND)
+    a_dbids: dict[int, int] = {}  # dispatch_id -> asset A command row id
     with db_conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO assets_assetcommand "
-            "(asset_id, command, position, altitude, dispatch_id, "
-            " ack_state, ack_timestamp, ack_superseded_by) "
-            "VALUES (%s, 'RTL', ST_SetSRID(ST_MakePoint(0, 0), 4326)::geography, 0, "
-            "        %s, %s, %s, %s) RETURNING id",
-            (asset_a, collide_dispatch, ACK_STATE_SUPERSEDED, sentinel_ts, sentinel_reason),
-        )
-        a_dbid = cur.fetchone()[0]
+        for dispatch_id in collision_band:
+            cur.execute(
+                "INSERT INTO assets_assetcommand "
+                "(asset_id, command, position, altitude, dispatch_id, "
+                " ack_state, ack_timestamp, ack_superseded_by) "
+                "VALUES (%s, 'RTL', ST_SetSRID(ST_MakePoint(0, 0), 4326)::geography, 0, "
+                "        %s, %s, %s, %s) RETURNING id",
+                (asset_a, dispatch_id, ACK_STATE_SUPERSEDED, sentinel_ts, sentinel_reason),
+            )
+            a_dbids[dispatch_id] = cur.fetchone()[0]
     db_conn.commit()
 
-    # Second dispatch to B: should land on collide_dispatch and be acked by B.
+    # Second dispatch to B: lands on one dispatch_id in the band and is acked.
     b_second = _dispatch_rtl(db_conn, asset_b)
     b_second_dispatch = _poll_field(db_conn, b_second, "dispatch_id", timeout=10.0)
     b_second_state = _poll_ack_state(db_conn, b_second, ACK_STATE_ACTIONED, timeout=10.0)
 
-    # Guard the construction itself: if the collision didn't actually happen the
-    # test proves nothing, so fail loudly rather than pass vacuously.
-    assert b_second_dispatch == collide_dispatch, (
-        f"setup failed to collide: A.dispatch_id={collide_dispatch} but B's second "
-        f"command got dispatch_id={b_second_dispatch}"
+    # Guard the construction itself: if B's command did not collide with a seeded
+    # row the test proves nothing, so fail loudly rather than pass vacuously.
+    assert b_second_dispatch in collision_band, (
+        f"setup failed to collide: B's second command got dispatch_id="
+        f"{b_second_dispatch}, outside the seeded band "
+        f"{collision_band.start}..{collision_band.stop - 1}; server log:\n"
+        + server_proc["log"].read_text(errors="replace")
     )
     assert b_second_state == ACK_STATE_ACTIONED, (
         f"B's own command should have been acked actioned, got {b_second_state}"
     )
 
-    # The real assertion: asset A's row is untouched by B's ack. With the bug
-    # (match on dispatch_id alone), B's actioned ack would overwrite A's
-    # superseded sentinel and stamp it with B's ack_timestamp.
+    # The real assertion: none of asset A's rows are touched by B's ack — above
+    # all the one sharing B's dispatch_id. With the bug (match on dispatch_id
+    # alone) B's actioned ack would overwrite that row's superseded sentinel and
+    # stamp it with B's ack_timestamp.
     db_conn.rollback()
     with db_conn.cursor() as cur:
         cur.execute(
-            "SELECT ack_state, ack_timestamp, ack_superseded_by "
-            "FROM assets_assetcommand WHERE id = %s",
-            (a_dbid,),
+            "SELECT dispatch_id, ack_state, ack_timestamp, ack_superseded_by "
+            "FROM assets_assetcommand WHERE asset_id = %s ORDER BY dispatch_id",
+            (asset_a,),
         )
-        a_state, a_ts, a_reason = cur.fetchone()
-    assert (a_state, a_ts, a_reason) == (ACK_STATE_SUPERSEDED, sentinel_ts, sentinel_reason), (
-        "asset A's command row was mutated by asset B's ack despite the shared "
-        f"dispatch_id={collide_dispatch}: got ack_state={a_state}, "
-        f"ack_timestamp={a_ts}, ack_superseded_by={a_reason}; server log:\n"
-        + server_proc["log"].read_text(errors="replace")
-    )
+        a_rows = cur.fetchall()
+    for dispatch_id, a_state, a_ts, a_reason in a_rows:
+        assert (a_state, a_ts, a_reason) == (ACK_STATE_SUPERSEDED, sentinel_ts, sentinel_reason), (
+            f"asset A's command row at dispatch_id={dispatch_id} was mutated by asset B's "
+            f"ack (B collided at dispatch_id={b_second_dispatch}): got ack_state={a_state}, "
+            f"ack_timestamp={a_ts}, ack_superseded_by={a_reason}; server log:\n"
+            + server_proc["log"].read_text(errors="replace")
+        )
 
 
 @pytest.mark.requires_docker
