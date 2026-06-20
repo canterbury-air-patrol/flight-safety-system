@@ -577,6 +577,30 @@ TEST_CASE("Command Ack Message Check - No-op (already in the commanded state)")
     REQUIRE(decoded->getReason() == flight_safety_system::transport::supersede_none);
 }
 
+TEST_CASE("Command Ack Message Check - reason is normalised away for a non-superseded outcome")
+{
+    auto acked_command_id = static_cast<uint64_t>(random());
+    auto timestamp = static_cast<uint64_t>(random());
+
+    /* A reason is only meaningful alongside a superseded outcome. Even if a
+     * caller passes one for any other outcome, the constructor must drop it to
+     * supersede_none so an inconsistent outcome/reason pair never reaches the
+     * wire, logs, or UI. */
+    auto msg = std::make_shared<flight_safety_system::transport::fss_message_command_ack>(
+        acked_command_id, flight_safety_system::transport::asset_command_rtl,
+        flight_safety_system::transport::command_ack_actioned,
+        flight_safety_system::transport::supersede_low_battery, timestamp);
+    REQUIRE(msg->getOutcome() == flight_safety_system::transport::command_ack_actioned);
+    REQUIRE(msg->getReason() == flight_safety_system::transport::supersede_none);
+
+    msg->setId(static_cast<uint64_t>(random()));
+    auto bl = msg->getPacked();
+    REQUIRE(bl != nullptr);
+    auto decoded = std::make_shared<flight_safety_system::transport::fss_message_command_ack>(msg->getId(), bl);
+    REQUIRE(decoded->getOutcome() == flight_safety_system::transport::command_ack_actioned);
+    REQUIRE(decoded->getReason() == flight_safety_system::transport::supersede_none);
+}
+
 TEST_CASE("SMM Settings Message Check")
 {
     auto msg_id = static_cast<uint64_t>(random());

@@ -1032,7 +1032,12 @@ flight_safety_system::transport::fss_message_command_ack::fss_message_command_ac
                                                                                   uint64_t t_timestamp)
     : fss_message(message_type_command_ack), acked_command_id(t_acked_command_id),
       command(static_cast<uint8_t>(t_command)), outcome(static_cast<uint8_t>(t_outcome)),
-      reason(static_cast<uint8_t>(t_reason)), timestamp(t_timestamp)
+      /* The reason is only meaningful for a superseded outcome; for any other
+       * outcome it must read back as supersede_none. Enforce that here rather
+       * than trusting every caller, so an inconsistent outcome/reason pair can
+       * never propagate into the wire, logs, or UI. */
+      reason(static_cast<uint8_t>(t_outcome == command_ack_superseded ? t_reason : supersede_none)),
+      timestamp(t_timestamp)
 {
 }
 // NOLINTEND(bugprone-easily-swappable-parameters)
