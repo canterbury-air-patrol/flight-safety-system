@@ -107,7 +107,7 @@ def pg_container() -> Iterator[dict[str, object]]:
         pytest.skip("docker daemon not reachable")
 
     container = f"fss-e2e-pg-{uuid.uuid4().hex[:8]}"
-    password = "e2e"
+    password = "e2e"  # noqa: S105 — throwaway password for an ephemeral local test container
     user = "postgres"
     db = "postgres"
 
