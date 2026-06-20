@@ -56,6 +56,27 @@ def _wait_for_client_ready(server_proc, name: str, timeout: float = 15.0) -> Non
     )
 
 
+def _poll(db_conn, query: str, params: tuple, want, timeout: float, poll: float = 0.05):
+    """Poll `query` until `want(row)` holds for the fetched row, or time out.
+
+    A fresh transaction is taken each iteration so the server's committed async
+    writes become visible. Returns the last row fetched (so a timeout still
+    reports what was stored), or None if the query never returned a row."""
+    deadline = time.monotonic() + timeout
+    last = None
+    while time.monotonic() < deadline:
+        db_conn.rollback()
+        with db_conn.cursor() as cur:
+            cur.execute(query, params)
+            row = cur.fetchone()
+        if row is not None:
+            last = row
+            if want(row):
+                return row
+        time.sleep(poll)
+    return last
+
+
 def _poll_row(db_conn, dbid: int, timeout: float, expected_state: int = ACK_STATE_ACTIONED):
     """Poll the AssetCommand row until ack_state reaches the terminal
     `expected_state`, or time out.
@@ -63,27 +84,17 @@ def _poll_row(db_conn, dbid: int, timeout: float, expected_state: int = ACK_STAT
     The ack is two-phase: the client sends `received` (0) immediately followed
     by `actioned` (1), persisted as two async writes. Returning as soon as
     ack_state is merely non-NULL races those writes and can latch the transient
-    `received`; callers assert the terminal outcome, so wait for it. Returns the
-    last row seen (so a timeout still reports what was stored), or None if no ack
-    ever landed."""
-    deadline = time.monotonic() + timeout
-    last = None
-    while time.monotonic() < deadline:
-        # A fresh transaction each poll so we see the server's committed writes.
-        db_conn.rollback()
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "SELECT dispatch_id, ack_state, ack_timestamp "
-                "FROM assets_assetcommand WHERE id = %s",
-                (dbid,),
-            )
-            row = cur.fetchone()
-        if row is not None and row[1] is not None:
-            last = row
-            if row[1] == expected_state:
-                return row
-        time.sleep(0.05)
-    return last
+    `received`; callers assert the terminal outcome, so wait for it. Returns
+    (dispatch_id, ack_state, ack_timestamp) once ack_state is set, else None."""
+    row = _poll(
+        db_conn,
+        "SELECT dispatch_id, ack_state, ack_timestamp "
+        "FROM assets_assetcommand WHERE id = %s",
+        (dbid,),
+        lambda r: r[1] == expected_state,
+        timeout,
+    )
+    return row if row is not None and row[1] is not None else None
 
 
 def _poll_field(db_conn, dbid: int, field: str, timeout: float):
@@ -92,19 +103,15 @@ def _poll_field(db_conn, dbid: int, field: str, timeout: float):
     `field` is a fixed identifier chosen by the test (never request data), so
     interpolating it into the query is safe here."""
     assert field in {"dispatch_id", "ack_state"}, field
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        db_conn.rollback()
-        with db_conn.cursor() as cur:
-            cur.execute(
-                f"SELECT {field} FROM assets_assetcommand WHERE id = %s",  # noqa: S608
-                (dbid,),
-            )
-            row = cur.fetchone()
-        if row is not None and row[0] is not None:
-            return row[0]
-        time.sleep(0.02)
-    return None
+    row = _poll(
+        db_conn,
+        f"SELECT {field} FROM assets_assetcommand WHERE id = %s",  # noqa: S608
+        (dbid,),
+        lambda r: r[0] is not None,
+        timeout,
+        poll=0.02,
+    )
+    return row[0] if row is not None else None
 
 
 def _poll_ack_state(db_conn, dbid: int, expected: int, timeout: float):
@@ -112,22 +119,15 @@ def _poll_ack_state(db_conn, dbid: int, expected: int, timeout: float):
     time out. See _poll_row for why a bare non-NULL check races the two-phase
     ack. Returns the last non-NULL state seen (so a timeout reports what was
     stored), or None if no ack ever landed."""
-    deadline = time.monotonic() + timeout
-    last = None
-    while time.monotonic() < deadline:
-        db_conn.rollback()
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "SELECT ack_state FROM assets_assetcommand WHERE id = %s",
-                (dbid,),
-            )
-            row = cur.fetchone()
-        if row is not None and row[0] is not None:
-            last = row[0]
-            if last == expected:
-                return last
-        time.sleep(0.02)
-    return last
+    row = _poll(
+        db_conn,
+        "SELECT ack_state FROM assets_assetcommand WHERE id = %s",
+        (dbid,),
+        lambda r: r[0] == expected,
+        timeout,
+        poll=0.02,
+    )
+    return row[0] if row is not None else None
 
 
 @pytest.mark.requires_docker
