@@ -100,13 +100,16 @@ void flight_safety_system::client_ssl::fss_client::updateConfigured()
     /* A client is configured once it has an asset name and at least one server
      * (live or pending reconnect). Centralised here so the file ctor, the
      * programmatic setAssetName/connectTo path, and any future mutator all keep
-     * isConfigured() in step. */
+     * isConfigured() in step. Self-locking so no caller has to remember to. */
+    std::scoped_lock lock(this->servers_lock);
     this->configured = !this->asset_name.empty() && (!this->servers.empty() || !this->reconnect_servers.empty());
 }
 
 void flight_safety_system::client_ssl::fss_client::setAssetName(std::string t_asset_name)
 {
-    std::scoped_lock lock(this->servers_lock);
+    /* asset_name is set once during configuration, before the client is used
+     * concurrently, so it is not guarded by servers_lock (getAssetName() also
+     * reads it unlocked). Recompute the configured flag afterwards. */
     this->asset_name = std::move(t_asset_name);
     this->updateConfigured();
 }
@@ -213,6 +216,7 @@ auto flight_safety_system::client_ssl::fss_client::getAssetName() -> std::string
 
 auto flight_safety_system::client_ssl::fss_client::isConfigured() const -> bool
 {
+    std::scoped_lock lock(this->servers_lock);
     return this->configured;
 }
 
@@ -223,15 +227,19 @@ void flight_safety_system::client_ssl::fss_client::addServer(
      * (whether the server's own connection pointer is set) and does not touch
      * the shared lists. */
     bool is_connected = server->connected();
-    std::scoped_lock lock(this->servers_lock);
-    if (is_connected)
     {
-        this->servers.push_back(server);
+        std::scoped_lock lock(this->servers_lock);
+        if (is_connected)
+        {
+            this->servers.push_back(server);
+        }
+        else
+        {
+            this->reconnect_servers.push_back(server);
+        }
     }
-    else
-    {
-        this->reconnect_servers.push_back(server);
-    }
+    /* updateConfigured() takes servers_lock itself, so recompute after releasing
+     * it here rather than holding it across the call. */
     this->updateConfigured();
 }
 
