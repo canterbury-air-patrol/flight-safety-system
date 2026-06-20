@@ -23,6 +23,26 @@ ACK_STATE_ACTIONED = 1
 ACK_STATE_SUPERSEDED = 2
 
 
+def _wait_for_client_ready(server_proc, name: str, timeout: float = 15.0) -> bool:
+    """Block until the server reports that the aircraft client `name` identified.
+
+    The fake client connects, runs the protocol-version handshake (which is when
+    the command-ack capability is negotiated) and only then identifies; the
+    server logs "Aircraft client identified: <name>" at that point. Waiting for
+    that line is a precise readiness signal — the connection exists and the
+    capability is negotiated — and replaces a blind fixed sleep that was both
+    slower and prone to flaking under load. Returns True once seen, False on
+    timeout."""
+    needle = f"Aircraft client identified: {name}"
+    log_path = server_proc["log"]
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if needle in log_path.read_text(errors="replace"):
+            return True
+        time.sleep(0.05)
+    return False
+
+
 def _poll_row(db_conn, dbid: int, timeout: float, expected_state: int = ACK_STATE_ACTIONED):
     """Poll the AssetCommand row until ack_state reaches the terminal
     `expected_state`, or time out.
@@ -108,9 +128,12 @@ def test_command_ack_is_stored(db_conn, fake_client, server_proc):
 
     fake_client("test1")
 
-    # Let the client connect, identify, and negotiate the version handshake
-    # (the command-ack capability is only negotiated then).
-    time.sleep(5)
+    # Wait for the client to connect, negotiate the handshake (where the
+    # command-ack capability is agreed) and identify, rather than blind-sleeping.
+    assert _wait_for_client_ready(server_proc, "test1"), (
+        "client test1 never identified; server log:\n"
+        + server_proc["log"].read_text(errors="replace")
+    )
 
     with db_conn.cursor() as cur:
         cur.execute(
@@ -184,7 +207,10 @@ def test_ack_does_not_cross_assets_on_dispatch_id_collision(
     # Only asset B gets a live client; asset A is a database-only asset whose
     # command row we craft to collide with B's dispatch_id.
     fake_client("test2")
-    time.sleep(5)
+    assert _wait_for_client_ready(server_proc, "test2"), (
+        "client test2 never identified; server log:\n"
+        + server_proc["log"].read_text(errors="replace")
+    )
 
     # First dispatch to B: learn the dispatch_id its connection is currently at.
     b_first = _dispatch_rtl(db_conn, asset_b)
@@ -274,7 +300,10 @@ def test_ack_updates_only_the_latest_row_on_cross_session_dispatch_id_reuse(
     db_conn.commit()
 
     fake_client("test1")
-    time.sleep(5)
+    assert _wait_for_client_ready(server_proc, "test1"), (
+        "client test1 never identified; server log:\n"
+        + server_proc["log"].read_text(errors="replace")
+    )
 
     # First dispatch: learn the connection's current dispatch_id.
     first = _dispatch_rtl(db_conn, asset)
