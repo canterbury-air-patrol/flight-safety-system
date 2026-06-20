@@ -22,6 +22,19 @@ ACK_STATE_RECEIVED = 0
 ACK_STATE_ACTIONED = 1
 ACK_STATE_SUPERSEDED = 2
 
+# Mirror flight_safety_system::transport::fss_command_ack_reason, the codes
+# stored in ack_superseded_by. supersede_newer_command is the only reason the
+# fake client could ever name; we use it as the sentinel reason precisely
+# because the fake client never supersedes its own command, so the live ack
+# path under test cannot produce it.
+SUPERSEDE_NEWER_COMMAND = 3
+
+# A pre-seeded "already superseded" row carries this fixed ack timestamp and
+# reason. Neither value is produced by the live ack path under test, so any
+# change to a seeded row is unambiguously attributable to the code under test.
+SENTINEL_ACK_TIMESTAMP = 111
+SENTINEL_SUPERSEDE_REASON = SUPERSEDE_NEWER_COMMAND
+
 
 def _wait_for_client_ready(server_proc, name: str, timeout: float = 15.0) -> None:
     """Block until the server reports that the aircraft client `name` identified.
@@ -233,8 +246,8 @@ def test_ack_does_not_cross_assets_on_dispatch_id_collision(
     # (per-connection ids are contiguous), with a terminal superseded ack that
     # the fake client never produces — so any change to it is unambiguous.
     collide_dispatch = b_first_dispatch + 1
-    sentinel_ts = 111
-    sentinel_reason = 3
+    sentinel_ts = SENTINEL_ACK_TIMESTAMP
+    sentinel_reason = SENTINEL_SUPERSEDE_REASON
     with db_conn.cursor() as cur:
         cur.execute(
             "INSERT INTO assets_assetcommand "
@@ -322,8 +335,8 @@ def test_ack_updates_only_the_latest_row_on_cross_session_dispatch_id_reuse(
     # live command will use, with an explicitly older timestamp so the newest-row
     # subselect must not pick it.
     collide_dispatch = first_dispatch + 1
-    sentinel_ts = 222
-    sentinel_reason = 3
+    sentinel_ts = SENTINEL_ACK_TIMESTAMP
+    sentinel_reason = SENTINEL_SUPERSEDE_REASON
     with db_conn.cursor() as cur:
         cur.execute(
             "INSERT INTO assets_assetcommand "
