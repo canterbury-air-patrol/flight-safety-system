@@ -30,6 +30,7 @@ private:
     std::list<std::shared_ptr<flight_safety_system::client_ssl::fss_server>> servers{};
     std::list<std::shared_ptr<flight_safety_system::client_ssl::fss_server>> reconnect_servers{};
     std::mutex servers_lock{};
+    bool configured{false};
     void notifyConnectionStatus();
     virtual void connectionStatusChange(flight_safety_system::client_ssl::connection_status status);
 protected:
@@ -49,6 +50,7 @@ public:
     virtual void disconnect();
     virtual void sendMsgAll(const std::shared_ptr<flight_safety_system::transport::fss_message> &msg);
     virtual auto getAssetName() -> std::string;
+    virtual auto isConfigured() const -> bool;
     virtual void serverRequiresReconnect(fss_server *server);
     virtual void updateServers(const std::shared_ptr<flight_safety_system::transport::fss_message_server_list> &msg);
     /* Called for every command, with the originating server (the connection the

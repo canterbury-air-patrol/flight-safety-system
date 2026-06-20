@@ -104,7 +104,20 @@ TEST_CASE("Client Base")
 TEST_CASE("client: config file not found leaves client with no servers")
 {
     fss::client_ssl::fss_client client("/nonexistent/config.json");
+    REQUIRE_FALSE(client.isConfigured());
     client.attemptReconnect(); // no-op; must not crash
+}
+
+TEST_CASE("client: malformed JSON config leaves client unconfigured")
+{
+    const char *tmppath = "/tmp/fss_test_client_malformed.json";
+    {
+        std::ofstream f(tmppath);
+        f << R"({"name":"test-asset", "ssl": {)";
+    }
+    fss::client_ssl::fss_client client(tmppath);
+    REQUIRE_FALSE(client.isConfigured());
+    std::remove(tmppath);
 }
 
 TEST_CASE("client: processMessage dispatches position_report to handlePositionReport")
@@ -294,6 +307,7 @@ TEST_CASE("client: JSON config with server entry parses name and creates reconne
           << R"("servers":[{"address":"127.0.0.1","port":9999}]})";
     }
     fss::client_ssl::fss_client client(tmppath);
+    REQUIRE(client.isConfigured());
     REQUIRE(client.getAssetName() == "test-asset");
     std::remove(tmppath);
 }
