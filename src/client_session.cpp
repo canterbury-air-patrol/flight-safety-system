@@ -811,6 +811,16 @@ void fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss
                         asset_id, ack_msg->getAckedCommandId(), static_cast<uint8_t>(ack_msg->getOutcome()),
                         ack_msg->getTimeStamp(), static_cast<uint8_t>(ack_msg->getReason())});
                 }
+                else if (ack_msg != nullptr)
+                {
+                    /* asset_id == 0: the connection has no identified asset, so the
+                     * ack cannot be scoped and is dropped. A conforming client only
+                     * acks after identifying, so this is unexpected — log it so an
+                     * unscoped ack can be investigated rather than vanishing. */
+                    FSS_LOG_WARN("server", "Dropping command-ack for acked-command "
+                                               << ack_msg->getAckedCommandId()
+                                               << " from connection with no identified asset (asset_id==0)");
+                }
             }
             break;
             case fss::transport::message_type_command:
