@@ -6,12 +6,10 @@ import signal
 import socket
 import subprocess
 import time
-from pathlib import Path
-from typing import Iterator, IO
+from typing import IO
 
 import psycopg2
 import pytest
-
 from conftest import (
     E2E_ROOT,
     REPO_ROOT,

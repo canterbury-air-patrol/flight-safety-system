@@ -14,9 +14,7 @@ from typing import Dict, Iterator
 
 import psycopg2
 import pytest
-
 from conftest import wait_for_row
-
 
 _LOCKABLE_TABLES = frozenset({"assets_assetposition"})
 

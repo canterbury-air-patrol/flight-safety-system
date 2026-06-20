@@ -21,7 +21,6 @@ import time
 from pathlib import Path
 
 import pytest
-
 from conftest import wait_for_row
 from test_slow_db_does_not_stall import hold_table_lock
 
