@@ -299,25 +299,22 @@ TEST_CASE("ssl: isPeerCertRevoked with non-existent CRL file returns false")
 {
     const uint16_t port = fss_test::pick_port();
     REQUIRE(port != 0);
-    std::shared_ptr<flight_safety_system::transport::fss_connection> server_conn;
+    fss_test::connection_handoff handoff;
 
     auto listen = std::make_shared<flight_safety_system::transport_ssl::fss_listen>(
-        port,
-        [&server_conn](std::shared_ptr<flight_safety_system::transport::fss_connection> c) -> bool {
-            server_conn = std::move(c);
-            return true;
-        },
-        CA_PUBLIC_FILE, SERVER_PRIVATE_FILE, SERVER_PUBLIC_FILE);
+        port, handoff.callback(), CA_PUBLIC_FILE, SERVER_PRIVATE_FILE, SERVER_PUBLIC_FILE);
 
     auto client = std::make_shared<flight_safety_system::transport_ssl::fss_connection_client>(
         CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE);
     REQUIRE(client->connectTo("localhost", port));
 
-    REQUIRE(fss_test::wait_for([&] { return server_conn != nullptr; }));
+    auto server_conn = handoff.wait();
+    REQUIRE(server_conn != nullptr);
 
     REQUIRE_FALSE(server_conn->isPeerCertRevoked("/nonexistent/path/crl.pem"));
 
     server_conn = nullptr;
+    handoff.reset();
 }
 
 TEST_CASE("ssl: a silent peer does not block other clients' handshakes", "[ssl_handshake_dos]")
