@@ -43,18 +43,17 @@ TEST_CASE("transport: getClientNames returns empty list for base fss_connection"
     REQUIRE(conn.getClientNames().empty());
 }
 
-static std::shared_ptr<flight_safety_system::transport::fss_connection> client_conn = nullptr;
-static auto test_client_connect_cb(std::shared_ptr<flight_safety_system::transport::fss_connection> new_conn) -> bool
-{
-    client_conn = std::move(new_conn);
-    return true;
-}
+/* The listener invokes its accept callback on its own worker thread; route the
+ * accepted connection through a mutex-guarded handoff so the main thread reads
+ * it with a happens-before edge. */
+static fss_test::connection_handoff client_handoff;
 
 
 TEST_CASE("Listen Socket")
 {
+    client_handoff.reset();
     constexpr int listen_port = 20202;
-    auto listen = std::make_shared<flight_safety_system::transport::fss_listen>(listen_port, test_client_connect_cb);
+    auto listen = std::make_shared<flight_safety_system::transport::fss_listen>(listen_port, client_handoff.callback());
     REQUIRE(listen != nullptr);
 
     auto conn = std::make_shared<flight_safety_system::transport::fss_connection>();
@@ -65,39 +64,27 @@ TEST_CASE("Listen Socket")
 
     conn = nullptr;
 
-    REQUIRE(fss_test::wait_for([]() { return client_conn != nullptr; }));
+    auto server_conn = client_handoff.wait();
+    REQUIRE(server_conn != nullptr);
 
     std::shared_ptr<flight_safety_system::transport::fss_message> msg;
     REQUIRE(fss_test::wait_for([&]() {
-        msg = client_conn->getMsg();
+        msg = server_conn->getMsg();
         return msg != nullptr;
     }));
     REQUIRE(msg->getType() == flight_safety_system::transport::message_type_identity);
 
     REQUIRE(fss_test::wait_for([&]() {
-        msg = client_conn->getMsg();
+        msg = server_conn->getMsg();
         return msg != nullptr;
     }));
     REQUIRE(msg->getType() == flight_safety_system::transport::message_type_closed);
 
-    msg = client_conn->getMsg();
+    msg = server_conn->getMsg();
     REQUIRE(msg == nullptr);
 
-    client_conn = nullptr;
+    client_handoff.reset();
 }
-
-class test_message_cb : public flight_safety_system::transport::fss_message_cb {
-private:
-    std::shared_ptr<flight_safety_system::transport::fss_message> first{};
-public:
-    explicit test_message_cb(std::shared_ptr<flight_safety_system::transport::fss_connection> t_conn)
-        : fss_message_cb(std::move(t_conn)) {};
-    auto getFirstMsg() -> std::shared_ptr<flight_safety_system::transport::fss_message> { return this->first; }
-    void processMessage(std::shared_ptr<flight_safety_system::transport::fss_message> message) override
-    {
-        this->first = std::move(message);
-    }
-};
 
 
 class small_queue_listen : public flight_safety_system::transport::fss_listen {
@@ -124,32 +111,35 @@ TEST_CASE("Queue overflow drops oldest messages")
     const auto port = fss_test::pick_port();
     REQUIRE(port != 0);
 
-    auto listen = std::make_shared<small_queue_listen>(port, test_client_connect_cb);
+    client_handoff.reset();
+    auto listen = std::make_shared<small_queue_listen>(port, client_handoff.callback());
     REQUIRE(listen != nullptr);
 
     auto conn = std::make_shared<flight_safety_system::transport::fss_connection>();
     REQUIRE(conn != nullptr);
     REQUIRE(conn->connectTo("localhost", port));
 
-    REQUIRE(fss_test::wait_for([]() { return client_conn != nullptr; }));
+    auto server_conn = client_handoff.wait();
+    REQUIRE(server_conn != nullptr);
 
     for (size_t i = 0; i < small_queue_listen::queue_limit + extra; ++i)
     {
         conn->sendMsg(std::make_shared<flight_safety_system::transport::fss_message_rtt_request>());
     }
 
-    REQUIRE(fss_test::wait_for([&]() { return client_conn->getDroppedMessages() >= extra; }));
-    REQUIRE(client_conn->getDroppedMessages() == extra);
+    REQUIRE(fss_test::wait_for([&]() { return server_conn->getDroppedMessages() >= extra; }));
+    REQUIRE(server_conn->getDroppedMessages() == extra);
 
     size_t count = 0;
-    while (client_conn->getMsg() != nullptr)
+    while (server_conn->getMsg() != nullptr)
     {
         ++count;
     }
     REQUIRE(count == small_queue_listen::queue_limit);
 
     conn = nullptr;
-    client_conn = nullptr;
+    server_conn = nullptr;
+    client_handoff.reset();
 }
 
 namespace {
@@ -261,7 +251,8 @@ TEST_CASE("Listen - Callback")
 {
     constexpr int listen_port = 20203;
 
-    auto listen = std::make_shared<flight_safety_system::transport::fss_listen>(listen_port, test_client_connect_cb);
+    client_handoff.reset();
+    auto listen = std::make_shared<flight_safety_system::transport::fss_listen>(listen_port, client_handoff.callback());
     REQUIRE(listen != nullptr);
 
     auto conn = std::make_shared<flight_safety_system::transport::fss_connection>();
@@ -270,14 +261,15 @@ TEST_CASE("Listen - Callback")
 
     conn->sendMsg(std::make_shared<flight_safety_system::transport::fss_message_identity>("testClient"));
 
-    REQUIRE(fss_test::wait_for([]() { return client_conn != nullptr; }));
+    auto server_conn = client_handoff.wait();
+    REQUIRE(server_conn != nullptr);
 
-    auto cb = std::make_shared<test_message_cb>(client_conn);
+    auto cb = std::make_shared<fss_test::recording_message_cb>(server_conn);
     REQUIRE(cb->connected());
-    REQUIRE(cb->getConnection() == client_conn);
-    client_conn->setHandler(cb.get());
+    REQUIRE(cb->getConnection() == server_conn);
+    server_conn->setHandler(cb.get());
 
-    REQUIRE(client_conn->getMsg() == nullptr);
+    REQUIRE(server_conn->getMsg() == nullptr);
 
     cb->sendMsg(std::make_shared<flight_safety_system::transport::fss_message_rtt_request>());
 
@@ -286,5 +278,5 @@ TEST_CASE("Listen - Callback")
     cb->disconnect();
     REQUIRE(!cb->connected());
 
-    client_conn = nullptr;
+    client_handoff.reset();
 }
