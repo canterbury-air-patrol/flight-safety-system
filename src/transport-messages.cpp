@@ -102,8 +102,14 @@ static auto decode_command_ack_reason(uint8_t reason) -> flight_safety_system::t
         case static_cast<uint8_t>(supersede_comms_loss): return supersede_comms_loss;
         case static_cast<uint8_t>(supersede_newer_command): return supersede_newer_command;
         /* An unrecognised reason from a newer peer degrades to "none" rather
-         * than inventing a cause the operator might act on. */
-        default: return supersede_none;
+         * than inventing a cause the operator might act on, but log it: the ack
+         * is reported as supersede_none to the operator while the raw code is
+         * preserved here so a version mismatch or protocol drift stays
+         * diagnosable instead of vanishing silently. */
+        default:
+            FSS_LOG_WARN("transport", "Unknown command-ack supersede reason " << static_cast<unsigned>(reason)
+                                                                              << "; treating as supersede_none");
+            return supersede_none;
     }
 }
 
