@@ -44,10 +44,6 @@ flight_safety_system::client_ssl::fss_client::fss_client(const std::string &t_fi
                 this->ca_file, this->private_key_file, this->public_key_file);
             this->addServer(server);
         }
-        if (!this->asset_name.empty() && (!this->servers.empty() || !this->reconnect_servers.empty()))
-        {
-            this->configured = true;
-        }
     }
     catch (const Json::Exception &e)
     {
@@ -99,9 +95,20 @@ void flight_safety_system::client_ssl::fss_client::disconnect()
     }
 }
 
+void flight_safety_system::client_ssl::fss_client::updateConfigured()
+{
+    /* A client is configured once it has an asset name and at least one server
+     * (live or pending reconnect). Centralised here so the file ctor, the
+     * programmatic setAssetName/connectTo path, and any future mutator all keep
+     * isConfigured() in step. */
+    this->configured = !this->asset_name.empty() && (!this->servers.empty() || !this->reconnect_servers.empty());
+}
+
 void flight_safety_system::client_ssl::fss_client::setAssetName(std::string t_asset_name)
 {
+    std::scoped_lock lock(this->servers_lock);
     this->asset_name = std::move(t_asset_name);
+    this->updateConfigured();
 }
 
 void flight_safety_system::client_ssl::fss_client::connectTo(const std::string &t_address, uint16_t t_port,
@@ -225,6 +232,7 @@ void flight_safety_system::client_ssl::fss_client::addServer(
     {
         this->reconnect_servers.push_back(server);
     }
+    this->updateConfigured();
 }
 
 static auto server_list_matches(const std::list<std::shared_ptr<flight_safety_system::client_ssl::fss_server>> &servers,
