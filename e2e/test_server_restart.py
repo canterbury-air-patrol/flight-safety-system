@@ -159,16 +159,20 @@ def test_client_reconnects_after_server_bounce(
     finally:
         if client.poll() is None:
             client.send_signal(signal.SIGINT)
-            try: client.wait(timeout=5)
+            try:
+                client.wait(timeout=5)
             except subprocess.TimeoutExpired:
-                client.kill(); client.wait(timeout=5)
+                client.kill()
+                client.wait(timeout=5)
         client_fp.close()
-        for s in (server1, server2 if 'server2' in locals() else None):
-            if s is not None and s.poll() is None:
-                s.send_signal(signal.SIGINT)
-                try: s.wait(timeout=5)
+        for server in (server1, server2 if 'server2' in locals() else None):
+            if server is not None and server.poll() is None:
+                server.send_signal(signal.SIGINT)
+                try:
+                    server.wait(timeout=5)
                 except subprocess.TimeoutExpired:
-                    s.kill(); s.wait(timeout=5)
-        for l in (server1_log, server2_log):
-            if l is not None:
-                l.close()
+                    server.kill()
+                    server.wait(timeout=5)
+        for log in (server1_log, server2_log):
+            if log is not None:
+                log.close()
