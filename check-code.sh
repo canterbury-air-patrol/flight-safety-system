@@ -17,3 +17,9 @@ cppcheck --enable=warning,performance,portability,style --error-exitcode=1 \
 
 run-clang-tidy -p . 'src/(?!server-db).*\.cpp$' 2>&1 | tee clang-tidy.log
 ! grep -q "warning:" clang-tidy.log
+
+# Lint the e2e Python harness. ruff's rule set is version-dependent, so CI pins
+# the exact version in a venv and points RUFF at it (see e2e/requirements-dev.txt).
+# Locally, install that pin into a venv and set RUFF, or rely on a ruff on PATH.
+ruff="${RUFF:-ruff}"
+"$ruff" check e2e/

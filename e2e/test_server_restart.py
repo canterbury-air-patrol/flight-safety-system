@@ -10,6 +10,7 @@ from typing import IO
 
 import psycopg2
 import pytest
+
 from conftest import (
     E2E_ROOT,
     REPO_ROOT,
