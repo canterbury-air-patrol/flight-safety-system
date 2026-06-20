@@ -98,7 +98,10 @@ def test_server_exits_when_db_host_invalid(certs_dir, tmp_path, migrated_db):
     # Sanity: the chosen port should not be left listening after exit.
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.settimeout(0.2)
-        with pytest.raises(OSError):
+        # A closed local port returns an immediate RST, so connect raises
+        # ConnectionRefusedError specifically (not a timeout) — assert that
+        # precise type rather than the broad OSError base.
+        with pytest.raises(ConnectionRefusedError):
             s.connect(("127.0.0.1", port))
 
 

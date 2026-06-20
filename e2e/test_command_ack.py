@@ -187,7 +187,8 @@ def test_command_ack_is_stored(db_conn, fake_client, server_proc):
     # latest-wins / no-regression rule means the terminal state must win over the
     # earlier received.
     assert ack_state == ACK_STATE_ACTIONED, f"expected ack_state actioned, got {ack_state}"
-    assert ack_timestamp is not None and ack_timestamp > 0, "ack_timestamp was not stored"
+    assert ack_timestamp is not None, "ack_timestamp was not stored"
+    assert ack_timestamp > 0, f"ack_timestamp should be positive, got {ack_timestamp}"
 
 
 def _dispatch_rtl(db_conn, asset_id: int) -> int:
