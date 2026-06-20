@@ -97,7 +97,6 @@ public:
         }
         return this->get();
     }
-
 private:
     std::mutex mtx{};
     connection_ptr conn{};
@@ -134,7 +133,6 @@ public:
             this->first = std::move(message);
         }
     }
-
 private:
     std::mutex first_lock{};
     std::shared_ptr<flight_safety_system::transport::fss_message> first{};
