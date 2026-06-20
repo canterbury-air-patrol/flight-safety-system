@@ -353,50 +353,59 @@ def test_ack_updates_only_the_latest_row_on_cross_session_dispatch_id_reuse(
     )
     _poll_field(db_conn, first, "ack_state", timeout=10.0)
 
-    # Seed an OLD already-acked row for the SAME asset at the dispatch_id the next
-    # live command will use, with an explicitly older timestamp so the newest-row
-    # subselect must not pick it.
-    collide_dispatch = first_dispatch + 1
+    # Seed OLD already-acked rows for the SAME asset across the band of
+    # dispatch_ids the next live command might land on — the connection's
+    # last_msg_id is bumped by RTT and other server->client traffic, so it is
+    # not reliably first_dispatch + 1. Each carries an explicitly older timestamp
+    # so the newest-row subselect must prefer the live command's row, never these.
     sentinel_ts = SENTINEL_ACK_TIMESTAMP
     sentinel_reason = SENTINEL_SUPERSEDE_REASON
+    collision_band = range(first_dispatch + 1, first_dispatch + 1 + COLLISION_BAND)
+    old_dbids: dict[int, int] = {}  # dispatch_id -> seeded historical row id
     with db_conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO assets_assetcommand "
-            "(asset_id, command, position, altitude, timestamp, dispatch_id, "
-            " ack_state, ack_timestamp, ack_superseded_by) "
-            "VALUES (%s, 'RTL', ST_SetSRID(ST_MakePoint(0, 0), 4326)::geography, 0, "
-            "        NOW() - INTERVAL '1 hour', %s, %s, %s, %s) RETURNING id",
-            (asset, collide_dispatch, ACK_STATE_SUPERSEDED, sentinel_ts, sentinel_reason),
-        )
-        old_dbid = cur.fetchone()[0]
+        for dispatch_id in collision_band:
+            cur.execute(
+                "INSERT INTO assets_assetcommand "
+                "(asset_id, command, position, altitude, timestamp, dispatch_id, "
+                " ack_state, ack_timestamp, ack_superseded_by) "
+                "VALUES (%s, 'RTL', ST_SetSRID(ST_MakePoint(0, 0), 4326)::geography, 0, "
+                "        NOW() - INTERVAL '1 hour', %s, %s, %s, %s) RETURNING id",
+                (asset, dispatch_id, ACK_STATE_SUPERSEDED, sentinel_ts, sentinel_reason),
+            )
+            old_dbids[dispatch_id] = cur.fetchone()[0]
     db_conn.commit()
 
-    # New dispatch: lands on collide_dispatch with a fresh (newer) timestamp.
+    # New dispatch: lands on one dispatch_id in the band with a fresh timestamp.
     new_dbid = _dispatch_rtl(db_conn, asset)
     new_dispatch = _poll_field(db_conn, new_dbid, "dispatch_id", timeout=10.0)
     new_state = _poll_ack_state(db_conn, new_dbid, ACK_STATE_ACTIONED, timeout=10.0)
 
-    assert new_dispatch == collide_dispatch, (
-        f"setup failed to reuse dispatch_id: old row={collide_dispatch} but the new "
-        f"command got dispatch_id={new_dispatch}"
+    assert new_dispatch in collision_band, (
+        f"setup failed to reuse dispatch_id: the new command got dispatch_id="
+        f"{new_dispatch}, outside the seeded band "
+        f"{collision_band.start}..{collision_band.stop - 1}; server log:\n"
+        + server_proc["log"].read_text(errors="replace")
     )
     # The new (latest) row is the one the ack must land on.
     assert new_state == ACK_STATE_ACTIONED, (
         f"the new command should have been acked actioned, got {new_state}"
     )
 
-    # The old, already-settled row must be untouched.
+    # The old, already-settled rows must all be untouched — above all the one
+    # sharing the new command's dispatch_id, which the newest-row subselect must
+    # not reach back to.
     db_conn.rollback()
     with db_conn.cursor() as cur:
         cur.execute(
-            "SELECT ack_state, ack_timestamp, ack_superseded_by "
-            "FROM assets_assetcommand WHERE id = %s",
-            (old_dbid,),
+            "SELECT dispatch_id, ack_state, ack_timestamp, ack_superseded_by "
+            "FROM assets_assetcommand WHERE id = ANY(%s) ORDER BY dispatch_id",
+            (list(old_dbids.values()),),
         )
-        old_state, old_ts, old_reason = cur.fetchone()
-    assert (old_state, old_ts, old_reason) == (ACK_STATE_SUPERSEDED, sentinel_ts, sentinel_reason), (
-        "the old already-acked command row was rewritten by an ack meant for the "
-        f"newer command sharing dispatch_id={collide_dispatch}: got "
-        f"ack_state={old_state}, ack_timestamp={old_ts}, ack_superseded_by={old_reason}; "
-        "server log:\n" + server_proc["log"].read_text(errors="replace")
-    )
+        old_rows = cur.fetchall()
+    for dispatch_id, old_state, old_ts, old_reason in old_rows:
+        assert (old_state, old_ts, old_reason) == (ACK_STATE_SUPERSEDED, sentinel_ts, sentinel_reason), (
+            f"the old already-acked row at dispatch_id={dispatch_id} was rewritten by an ack "
+            f"meant for the newer command (which landed at dispatch_id={new_dispatch}): got "
+            f"ack_state={old_state}, ack_timestamp={old_ts}, ack_superseded_by={old_reason}; "
+            "server log:\n" + server_proc["log"].read_text(errors="replace")
+        )
