@@ -16,7 +16,6 @@ import time
 
 import pytest
 
-
 # Mirror flight_safety_system::transport::fss_command_ack_outcome.
 ACK_STATE_RECEIVED = 0
 ACK_STATE_ACTIONED = 1

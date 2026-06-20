@@ -19,7 +19,6 @@ import subprocess
 import time
 
 import pytest
-
 from conftest import (
     E2E_ROOT,
     REPO_ROOT,
@@ -27,7 +26,6 @@ from conftest import (
     _pick_port,
     _render_template,
 )
-
 
 # RFC-5737 documentation block — guaranteed not to route to a real Postgres.
 UNREACHABLE_DB_HOST = "192.0.2.1"

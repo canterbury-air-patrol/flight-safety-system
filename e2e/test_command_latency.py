@@ -9,7 +9,6 @@ import time
 
 import pytest
 
-
 _DISPATCH_RE = re.compile(r"dispatched command dbid=(\d+)")
 
 # Should match flight_safety_system::server::command_poll_ms in src/fss-server.hpp
