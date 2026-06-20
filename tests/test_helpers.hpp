@@ -83,13 +83,18 @@ public:
         this->conn = nullptr;
     }
 
-    /* Block until a connection has been accepted, then return it (or nullptr if
-     * none arrived within the timeout). The returned copy is safe to use from
-     * the main thread: the mutex hands ownership over with a happens-before edge
-     * to every write the worker made while building the connection. */
+    /* Block until a connection has been accepted, then return it. A successful
+     * handoff always stores a non-null connection, so the return value is null
+     * if and only if the wait timed out — callers assert the handoff happened
+     * with REQUIRE(wait() != nullptr). The returned copy is safe to use from the
+     * main thread: the mutex hands ownership over with a happens-before edge to
+     * every write the worker made while building the connection. */
     auto wait(std::chrono::milliseconds timeout = std::chrono::milliseconds(2000)) -> connection_ptr
     {
-        wait_for([this]() { return this->get() != nullptr; }, timeout);
+        if (!wait_for([this]() { return this->get() != nullptr; }, timeout))
+        {
+            return nullptr;
+        }
         return this->get();
     }
 
@@ -121,7 +126,13 @@ public:
     void processMessage(std::shared_ptr<flight_safety_system::transport::fss_message> message) override
     {
         const std::scoped_lock lock(this->first_lock);
-        this->first = std::move(message);
+        /* Keep the *first* message, as the name promises: later arrivals do not
+         * overwrite it, so a test that sends one request and waits for one reply
+         * reads exactly that reply. */
+        if (this->first == nullptr)
+        {
+            this->first = std::move(message);
+        }
     }
 
 private:
