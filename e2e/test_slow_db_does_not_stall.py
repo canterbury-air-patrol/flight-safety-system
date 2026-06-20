@@ -9,8 +9,8 @@ must drain and new rows must land.
 from __future__ import annotations
 
 import time
+from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Dict, Iterator
 
 import psycopg2
 import pytest
@@ -20,7 +20,7 @@ _LOCKABLE_TABLES = frozenset({"assets_assetposition"})
 
 
 @contextmanager
-def hold_table_lock(db_info: Dict[str, object], table: str) -> Iterator[None]:
+def hold_table_lock(db_info: dict[str, object], table: str) -> Iterator[None]:
     """Hold an EXCLUSIVE lock on `table` via a fresh connection.
 
     EXCLUSIVE blocks INSERT/UPDATE/DELETE from other transactions while

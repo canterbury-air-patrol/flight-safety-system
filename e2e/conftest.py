@@ -18,8 +18,8 @@ import string
 import subprocess
 import time
 import uuid
+from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import Callable, Dict, Iterator, List, Optional
 
 import psycopg2
 import pytest
@@ -61,7 +61,7 @@ def _docker_available() -> bool:
 
 
 @pytest.fixture(scope="session")
-def pg_container() -> Iterator[Dict[str, object]]:
+def pg_container() -> Iterator[dict[str, object]]:
     """Provide Postgres+PostGIS connection parameters.
 
     Three modes (checked in order):
@@ -74,7 +74,7 @@ def pg_container() -> Iterator[Dict[str, object]]:
     external = os.environ.get("FSS_E2E_EXTERNAL_DB")
     if external:
         # Parse simple "key=value ..." style connection string.
-        params: Dict[str, object] = {}
+        params: dict[str, object] = {}
         for token in external.split():
             k, _, v = token.partition("=")
             params[k] = v
@@ -163,7 +163,7 @@ def pg_container() -> Iterator[Dict[str, object]]:
 
 
 @pytest.fixture(scope="session")
-def migrated_db(pg_container: Dict[str, object]) -> Dict[str, object]:
+def migrated_db(pg_container: dict[str, object]) -> dict[str, object]:
     """Apply bundled SQL files in lexical order and yield the same conn info.
 
     This uses the fallback schema under e2e/schema/. The primary path
@@ -186,7 +186,7 @@ def migrated_db(pg_container: Dict[str, object]) -> Dict[str, object]:
 
 
 @pytest.fixture
-def db_conn(migrated_db: Dict[str, object]) -> Iterator[psycopg2.extensions.connection]:
+def db_conn(migrated_db: dict[str, object]) -> Iterator[psycopg2.extensions.connection]:
     conn = psycopg2.connect(
         host=migrated_db["host"], port=migrated_db["port"],
         user=migrated_db["user"], password=migrated_db["password"],
@@ -239,7 +239,7 @@ def certs_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
         (target / script).chmod(0o755)
 
     # sourcery skip: dangerous-subprocess-use-audit
-    def run(cmd: List[str]) -> None:
+    def run(cmd: list[str]) -> None:
         subprocess.check_call(cmd, cwd=str(target))
 
     run(["./generate-ca.sh"])
@@ -256,11 +256,11 @@ def _render_template(template_path: Path, out_path: Path, **subs: object) -> Non
 
 @pytest.fixture
 def server_proc(
-    migrated_db: Dict[str, object],
+    migrated_db: dict[str, object],
     certs_dir: Path,
     tmp_path: Path,
     reset_db: None,
-) -> Iterator[Dict[str, object]]:
+) -> Iterator[dict[str, object]]:
     """Spawn fss-server pointed at migrated_db. Yield a control dict.
 
     The test is responsible for asserting behavior; this fixture only handles
@@ -340,20 +340,20 @@ def server_proc(
 
 @pytest.fixture
 def fake_client(
-    server_proc: Dict[str, object],
+    server_proc: dict[str, object],
     certs_dir: Path,
     tmp_path: Path,
-) -> Iterator[Callable[..., Dict[str, object]]]:
+) -> Iterator[Callable[..., dict[str, object]]]:
     """Factory that spawns an fss-fake-client bound to the active server."""
     if not FAKE_CLIENT_BIN.exists():
         pytest.skip(f"fss-fake-client not built at {FAKE_CLIENT_BIN}")
 
-    procs: List[Dict[str, object]] = []
+    procs: list[dict[str, object]] = []
 
     def _launch(
         name: str = "test1",
-        ca_override: Optional[Path] = None,
-    ) -> Dict[str, object]:
+        ca_override: Path | None = None,
+    ) -> dict[str, object]:
         config_path = tmp_path / f"client-{name}.json"
         log_path = tmp_path / f"client-{name}.log"
         _render_template(
@@ -399,7 +399,7 @@ def wait_for_row(
     params: tuple = (),
     timeout: float = 20.0,
     poll: float = 0.5,
-) -> Optional[tuple]:
+) -> tuple | None:
     """Poll a query until it returns a row or timeout elapses."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
