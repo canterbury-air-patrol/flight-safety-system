@@ -200,7 +200,7 @@ def db_conn(migrated_db: dict[str, object]) -> Iterator[psycopg2.extensions.conn
 
 
 @pytest.fixture
-def reset_db(db_conn: psycopg2.extensions.connection) -> Iterator[None]:
+def reset_db(db_conn: psycopg2.extensions.connection) -> None:
     """Truncate FSS tables before the test so state doesn't bleed between cases."""
     tables = [
         "assets_assetposition",
@@ -216,7 +216,6 @@ def reset_db(db_conn: psycopg2.extensions.connection) -> Iterator[None]:
     with db_conn.cursor() as cur:
         # sourcery skip: sqlalchemy-execute-raw-query
         cur.execute("TRUNCATE " + ", ".join(tables) + " RESTART IDENTITY CASCADE")
-    yield
 
 
 @pytest.fixture(scope="session")
