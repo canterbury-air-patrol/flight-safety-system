@@ -23,10 +23,18 @@ ACK_STATE_ACTIONED = 1
 ACK_STATE_SUPERSEDED = 2
 
 
-def _poll_row(db_conn, dbid: int, timeout: float):
-    """Poll the AssetCommand row until its ack fields are populated, or time out.
-    Returns (dispatch_id, ack_state, ack_timestamp) once ack_state is set."""
+def _poll_row(db_conn, dbid: int, timeout: float, expected_state: int = ACK_STATE_ACTIONED):
+    """Poll the AssetCommand row until ack_state reaches the terminal
+    `expected_state`, or time out.
+
+    The ack is two-phase: the client sends `received` (0) immediately followed
+    by `actioned` (1), persisted as two async writes. Returning as soon as
+    ack_state is merely non-NULL races those writes and can latch the transient
+    `received`; callers assert the terminal outcome, so wait for it. Returns the
+    last row seen (so a timeout still reports what was stored), or None if no ack
+    ever landed."""
     deadline = time.monotonic() + timeout
+    last = None
     while time.monotonic() < deadline:
         # A fresh transaction each poll so we see the server's committed writes.
         db_conn.rollback()
@@ -38,9 +46,11 @@ def _poll_row(db_conn, dbid: int, timeout: float):
             )
             row = cur.fetchone()
         if row is not None and row[1] is not None:
-            return row
+            last = row
+            if row[1] == expected_state:
+                return row
         time.sleep(0.05)
-    return None
+    return last
 
 
 def _poll_field(db_conn, dbid: int, field: str, timeout: float):
@@ -62,6 +72,29 @@ def _poll_field(db_conn, dbid: int, field: str, timeout: float):
             return row[0]
         time.sleep(0.02)
     return None
+
+
+def _poll_ack_state(db_conn, dbid: int, expected: int, timeout: float):
+    """Poll a row's ack_state until it reaches the terminal `expected` value, or
+    time out. See _poll_row for why a bare non-NULL check races the two-phase
+    ack. Returns the last non-NULL state seen (so a timeout reports what was
+    stored), or None if no ack ever landed."""
+    deadline = time.monotonic() + timeout
+    last = None
+    while time.monotonic() < deadline:
+        db_conn.rollback()
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "SELECT ack_state FROM assets_assetcommand WHERE id = %s",
+                (dbid,),
+            )
+            row = cur.fetchone()
+        if row is not None and row[0] is not None:
+            last = row[0]
+            if last == expected:
+                return last
+        time.sleep(0.02)
+    return last
 
 
 @pytest.mark.requires_docker
@@ -184,7 +217,7 @@ def test_ack_does_not_cross_assets_on_dispatch_id_collision(
     # Second dispatch to B: should land on collide_dispatch and be acked by B.
     b_second = _dispatch_rtl(db_conn, asset_b)
     b_second_dispatch = _poll_field(db_conn, b_second, "dispatch_id", timeout=10.0)
-    b_second_state = _poll_field(db_conn, b_second, "ack_state", timeout=10.0)
+    b_second_state = _poll_ack_state(db_conn, b_second, ACK_STATE_ACTIONED, timeout=10.0)
 
     # Guard the construction itself: if the collision didn't actually happen the
     # test proves nothing, so fail loudly rather than pass vacuously.
@@ -273,7 +306,7 @@ def test_ack_updates_only_the_latest_row_on_cross_session_dispatch_id_reuse(
     # New dispatch: lands on collide_dispatch with a fresh (newer) timestamp.
     new_dbid = _dispatch_rtl(db_conn, asset)
     new_dispatch = _poll_field(db_conn, new_dbid, "dispatch_id", timeout=10.0)
-    new_state = _poll_field(db_conn, new_dbid, "ack_state", timeout=10.0)
+    new_state = _poll_ack_state(db_conn, new_dbid, ACK_STATE_ACTIONED, timeout=10.0)
 
     assert new_dispatch == collide_dispatch, (
         f"setup failed to reuse dispatch_id: old row={collide_dispatch} but the new "
