@@ -7,6 +7,7 @@
 #include <functional>
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <sstream>
 #include <streambuf>
 #include <string>
@@ -38,6 +39,95 @@ inline auto wait_for(const std::function<bool()> &pred,
     }
     return pred();
 }
+
+/* Thread-safe handoff of an accepted connection from a listener's accept
+ * callback to the main test thread.
+ *
+ * A listener invokes its accept callback on its own setup-worker thread, so
+ * stashing the connection in a bare global/local shared_ptr and then polling it
+ * from the main thread with wait_for() is a data race: the poll establishes no
+ * happens-before edge, so TSan flags both the shared_ptr access and — because
+ * the worker is still the last writer of the connection's gnutls state — any
+ * later read of that connection (e.g. isPeerCertRevoked). Funnelling every
+ * access through one mutex publishes the worker's write to the reader. */
+class connection_handoff {
+public:
+    using connection_ptr = std::shared_ptr<flight_safety_system::transport::fss_connection>;
+
+    connection_handoff() = default;
+    connection_handoff(const connection_handoff &) = delete;
+    connection_handoff(connection_handoff &&) = delete;
+    auto operator=(const connection_handoff &) -> connection_handoff & = delete;
+    auto operator=(connection_handoff &&) -> connection_handoff & = delete;
+    ~connection_handoff() = default;
+
+    /* An fss_connect_cb that stores the accepted connection under the lock. */
+    auto callback() -> std::function<bool(connection_ptr)>
+    {
+        return [this](connection_ptr c) -> bool {
+            const std::scoped_lock lock(this->mtx);
+            this->conn = std::move(c);
+            return true;
+        };
+    }
+
+    [[nodiscard]] auto get() -> connection_ptr
+    {
+        const std::scoped_lock lock(this->mtx);
+        return this->conn;
+    }
+
+    void reset()
+    {
+        const std::scoped_lock lock(this->mtx);
+        this->conn = nullptr;
+    }
+
+    /* Block until a connection has been accepted, then return it (or nullptr if
+     * none arrived within the timeout). The returned copy is safe to use from
+     * the main thread: the mutex hands ownership over with a happens-before edge
+     * to every write the worker made while building the connection. */
+    auto wait(std::chrono::milliseconds timeout = std::chrono::milliseconds(2000)) -> connection_ptr
+    {
+        wait_for([this]() { return this->get() != nullptr; }, timeout);
+        return this->get();
+    }
+
+private:
+    std::mutex mtx{};
+    connection_ptr conn{};
+};
+
+/* An fss_message_cb that records the first message it receives, with the
+ * recv-thread write and the test-thread read synchronised. processMessage()
+ * runs on the connection's recv thread; getFirstMsg() is polled from the test
+ * thread, so the stored shared_ptr needs a lock to avoid a data race. */
+class recording_message_cb : public flight_safety_system::transport::fss_message_cb {
+public:
+    explicit recording_message_cb(std::shared_ptr<flight_safety_system::transport::fss_connection> t_conn)
+        : fss_message_cb(std::move(t_conn))
+    {
+    }
+    recording_message_cb(const recording_message_cb &) = delete;
+    recording_message_cb(recording_message_cb &&) = delete;
+    auto operator=(const recording_message_cb &) -> recording_message_cb & = delete;
+    auto operator=(recording_message_cb &&) -> recording_message_cb & = delete;
+    ~recording_message_cb() override = default;
+    auto getFirstMsg() -> std::shared_ptr<flight_safety_system::transport::fss_message>
+    {
+        const std::scoped_lock lock(this->first_lock);
+        return this->first;
+    }
+    void processMessage(std::shared_ptr<flight_safety_system::transport::fss_message> message) override
+    {
+        const std::scoped_lock lock(this->first_lock);
+        this->first = std::move(message);
+    }
+
+private:
+    std::mutex first_lock{};
+    std::shared_ptr<flight_safety_system::transport::fss_message> first{};
+};
 
 /* Obtain a free ephemeral TCP port by binding to port 0, reading the assigned
  * port, then closing. Caller accepts the TOCTOU risk (another process can grab

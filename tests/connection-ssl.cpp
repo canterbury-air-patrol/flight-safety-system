@@ -40,21 +40,19 @@ TEST_CASE("SSL - Connection Create (failure)")
     REQUIRE(!conn->connectTo("this.host.does.not.exist", 1));
 }
 
-static std::shared_ptr<flight_safety_system::transport::fss_connection> client_conn = nullptr;
-static auto test_client_connect_cb(std::shared_ptr<flight_safety_system::transport::fss_connection> new_conn) -> bool
-{
-    client_conn = std::move(new_conn);
-    return true;
-}
+/* The listener invokes its accept callback on its own worker thread; route the
+ * accepted connection through a mutex-guarded handoff so the main thread reads
+ * it (and the connection's gnutls state) with a happens-before edge. */
+static fss_test::connection_handoff client_handoff;
 
 
 TEST_CASE("SSL - Listen Socket")
 {
-    client_conn = nullptr;
+    client_handoff.reset();
     const uint16_t listen_port = fss_test::pick_port();
     REQUIRE(listen_port != 0);
     auto listen = std::make_shared<flight_safety_system::transport_ssl::fss_listen>(
-        listen_port, test_client_connect_cb, CA_PUBLIC_FILE, SERVER_PRIVATE_FILE, SERVER_PUBLIC_FILE);
+        listen_port, client_handoff.callback(), CA_PUBLIC_FILE, SERVER_PRIVATE_FILE, SERVER_PUBLIC_FILE);
     REQUIRE(listen != nullptr);
 
     std::shared_ptr<flight_safety_system::transport::fss_connection> conn =
@@ -65,14 +63,15 @@ TEST_CASE("SSL - Listen Socket")
     auto send_msg = std::make_shared<flight_safety_system::transport::fss_message_identity>("testClient");
     conn->sendMsg(send_msg);
 
-    REQUIRE(fss_test::wait_for([]() { return client_conn != nullptr; }));
+    auto server_conn = client_handoff.wait();
+    REQUIRE(server_conn != nullptr);
 
     // Drain identity before dropping the client connection.  Dropping conn
     // while the server's recv thread hasn't yet dequeued the identity bytes
     // causes a race where message_type_closed arrives first.
     std::shared_ptr<flight_safety_system::transport::fss_message> msg;
     REQUIRE(fss_test::wait_for([&]() {
-        msg = client_conn->getMsg();
+        msg = server_conn->getMsg();
         return msg != nullptr;
     }));
     REQUIRE(msg->getType() == flight_safety_system::transport::message_type_identity);
@@ -80,39 +79,25 @@ TEST_CASE("SSL - Listen Socket")
     conn = nullptr;
 
     REQUIRE(fss_test::wait_for([&]() {
-        msg = client_conn->getMsg();
+        msg = server_conn->getMsg();
         return msg != nullptr;
     }));
     REQUIRE(msg->getType() == flight_safety_system::transport::message_type_closed);
 
-    msg = client_conn->getMsg();
+    msg = server_conn->getMsg();
     REQUIRE(msg == nullptr);
 
-    client_conn = nullptr;
+    client_handoff.reset();
 }
-
-class test_ssl_message_cb : public flight_safety_system::transport::fss_message_cb {
-private:
-    std::shared_ptr<flight_safety_system::transport::fss_message> first{};
-public:
-    explicit test_ssl_message_cb(std::shared_ptr<flight_safety_system::transport::fss_connection> t_conn)
-        : fss_message_cb(std::move(t_conn)) {};
-    auto getFirstMsg() -> std::shared_ptr<flight_safety_system::transport::fss_message> { return this->first; }
-    void processMessage(std::shared_ptr<flight_safety_system::transport::fss_message> message) override
-    {
-        this->first = std::move(message);
-    }
-};
-
 
 TEST_CASE("SSL - Listen - Callback")
 {
-    client_conn = nullptr;
+    client_handoff.reset();
     const uint16_t listen_port = fss_test::pick_port();
     REQUIRE(listen_port != 0);
 
     auto listen = std::make_shared<flight_safety_system::transport_ssl::fss_listen>(
-        listen_port, test_client_connect_cb, CA_PUBLIC_FILE, SERVER_PRIVATE_FILE, SERVER_PUBLIC_FILE);
+        listen_port, client_handoff.callback(), CA_PUBLIC_FILE, SERVER_PRIVATE_FILE, SERVER_PUBLIC_FILE);
     REQUIRE(listen != nullptr);
 
     std::shared_ptr<flight_safety_system::transport::fss_connection> conn =
@@ -123,14 +108,15 @@ TEST_CASE("SSL - Listen - Callback")
 
     conn->sendMsg(std::make_shared<flight_safety_system::transport::fss_message_identity>("testClient"));
 
-    REQUIRE(fss_test::wait_for([]() { return client_conn != nullptr; }));
+    auto server_conn = client_handoff.wait();
+    REQUIRE(server_conn != nullptr);
 
-    auto cb = std::make_shared<test_ssl_message_cb>(client_conn);
+    auto cb = std::make_shared<fss_test::recording_message_cb>(server_conn);
     REQUIRE(cb->connected());
-    REQUIRE(cb->getConnection() == client_conn);
-    client_conn->setHandler(cb.get());
+    REQUIRE(cb->getConnection() == server_conn);
+    server_conn->setHandler(cb.get());
 
-    REQUIRE(client_conn->getMsg() == nullptr);
+    REQUIRE(server_conn->getMsg() == nullptr);
 
     cb->sendMsg(std::make_shared<flight_safety_system::transport::fss_message_rtt_request>());
 
@@ -139,56 +125,49 @@ TEST_CASE("SSL - Listen - Callback")
     cb->disconnect();
     REQUIRE(!cb->connected());
 
-    client_conn = nullptr;
+    client_handoff.reset();
 }
 
 TEST_CASE("ssl: isPeerCertRevoked detects revoked cert via CRL")
 {
     const uint16_t port = fss_test::pick_port();
     REQUIRE(port != 0);
-    std::shared_ptr<flight_safety_system::transport::fss_connection> server_conn;
+    fss_test::connection_handoff handoff;
 
     auto listen = std::make_shared<flight_safety_system::transport_ssl::fss_listen>(
-        port,
-        [&server_conn](std::shared_ptr<flight_safety_system::transport::fss_connection> c) -> bool {
-            server_conn = std::move(c);
-            return true;
-        },
-        CA_PUBLIC_FILE, SERVER_PRIVATE_FILE, SERVER_PUBLIC_FILE);
+        port, handoff.callback(), CA_PUBLIC_FILE, SERVER_PRIVATE_FILE, SERVER_PUBLIC_FILE);
     REQUIRE(listen != nullptr);
 
     auto client = std::make_shared<flight_safety_system::transport_ssl::fss_connection_client>(
         CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE);
     REQUIRE(client->connectTo("localhost", port));
 
-    REQUIRE(fss_test::wait_for([&] { return server_conn != nullptr; }));
+    auto server_conn = handoff.wait();
+    REQUIRE(server_conn != nullptr);
 
     REQUIRE(server_conn->isPeerCertRevoked(CLIENT_CRL_FILE));
     REQUIRE_FALSE(server_conn->isPeerCertRevoked(EMPTY_CRL_FILE));
     REQUIRE_FALSE(server_conn->isPeerCertRevoked(""));
 
     server_conn = nullptr;
+    handoff.reset();
 }
 
 TEST_CASE("ssl: disconnect after CRL revocation terminates client session")
 {
     const uint16_t port = fss_test::pick_port();
     REQUIRE(port != 0);
-    std::shared_ptr<flight_safety_system::transport::fss_connection> server_conn;
+    fss_test::connection_handoff handoff;
 
     auto listen = std::make_shared<flight_safety_system::transport_ssl::fss_listen>(
-        port,
-        [&server_conn](std::shared_ptr<flight_safety_system::transport::fss_connection> c) -> bool {
-            server_conn = std::move(c);
-            return true;
-        },
-        CA_PUBLIC_FILE, SERVER_PRIVATE_FILE, SERVER_PUBLIC_FILE);
+        port, handoff.callback(), CA_PUBLIC_FILE, SERVER_PRIVATE_FILE, SERVER_PUBLIC_FILE);
     REQUIRE(listen != nullptr);
 
     auto client = flight_safety_system::transport_ssl::fss_connection_client::create(
         CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE, "localhost", port);
     REQUIRE(client != nullptr);
-    REQUIRE(fss_test::wait_for([&] { return server_conn != nullptr; }));
+    auto server_conn = handoff.wait();
+    REQUIRE(server_conn != nullptr);
 
     REQUIRE(server_conn->isPeerCertRevoked(CLIENT_CRL_FILE));
     server_conn->disconnect();
@@ -199,16 +178,17 @@ TEST_CASE("ssl: disconnect after CRL revocation terminates client session")
     }));
 
     server_conn = nullptr;
+    handoff.reset();
 }
 
 TEST_CASE("SSL - Negotiated cipher suite is AEAD (TLS 1.2+)")
 {
     const uint16_t listen_port = fss_test::pick_port();
     REQUIRE(listen_port != 0);
-    client_conn = nullptr;
+    client_handoff.reset();
 
     auto listen = std::make_shared<flight_safety_system::transport_ssl::fss_listen>(
-        listen_port, test_client_connect_cb, CA_PUBLIC_FILE, SERVER_PRIVATE_FILE, SERVER_PUBLIC_FILE);
+        listen_port, client_handoff.callback(), CA_PUBLIC_FILE, SERVER_PRIVATE_FILE, SERVER_PUBLIC_FILE);
     REQUIRE(listen != nullptr);
 
     auto conn = std::make_shared<flight_safety_system::transport_ssl::fss_connection_client>(
@@ -227,5 +207,5 @@ TEST_CASE("SSL - Negotiated cipher suite is AEAD (TLS 1.2+)")
                 desc.find("-CCM") != std::string::npos;
     REQUIRE(aead);
 
-    client_conn = nullptr;
+    client_handoff.reset();
 }
