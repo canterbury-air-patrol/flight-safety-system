@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -10,8 +11,11 @@
 
 namespace fss_test {
 
-/* In-memory IDatabase for unit tests. No thread-safety: tests drive the
- * session synchronously. Commands are held newest-first so getCommand
+/* In-memory IDatabase for unit tests. The record* sinks are written by the
+ * async db-write-queue worker thread while tests poll/inspect them from the
+ * main thread, so those sinks are guarded by records_lock and exposed only via
+ * snapshot accessors (getPositions() etc.) that copy under the lock — a bare
+ * public vector would race. Commands are held newest-first so getCommand
  * returns the most recently pushed entry, matching the production
  * "ORDER BY timestamp DESC LIMIT 1" semantics. */
 class MockDatabase : public flight_safety_system::server::IDatabase {
@@ -59,13 +63,6 @@ public:
         uint8_t ack_reason;
     };
 
-    std::vector<recorded_rtt> rtts{};
-    std::vector<recorded_pos> positions{};
-    std::vector<recorded_status> statuses{};
-    std::vector<recorded_search> searches{};
-    std::vector<recorded_dispatch> dispatches{};
-    std::vector<recorded_ack> acks{};
-
     MockDatabase() = default;
     MockDatabase(const MockDatabase &) = delete;
     MockDatabase(MockDatabase &&) = delete;
@@ -81,30 +78,72 @@ public:
 
     void recordPosition(uint64_t asset_id, double latitude, double longitude, uint32_t altitude) override
     {
+        const std::scoped_lock lock(records_lock);
         positions.push_back({asset_id, latitude, longitude, altitude});
     }
 
-    void recordRtt(uint64_t asset_id, uint64_t rtt_ms) override { rtts.push_back({asset_id, rtt_ms}); }
+    void recordRtt(uint64_t asset_id, uint64_t rtt_ms) override
+    {
+        const std::scoped_lock lock(records_lock);
+        rtts.push_back({asset_id, rtt_ms});
+    }
 
     void recordStatus(uint64_t asset_id, uint8_t bat_percent, uint32_t bat_mah_used, double bat_voltage) override
     {
+        const std::scoped_lock lock(records_lock);
         statuses.push_back({asset_id, bat_percent, bat_mah_used, bat_voltage});
     }
 
     void recordSearchStatus(uint64_t asset_id, uint64_t search_id, uint64_t completed, uint64_t total) override
     {
+        const std::scoped_lock lock(records_lock);
         searches.push_back({asset_id, search_id, completed, total});
     }
 
     void recordCommandDispatch(uint64_t command_dbid, uint64_t dispatch_id) override
     {
+        const std::scoped_lock lock(records_lock);
         dispatches.push_back({command_dbid, dispatch_id});
     }
 
     void recordCommandAck(uint64_t asset_id, uint64_t dispatch_id, uint8_t ack_state, uint64_t ack_timestamp,
                           uint8_t ack_reason) override
     {
+        const std::scoped_lock lock(records_lock);
         acks.push_back({asset_id, dispatch_id, ack_state, ack_timestamp, ack_reason});
+    }
+
+    /* Snapshot accessors: copy the sink under the lock so a test can inspect it
+     * without racing the write-queue worker that fills it. */
+    auto getPositions() const -> std::vector<recorded_pos>
+    {
+        const std::scoped_lock lock(records_lock);
+        return positions;
+    }
+    auto getRtts() const -> std::vector<recorded_rtt>
+    {
+        const std::scoped_lock lock(records_lock);
+        return rtts;
+    }
+    auto getStatuses() const -> std::vector<recorded_status>
+    {
+        const std::scoped_lock lock(records_lock);
+        return statuses;
+    }
+    auto getSearches() const -> std::vector<recorded_search>
+    {
+        const std::scoped_lock lock(records_lock);
+        return searches;
+    }
+    auto getDispatches() const -> std::vector<recorded_dispatch>
+    {
+        const std::scoped_lock lock(records_lock);
+        return dispatches;
+    }
+    auto getAcks() const -> std::vector<recorded_ack>
+    {
+        const std::scoped_lock lock(records_lock);
+        return acks;
     }
 
     auto getCommand(uint64_t asset_id) -> std::shared_ptr<flight_safety_system::server::asset_command> override
@@ -152,6 +191,16 @@ public:
     {
         commands[asset_id].push_back(std::move(cmd));
     }
+private:
+    /* Written by the async write-queue worker, read via the snapshot accessors
+     * above; all access is under records_lock. */
+    mutable std::mutex records_lock{};
+    std::vector<recorded_rtt> rtts{};
+    std::vector<recorded_pos> positions{};
+    std::vector<recorded_status> statuses{};
+    std::vector<recorded_search> searches{};
+    std::vector<recorded_dispatch> dispatches{};
+    std::vector<recorded_ack> acks{};
 };
 
 } // namespace fss_test

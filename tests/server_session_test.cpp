@@ -941,8 +941,8 @@ TEST_CASE("session: no-fix (NaN) position report is discarded, not stored or bro
         std::string{}, 0U, uint8_t{0}, 0U, uint8_t{0}, uint8_t{0}, fss::fss_current_timestamp());
     session->processMessage(no_fix);
 
-    REQUIRE(mock.positions.empty());     // not stored
-    REQUIRE(handler.broadcasts.empty()); // not broadcast
+    REQUIRE(mock.getPositions().empty()); // not stored
+    REQUIRE(handler.broadcasts.empty());  // not broadcast
     /* Logged distinctly as a no-fix, not the generic invalid-coordinate path. */
     REQUIRE(cap.str().find("no GPS fix") != std::string::npos);
 
@@ -1394,9 +1394,10 @@ TEST_CASE("session: system_status message is forwarded to db writer")
         std::make_shared<fss::transport::fss_message_system_status>(uint8_t{80}, uint32_t{1000}, double{12.5});
     session->processMessage(status);
 
-    REQUIRE(fss_test::wait_for([&]() { return !mock.statuses.empty(); }));
-    REQUIRE(mock.statuses.front().asset_id == asset_id);
-    REQUIRE(mock.statuses.front().bat_percent == 80);
+    REQUIRE(fss_test::wait_for([&]() { return !mock.getStatuses().empty(); }));
+    auto statuses = mock.getStatuses();
+    REQUIRE(statuses.front().asset_id == asset_id);
+    REQUIRE(statuses.front().bat_percent == 80);
 }
 
 TEST_CASE("session: command_ack is stored when the capability is negotiated")
@@ -1421,14 +1422,15 @@ TEST_CASE("session: command_ack is stored when the capability is negotiated")
                                                                          fss::transport::supersede_low_battery, ack_ts);
     session->processMessage(ack);
 
-    REQUIRE(fss_test::wait_for([&]() { return !mock.acks.empty(); }));
+    REQUIRE(fss_test::wait_for([&]() { return !mock.getAcks().empty(); }));
     /* The ack is scoped to the acking asset (the one this connection identified
      * as), not just the per-connection dispatch_id. */
-    REQUIRE(mock.acks.front().asset_id == 13);
-    REQUIRE(mock.acks.front().dispatch_id == acked_id);
-    REQUIRE(mock.acks.front().ack_state == static_cast<uint8_t>(fss::transport::command_ack_superseded));
-    REQUIRE(mock.acks.front().ack_timestamp == ack_ts);
-    REQUIRE(mock.acks.front().ack_reason == static_cast<uint8_t>(fss::transport::supersede_low_battery));
+    auto acks = mock.getAcks();
+    REQUIRE(acks.front().asset_id == 13);
+    REQUIRE(acks.front().dispatch_id == acked_id);
+    REQUIRE(acks.front().ack_state == static_cast<uint8_t>(fss::transport::command_ack_superseded));
+    REQUIRE(acks.front().ack_timestamp == ack_ts);
+    REQUIRE(acks.front().ack_reason == static_cast<uint8_t>(fss::transport::supersede_low_battery));
 }
 
 TEST_CASE("session: command_ack is dropped when the capability is not negotiated")
@@ -1452,7 +1454,7 @@ TEST_CASE("session: command_ack is dropped when the capability is not negotiated
 
     /* Give the async writer a brief chance to run, then confirm nothing was
      * stored. A short timeout suffices: a real write would land near-instantly. */
-    REQUIRE_FALSE(fss_test::wait_for([&]() { return !mock.acks.empty(); }, std::chrono::milliseconds(200)));
+    REQUIRE_FALSE(fss_test::wait_for([&]() { return !mock.getAcks().empty(); }, std::chrono::milliseconds(200)));
 }
 
 TEST_CASE("session: search_status message is forwarded to db writer")
@@ -1472,11 +1474,12 @@ TEST_CASE("session: search_status message is forwarded to db writer")
     auto search = std::make_shared<fss::transport::fss_message_search_status>(uint64_t{5}, uint64_t{3}, uint64_t{10});
     session->processMessage(search);
 
-    REQUIRE(fss_test::wait_for([&]() { return !mock.searches.empty(); }));
-    REQUIRE(mock.searches.front().asset_id == asset_id);
-    REQUIRE(mock.searches.front().search_id == 5);
-    REQUIRE(mock.searches.front().completed == 3);
-    REQUIRE(mock.searches.front().total == 10);
+    REQUIRE(fss_test::wait_for([&]() { return !mock.getSearches().empty(); }));
+    auto searches = mock.getSearches();
+    REQUIRE(searches.front().asset_id == asset_id);
+    REQUIRE(searches.front().search_id == 5);
+    REQUIRE(searches.front().completed == 3);
+    REQUIRE(searches.front().total == 10);
 }
 
 TEST_CASE("session: rtt_request from client triggers rtt_response reply")
@@ -1527,7 +1530,7 @@ TEST_CASE("session: position report with out-of-range latitude is rejected")
     /* Must not be broadcast. */
     REQUIRE(handler.broadcasts.empty());
     /* Must not be written to the database. */
-    REQUIRE(mock.positions.empty());
+    REQUIRE(mock.getPositions().empty());
     /* Connection must stay up. */
     REQUIRE(handler.disconnects == 0);
     /* A warning must be logged. */
@@ -1540,8 +1543,8 @@ TEST_CASE("session: position report with out-of-range latitude is rejected")
     session->processMessage(good_pos);
 
     REQUIRE(handler.broadcasts.size() == 1);
-    REQUIRE(fss_test::wait_for([&]() { return !mock.positions.empty(); }));
-    REQUIRE(mock.positions.front().asset_id == asset_id);
+    REQUIRE(fss_test::wait_for([&]() { return !mock.getPositions().empty(); }));
+    REQUIRE(mock.getPositions().front().asset_id == asset_id);
 }
 
 TEST_CASE("session: position report with invalid longitude or non-finite coords is rejected")
@@ -1576,7 +1579,7 @@ TEST_CASE("session: position report with invalid longitude or non-finite coords 
     }
 
     REQUIRE(handler.broadcasts.empty());
-    REQUIRE(mock.positions.empty());
+    REQUIRE(mock.getPositions().empty());
     REQUIRE(handler.disconnects == 0);
 }
 
