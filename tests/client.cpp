@@ -77,18 +77,16 @@ constexpr const char *SERVER_PUBLIC_FILE = "certs/localhost.public.pem";
 constexpr const char *CLIENT_PRIVATE_FILE = "certs/client.private.pem";
 constexpr const char *CLIENT_PUBLIC_FILE = "certs/client.public.pem";
 
-static std::shared_ptr<flight_safety_system::transport::fss_connection> client_conn = nullptr;
-static auto test_client_connect_cb(std::shared_ptr<flight_safety_system::transport::fss_connection> new_conn) -> bool
-{
-    client_conn = std::move(new_conn);
-    return true;
-}
+/* The listener's accept callback runs on its worker thread; route the accepted
+ * connection to the main thread through the mutex-guarded handoff. */
+static fss_test::connection_handoff client_handoff;
 
 TEST_CASE("Client Base")
 {
+    client_handoff.reset();
     constexpr int listen_port = 20402;
     auto listen = std::make_shared<flight_safety_system::transport_ssl::fss_listen>(
-        listen_port, test_client_connect_cb, CA_PUBLIC_FILE, SERVER_PRIVATE_FILE, SERVER_PUBLIC_FILE);
+        listen_port, client_handoff.callback(), CA_PUBLIC_FILE, SERVER_PRIVATE_FILE, SERVER_PUBLIC_FILE);
     REQUIRE(listen != nullptr);
 
     auto client = std::make_shared<flight_safety_system::client_ssl::fss_client>(CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE,
@@ -96,9 +94,9 @@ TEST_CASE("Client Base")
     REQUIRE(client != nullptr);
     client->connectTo("localhost", listen_port, true);
 
-    REQUIRE(fss_test::wait_for([]() { return client_conn != nullptr; }));
+    REQUIRE(client_handoff.wait() != nullptr);
 
-    client_conn = nullptr;
+    client_handoff.reset();
 }
 
 TEST_CASE("client: config file not found leaves client with no servers")
@@ -335,20 +333,20 @@ TEST_CASE("client: disconnect closes all active server connections")
 {
     /* connectTo with connect=true adds a server to the connected list.
      * A subsequent disconnect() must iterate and close it (lines 65-71). */
-    client_conn = nullptr;
+    client_handoff.reset();
     const uint16_t port = fss_test::pick_port();
     REQUIRE(port != 0);
     auto listen = std::make_shared<flight_safety_system::transport_ssl::fss_listen>(
-        port, test_client_connect_cb, CA_PUBLIC_FILE, SERVER_PRIVATE_FILE, SERVER_PUBLIC_FILE);
+        port, client_handoff.callback(), CA_PUBLIC_FILE, SERVER_PRIVATE_FILE, SERVER_PUBLIC_FILE);
     REQUIRE(listen != nullptr);
 
     auto client =
         std::make_shared<fss::client_ssl::fss_client>(CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE);
     client->connectTo("localhost", port, true);
-    REQUIRE(fss_test::wait_for([]() -> bool { return client_conn != nullptr; }));
+    REQUIRE(client_handoff.wait() != nullptr);
 
     client->disconnect(); /* exercises lines 65-71 */
-    client_conn = nullptr;
+    client_handoff.reset();
 }
 
 TEST_CASE("client: base class handleCommand, handlePositionReport, handleSMMSettings are no-ops")
