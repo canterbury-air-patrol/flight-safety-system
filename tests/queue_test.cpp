@@ -29,13 +29,10 @@ using flight_safety_system::transport::message_type_rtt_request;
 
 namespace {
 
-std::shared_ptr<fss_connection> server_side_conn;
-
-auto accept_cb(std::shared_ptr<fss_connection> new_conn) -> bool
-{
-    server_side_conn = std::move(new_conn);
-    return true;
-}
+/* The listener runs its accept callback on its own worker thread; hand the
+ * accepted connection to the main thread through a mutex-guarded handoff so the
+ * two do not race on the shared_ptr (or the connection's state). */
+fss_test::connection_handoff handoff;
 
 class large_queue_listen : public fss_listen {
 public:
@@ -58,9 +55,9 @@ protected:
 
 TEST_CASE("queue: FIFO ordering is preserved across many messages")
 {
-    server_side_conn = nullptr;
+    handoff.reset();
     constexpr uint16_t port = 20502;
-    auto listen = std::make_shared<fss_listen>(port, accept_cb);
+    auto listen = std::make_shared<fss_listen>(port, handoff.callback());
     REQUIRE(listen != nullptr);
 
     auto client = std::make_shared<fss_connection>();
@@ -74,7 +71,8 @@ TEST_CASE("queue: FIFO ordering is preserved across many messages")
     }
     client = nullptr;
 
-    REQUIRE(fss_test::wait_for([&]() { return server_side_conn != nullptr; }));
+    auto server_side_conn = handoff.wait();
+    REQUIRE(server_side_conn != nullptr);
 
     int received = 0;
     while (received < count)
@@ -97,21 +95,22 @@ TEST_CASE("queue: FIFO ordering is preserved across many messages")
     }
     REQUIRE(received == count);
 
-    server_side_conn = nullptr;
+    handoff.reset();
 }
 
 TEST_CASE("queue: getMsg returns closed sentinel then nullptr on peer disconnect")
 {
-    server_side_conn = nullptr;
+    handoff.reset();
     constexpr uint16_t port = 20503;
-    auto listen = std::make_shared<fss_listen>(port, accept_cb);
+    auto listen = std::make_shared<fss_listen>(port, handoff.callback());
     REQUIRE(listen != nullptr);
 
     auto client = std::make_shared<fss_connection>();
     REQUIRE(client->connectTo("localhost", port));
     REQUIRE(client->sendMsg(std::make_shared<fss_message_identity>("client1")));
 
-    REQUIRE(fss_test::wait_for([&]() { return server_side_conn != nullptr; }));
+    auto server_side_conn = handoff.wait();
+    REQUIRE(server_side_conn != nullptr);
 
     client = nullptr;
 
@@ -131,20 +130,21 @@ TEST_CASE("queue: getMsg returns closed sentinel then nullptr on peer disconnect
 
     REQUIRE(server_side_conn->getMsg() == nullptr);
 
-    server_side_conn = nullptr;
+    handoff.reset();
 }
 
 TEST_CASE("queue: 10k messages over loopback with no drops")
 {
-    server_side_conn = nullptr;
+    handoff.reset();
     constexpr uint16_t port = 20504;
-    auto listen = std::make_shared<large_queue_listen>(port, accept_cb);
+    auto listen = std::make_shared<large_queue_listen>(port, handoff.callback());
     REQUIRE(listen != nullptr);
 
     auto client = std::make_shared<fss_connection>();
     REQUIRE(client->connectTo("localhost", port));
 
-    REQUIRE(fss_test::wait_for([&]() { return server_side_conn != nullptr; }));
+    auto server_side_conn = handoff.wait();
+    REQUIRE(server_side_conn != nullptr);
 
     constexpr int count = 10000;
     std::atomic<int> produced{0};
@@ -183,4 +183,5 @@ TEST_CASE("queue: 10k messages over loopback with no drops")
 
     client = nullptr;
     server_side_conn = nullptr;
+    handoff.reset();
 }

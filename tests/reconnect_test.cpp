@@ -32,17 +32,14 @@ constexpr const char* SERVER_PUBLIC_FILE = "certs/localhost.public.pem";
 constexpr const char* CLIENT_PRIVATE_FILE = "certs/client.private.pem";
 constexpr const char* CLIENT_PUBLIC_FILE = "certs/client.public.pem";
 
-std::shared_ptr<flight_safety_system::transport::fss_connection> accepted_conn;
-
-auto accept_cb(std::shared_ptr<flight_safety_system::transport::fss_connection> new_conn) -> bool
-{
-    accepted_conn = std::move(new_conn);
-    return true;
-}
+/* The listener runs its accept callback on its own worker thread; the handoff
+ * publishes the accepted connection to the main thread with a happens-before
+ * edge. reset() between connections lets a test wait for the *next* accept. */
+fss_test::connection_handoff handoff;
 
 auto make_listener(uint16_t port)
 {
-    return std::make_shared<flight_safety_system::transport_ssl::fss_listen>(port, accept_cb, CA_PUBLIC_FILE,
+    return std::make_shared<flight_safety_system::transport_ssl::fss_listen>(port, handoff.callback(), CA_PUBLIC_FILE,
                                                                              SERVER_PRIVATE_FILE, SERVER_PUBLIC_FILE);
 }
 
@@ -73,7 +70,7 @@ protected:
 
 TEST_CASE("reconnect: client reconnects after listener bounce")
 {
-    accepted_conn = nullptr;
+    handoff.reset();
     constexpr uint16_t port = 20505;
 
     auto listen = make_listener(port);
@@ -83,9 +80,9 @@ TEST_CASE("reconnect: client reconnects after listener bounce")
                                                                                  CLIENT_PUBLIC_FILE);
     client->connectTo("localhost", port, /*connect*/ true);
 
-    REQUIRE(fss_test::wait_for([]() { return accepted_conn != nullptr; }));
-    auto original = accepted_conn;
-    accepted_conn = nullptr;
+    auto original = handoff.wait();
+    REQUIRE(original != nullptr);
+    handoff.reset();
 
     /* Drop the listener and the accepted connection — from the client's
      * perspective, the server side has gone away.  With the shared_ptr-capture
@@ -111,11 +108,11 @@ TEST_CASE("reconnect: client reconnects after listener bounce")
     REQUIRE(fss_test::wait_for(
         [&]() {
             client->attemptReconnect();
-            return accepted_conn != nullptr;
+            return handoff.get() != nullptr;
         },
         std::chrono::milliseconds(15000), std::chrono::milliseconds(200)));
 
-    accepted_conn = nullptr;
+    handoff.reset();
 }
 
 TEST_CASE("reconnect: attemptReconnect is throttled within the retry window")
@@ -304,18 +301,18 @@ TEST_CASE("reconnect: multi-server failover keeps secondary reachable")
     REQUIRE(listen_primary != nullptr);
     REQUIRE(listen_secondary != nullptr);
 
-    accepted_conn = nullptr;
+    handoff.reset();
     auto client = std::make_shared<flight_safety_system::client_ssl::fss_client>(CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE,
                                                                                  CLIENT_PUBLIC_FILE);
     client->connectTo("localhost", port_primary, /*connect*/ true);
-    REQUIRE(fss_test::wait_for([]() { return accepted_conn != nullptr; }));
-    auto primary_conn = accepted_conn;
-    accepted_conn = nullptr;
+    auto primary_conn = handoff.wait();
+    REQUIRE(primary_conn != nullptr);
+    handoff.reset();
 
     client->connectTo("localhost", port_secondary, /*connect*/ true);
-    REQUIRE(fss_test::wait_for([]() { return accepted_conn != nullptr; }));
-    auto secondary_conn = accepted_conn;
-    accepted_conn = nullptr;
+    auto secondary_conn = handoff.wait();
+    REQUIRE(secondary_conn != nullptr);
+    handoff.reset();
 
     /* Kill the primary; secondary must still accept traffic. */
     primary_conn = nullptr;
