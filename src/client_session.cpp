@@ -207,57 +207,84 @@ void fss::server::fss_client::sendCommand()
     }
     uint64_t ts = this->clock->now_ms();
     auto ac = this->pending_command;
-    constexpr int timeout_time = 10 * sec_to_msec;
-    if (ac != nullptr && (ac->getDBId() != this->last_command_dbid || ts > (this->last_command_send_ts + timeout_time)))
+    if (ac == nullptr)
     {
-        this->last_command_send_ts = ts;
-        this->last_command_dbid = ac->getDBId();
-        auto command = ac->getCommand();
-        if (command == fss::transport::asset_command_unknown)
-        {
-            FSS_LOG_ERROR("server", "Refusing to dispatch unknown command type to "
-                                        << this->name << " (dbid=" << ac->getDBId() << ")");
-            return;
-        }
-        if (command == fss::transport::asset_command_goto &&
-            !is_valid_coordinate(ac->getLatitude(), ac->getLongitude()))
-        {
-            FSS_LOG_ERROR("server", "Refusing to dispatch GOTO command with invalid coordinates to "
-                                        << this->name << " (dbid=" << ac->getDBId() << ", lat=" << ac->getLatitude()
-                                        << ", lon=" << ac->getLongitude() << ")");
-            return;
-        }
-        if (command == fss::transport::asset_command_altitude && !ac->isAltitudeValid())
-        {
-            /* A NULL altitude must not dispatch as 0 — that is a
-             * descend-to-ground instruction. */
-            FSS_LOG_ERROR("server", "Refusing to dispatch ALT command with NULL altitude to "
-                                        << this->name << " (dbid=" << ac->getDBId() << ")");
-            return;
-        }
-        std::shared_ptr<fss::transport::fss_message_asset_command> msg = nullptr;
-        switch (command)
-        {
-            case fss::transport::asset_command_goto:
-                msg = std::make_shared<fss::transport::fss_message_asset_command>(
-                    command, ac->getTimeStamp(), ac->getLatitude(), ac->getLongitude());
-                break;
-            case fss::transport::asset_command_altitude:
-                msg = std::make_shared<fss::transport::fss_message_asset_command>(command, ac->getTimeStamp(),
-                                                                                  ac->getAltitude());
-                break;
-            default:
-                msg = std::make_shared<fss::transport::fss_message_asset_command>(command, ac->getTimeStamp());
-                break;
-        }
-        this->getConnection()->sendMsg(msg);
-        /* sendMsg stamped the per-connection message id into msg; record it
-         * against the command row (cached_asset_id is non-zero here — the
-         * early return above guarantees it) so a later ack, which echoes this id
-         * as acked_command_id, can be matched back to this specific command. */
-        this->writer->enqueue(command_dispatch_write{ac->getDBId(), msg->getId()});
-        FSS_LOG_INFO("server", "dispatched command dbid=" << ac->getDBId() << " to " << this->name);
+        return;
     }
+    constexpr int timeout_time = 10 * sec_to_msec;
+    bool is_new_command = ac->getDBId() != this->last_command_dbid;
+    bool resend_window_expired = ts > (this->last_command_send_ts + timeout_time);
+    if (!is_new_command && !resend_window_expired)
+    {
+        /* Same command we last handled and still inside the resend window. */
+        return;
+    }
+    /* Mark a command as handled for the current resend window: applied on a
+     * successful dispatch, and on a permanent validation rejection below (which
+     * can never succeed, so re-evaluating it every tick would only spam the
+     * log). Deliberately NOT applied on a transient send failure, which must
+     * stay eligible for retry on the next send tick. Takes the timestamp and
+     * dbid explicitly so the state it writes is visible at each call. */
+    auto mark_handled = [this](uint64_t handled_ts, uint64_t handled_dbid) -> void {
+        this->last_command_send_ts = handled_ts;
+        this->last_command_dbid = handled_dbid;
+    };
+    auto command = ac->getCommand();
+    if (command == fss::transport::asset_command_unknown)
+    {
+        mark_handled(ts, ac->getDBId());
+        FSS_LOG_ERROR("server", "Refusing to dispatch unknown command type to " << this->name
+                                                                                << " (dbid=" << ac->getDBId() << ")");
+        return;
+    }
+    if (command == fss::transport::asset_command_goto && !is_valid_coordinate(ac->getLatitude(), ac->getLongitude()))
+    {
+        mark_handled(ts, ac->getDBId());
+        FSS_LOG_ERROR("server", "Refusing to dispatch GOTO command with invalid coordinates to "
+                                    << this->name << " (dbid=" << ac->getDBId() << ", lat=" << ac->getLatitude()
+                                    << ", lon=" << ac->getLongitude() << ")");
+        return;
+    }
+    if (command == fss::transport::asset_command_altitude && !ac->isAltitudeValid())
+    {
+        /* A NULL altitude must not dispatch as 0 — that is a
+         * descend-to-ground instruction. */
+        mark_handled(ts, ac->getDBId());
+        FSS_LOG_ERROR("server", "Refusing to dispatch ALT command with NULL altitude to "
+                                    << this->name << " (dbid=" << ac->getDBId() << ")");
+        return;
+    }
+    std::shared_ptr<fss::transport::fss_message_asset_command> msg = nullptr;
+    switch (command)
+    {
+        case fss::transport::asset_command_goto:
+            msg = std::make_shared<fss::transport::fss_message_asset_command>(command, ac->getTimeStamp(),
+                                                                              ac->getLatitude(), ac->getLongitude());
+            break;
+        case fss::transport::asset_command_altitude:
+            msg = std::make_shared<fss::transport::fss_message_asset_command>(command, ac->getTimeStamp(),
+                                                                              ac->getAltitude());
+            break;
+        default: msg = std::make_shared<fss::transport::fss_message_asset_command>(command, ac->getTimeStamp()); break;
+    }
+    if (!this->getConnection()->sendMsg(msg))
+    {
+        /* The socket write failed, so the command never reached the aircraft.
+         * Do not record a dispatch and do not advance the resend window: the
+         * command must be retried on the next send tick rather than appearing in
+         * the DB as dispatched. A genuinely dead connection is reaped separately
+         * by the recv thread's closed-message path. */
+        FSS_LOG_WARN("server", "Failed to send command dbid=" << ac->getDBId() << " to " << this->name
+                                                              << "; will retry on next tick");
+        return;
+    }
+    mark_handled(ts, ac->getDBId());
+    /* sendMsg stamped the per-connection message id into msg; record it against
+     * the command row (cached_asset_id is non-zero here — the early return above
+     * guarantees it) so a later ack, which echoes this id as acked_command_id,
+     * can be matched back to this specific command. */
+    this->writer->enqueue(command_dispatch_write{ac->getDBId(), msg->getId()});
+    FSS_LOG_INFO("server", "dispatched command dbid=" << ac->getDBId() << " to " << this->name);
 }
 
 void fss::server::fss_client::setClock(std::shared_ptr<fss::IClock> t_clock)
