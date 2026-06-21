@@ -10,10 +10,12 @@
 #error No catch header
 #endif
 
+#include <condition_variable>
 #include <cmath>
 #include <limits>
 #include <list>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -36,6 +38,11 @@ namespace {
  * back into an fss_message so tests can assert on outbound traffic. */
 class FakeConnection : public fss::transport::fss_connection {
 public:
+    /* sent/send_attempts are written by sendMsg, which the outbound writer
+     * thread (todo/21) may run; guard them with sent_lock so a test thread can
+     * observe them without racing. Synchronous tests that touch `sent` directly
+     * only ever do so on the same thread that called the send, so they stay
+     * race-free too. */
     std::vector<std::shared_ptr<fss::transport::fss_message>> sent{};
     std::list<std::string> cert_names{};
     /* When true, sendMsg() reports the socket write failed (as the real
@@ -53,10 +60,41 @@ public:
     ~FakeConnection() override = default;
 
     auto getClientNames() -> std::list<std::string> override { return cert_names; }
+
+    /* Block (true) or release (false) any in-flight or future sendMsg, modelling
+     * a peer whose socket has black-holed. Releasing wakes a blocked writer. */
+    void setBlocked(bool b)
+    {
+        {
+            std::scoped_lock guard(this->block_lock);
+            this->blocked = b;
+        }
+        this->block_cv.notify_all();
+    }
+
+    /* Thread-safe snapshot of the messages that actually went out. */
+    auto sentSnapshot() -> std::vector<std::shared_ptr<fss::transport::fss_message>>
+    {
+        std::scoped_lock guard(this->sent_lock);
+        return this->sent;
+    }
+
+    /* Releasing a blocked send is also needed when the connection is torn down,
+     * so a worker parked in sendMsg can exit and be joined. */
+    void disconnect() override
+    {
+        this->setBlocked(false);
+        fss::transport::fss_connection::disconnect();
+    }
 protected:
     auto sendMsg(const std::shared_ptr<fss::transport::buf_len> &bl) -> bool override
     {
+        {
+            std::unique_lock<std::mutex> lock(this->block_lock);
+            this->block_cv.wait(lock, [this]() -> bool { return !this->blocked; });
+        }
         auto msg = fss::transport::fss_message::decode(bl);
+        std::scoped_lock guard(this->sent_lock);
         if (msg != nullptr)
         {
             send_attempts.push_back(msg);
@@ -71,6 +109,11 @@ protected:
         }
         return true;
     }
+private:
+    std::mutex sent_lock{};
+    std::mutex block_lock{};
+    std::condition_variable block_cv{};
+    bool blocked{false};
 };
 
 /* Return the first message in `sent` (at or after `from`) that decoded to a T,
@@ -502,6 +545,78 @@ TEST_CASE("session: a successful command send records exactly one dispatch and s
     REQUIRE(count_sent<fss::transport::fss_message_asset_command>(conn->sent) == 1);
     REQUIRE(fss_test::wait_for([&]() -> bool { return mock.getDispatches().size() == 1; }));
     REQUIRE(mock.getDispatches().front().command_dbid == 88);
+}
+
+TEST_CASE("session: queueCommandSend dispatches a command on the outbound worker thread")
+{
+    /* todo/21: the server main loop schedules a command via queueCommandSend()
+     * and returns immediately; the per-client writer thread performs the actual
+     * send. Verify the command does reach the wire via that thread. */
+    fss_test::MockDatabase mock;
+    constexpr uint64_t asset_id = 21;
+    mock.asset_ids["craft"] = asset_id;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+    session->activate(); /* starts the outbound writer thread */
+
+    session->setPendingCommand(
+        std::make_shared<fss::server::asset_command>(/*dbid*/ 57, /*ts*/ 500, "RTL", 0.0, 0.0, 0));
+    session->queueCommandSend();
+
+    REQUIRE(fss_test::wait_for(
+        [&]() -> bool { return count_sent<fss::transport::fss_message_asset_command>(conn->sentSnapshot()) == 1; }));
+
+    session->disconnect();
+}
+
+TEST_CASE("session: a blocked client's writer does not stall command dispatch for another client")
+{
+    /* todo/21 Done-when: a black-holed socket on one client must not delay
+     * command dispatch for unrelated clients. Block client A's writer mid-send,
+     * then dispatch to client B and require B's command to go out regardless. */
+    fss_test::MockDatabase mock;
+    mock.asset_ids["alpha"] = 1;
+    mock.asset_ids["bravo"] = 2;
+    NullClientHandler handler;
+
+    auto conn_a = std::make_shared<FakeConnection>();
+    conn_a->cert_names.push_back("alpha");
+    auto writer_a = make_mock_writer(mock);
+    auto client_a = std::make_shared<fss::server::fss_client>(conn_a, &mock, writer_a, &handler);
+    client_a->processMessage(std::make_shared<fss::transport::fss_message_identity>("alpha"));
+    client_a->activate();
+
+    auto conn_b = std::make_shared<FakeConnection>();
+    conn_b->cert_names.push_back("bravo");
+    auto writer_b = make_mock_writer(mock);
+    auto client_b = std::make_shared<fss::server::fss_client>(conn_b, &mock, writer_b, &handler);
+    client_b->processMessage(std::make_shared<fss::transport::fss_message_identity>("bravo"));
+    client_b->activate();
+
+    /* A's socket black-holes: its writer thread will park inside send(). */
+    conn_a->setBlocked(true);
+    client_a->setPendingCommand(
+        std::make_shared<fss::server::asset_command>(/*dbid*/ 10, /*ts*/ 500, "RTL", 0.0, 0.0, 0));
+    client_a->queueCommandSend();
+
+    /* B's command must still be delivered while A's writer is stuck. */
+    client_b->setPendingCommand(
+        std::make_shared<fss::server::asset_command>(/*dbid*/ 20, /*ts*/ 500, "HOLD", 0.0, 0.0, 0));
+    client_b->queueCommandSend();
+
+    REQUIRE(fss_test::wait_for(
+        [&]() -> bool { return count_sent<fss::transport::fss_message_asset_command>(conn_b->sentSnapshot()) == 1; }));
+    /* A's command has not gone out — its writer is blocked, not crashed. */
+    REQUIRE(count_sent<fss::transport::fss_message_asset_command>(conn_a->sentSnapshot()) == 0);
+
+    /* disconnect() releases the block and joins A's writer cleanly. */
+    client_a->disconnect();
+    client_b->disconnect();
 }
 
 TEST_CASE("session: a freshly queued command is delivered after the poller updates the cache")
