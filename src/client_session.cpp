@@ -192,26 +192,49 @@ void fss::server::fss_client::activate()
     this->getConnection()->setHandler(this);
 }
 
+auto fss::server::fss_client::waitForOutboundWork() -> fss::server::fss_client::outbound_work
+{
+    std::unique_lock<std::mutex> lock(this->outbound_lock);
+    this->outbound_cv.wait(lock, [this]() -> bool {
+        return this->outbound_stopping || this->out_command_pending || this->out_rtt_pending;
+    });
+    outbound_work work;
+    if (this->outbound_stopping)
+    {
+        work.stop = true;
+        return work;
+    }
+    work.command = this->out_command_pending;
+    work.rtt = this->out_rtt_pending;
+    this->out_command_pending = false;
+    this->out_rtt_pending = false;
+    return work;
+}
+
 void fss::server::fss_client::outboundWorkerRun()
 {
     for (;;)
     {
+        auto work = this->waitForOutboundWork();
+        /* Periodic sends are best-effort: anything not yet written is
+         * re-scheduled on the next tick if the client survives, and a
+         * disconnecting client has nothing left to say. Exit promptly on stop so
+         * a join never waits on a send. */
+        if (work.stop)
         {
-            std::unique_lock<std::mutex> lock(this->outbound_lock);
-            this->outbound_cv.wait(lock,
-                                   [this]() -> bool { return this->outbound_stopping || this->out_command_pending; });
-            if (this->outbound_stopping)
-            {
-                /* Periodic sends are best-effort: a command not yet written will
-                 * be re-scheduled on the next tick if the client survives, and a
-                 * disconnecting client has nothing left to say. Exit promptly
-                 * rather than draining, so a join never waits on a send. */
-                return;
-            }
-            /* The only non-stop wake reason is a pending command. */
-            this->out_command_pending = false;
+            return;
         }
-        this->sendCommand();
+        /* Commands are the highest priority — send them before periodic RTT. */
+        if (work.command)
+        {
+            this->sendCommand();
+        }
+        if (work.rtt)
+        {
+            /* A fresh request per client: never a shared instance (see the C8
+             * invariant on fss_connection::sendMsg). */
+            this->sendRTTRequest(std::make_shared<fss::transport::fss_message_rtt_request>());
+        }
     }
 }
 
@@ -224,6 +247,19 @@ void fss::server::fss_client::queueCommandSend()
             return;
         }
         this->out_command_pending = true;
+    }
+    this->outbound_cv.notify_one();
+}
+
+void fss::server::fss_client::queueRTTRequest()
+{
+    {
+        std::scoped_lock guard(this->outbound_lock);
+        if (this->outbound_stopping)
+        {
+            return;
+        }
+        this->out_rtt_pending = true;
     }
     this->outbound_cv.notify_one();
 }
