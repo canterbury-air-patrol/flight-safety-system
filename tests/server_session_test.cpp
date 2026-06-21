@@ -1597,6 +1597,34 @@ TEST_CASE("session: sendSMMSettings sends smm_settings message when db returns s
     REQUIRE(find_sent<fss::transport::fss_message_smm_settings>(conn->sent) != nullptr);
 }
 
+TEST_CASE("session: queueSMMSettings sends cached settings on the outbound worker thread")
+{
+    /* todo/21: the periodic SMM-settings push is scheduled on the writer thread
+     * too. Verify a queued send reaches the wire via that thread. */
+    fss_test::MockDatabase mock;
+    constexpr uint64_t asset_id = 13;
+    mock.asset_ids["craft"] = asset_id;
+    mock.smm[asset_id] = std::make_shared<fss::server::smm_settings>("https://smm.test", fss::secure_string{"u"},
+                                                                     fss::secure_string{"p"});
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+    session->activate();
+
+    /* identify already pushed one set of settings synchronously. */
+    const std::size_t before = count_sent<fss::transport::fss_message_smm_settings>(conn->sentSnapshot());
+    session->queueSMMSettings();
+    REQUIRE(fss_test::wait_for([&]() -> bool {
+        return count_sent<fss::transport::fss_message_smm_settings>(conn->sentSnapshot()) == before + 1;
+    }));
+
+    session->disconnect();
+}
+
 TEST_CASE("MonotonicClock: now_ms is non-decreasing")
 {
     /* Sanity check: two back-to-back calls must return a non-decreasing

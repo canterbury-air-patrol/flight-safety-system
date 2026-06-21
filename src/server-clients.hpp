@@ -171,10 +171,12 @@ public:
     };
     void sendSMMSettings()
     {
-        /* Sends cached settings only; the poller refreshes the caches. */
+        /* Sends cached settings only; the poller refreshes the caches. Scheduled
+         * on each client's outbound writer thread (todo/21) so a stalled peer
+         * cannot hold up the periodic config push to the others. */
         for (const auto &client : this->snapshotClients())
         {
-            client->sendSMMSettings();
+            client->queueSMMSettings();
         }
     };
     /* Synchronous DB reads; poller thread only — see the main-loop DB
