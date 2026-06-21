@@ -28,7 +28,7 @@ AC_ARG_ENABLE([server],AS_HELP_STRING([--enable-server], [Build the server (fss-
 AC_ARG_ENABLE([tests],AS_HELP_STRING([--enable-tests], [Build the tests (Requires catch2)]))
 AC_ARG_ENABLE([coverage],AS_HELP_STRING([--enable-coverage], [Build with coverage support (gcov)]))
 AC_ARG_ENABLE([fake-client],AS_HELP_STRING([--enable-fake-client], [Build the example client (fss-fake-client)]))
-AC_ARG_ENABLE([tsan],AS_HELP_STRING([--enable-tsan], [Build the ThreadSanitizer concurrency test binary (requires --enable-tests; mutually exclusive with --enable-coverage)]))
+AC_ARG_ENABLE([tsan],AS_HELP_STRING([--enable-tsan], [Build the whole tree (libraries, tests, and the dedicated concurrency binary) under ThreadSanitizer so "make check" runs the full unit suite race-checked (requires --enable-tests; mutually exclusive with --enable-coverage)]))
 
 AM_CONDITIONAL([SERVER], [test "x$enable_server" == "xyes"])
 AM_CONDITIONAL([ENABLE_TESTS], [test "x$enable_tests" == "xyes"])
@@ -43,8 +43,12 @@ AS_IF([test "x$enable_tsan" == "xyes" -a "x$enable_tests" != "xyes"], [
     AC_MSG_ERROR([--enable-tsan requires --enable-tests])
 ])
 
+# Whole-tree ThreadSanitizer. These flags are appended to AM_CXXFLAGS/AM_LDFLAGS
+# in src/, tests/ and examples/ (the same way --enable-coverage instruments the
+# tree) so the libraries all_test links are instrumented too — a per-target flag
+# on just the concurrency binary would leave the rest of the suite blind.
 AS_IF([test "x$enable_tsan" == "xyes"], [
-    TSAN_CXXFLAGS="-fsanitize=thread -O1 -g -fno-omit-frame-pointer"
+    TSAN_CXXFLAGS="-fsanitize=thread -fno-omit-frame-pointer"
     TSAN_LDFLAGS="-fsanitize=thread"
 ], [
     TSAN_CXXFLAGS=""

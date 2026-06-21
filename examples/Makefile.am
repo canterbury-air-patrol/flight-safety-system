@@ -2,6 +2,11 @@ AUTOMAKE_OPTIONS = subdir-objects
 ACLOCAL_AMFLAGS = $(ACLOCAL_FLAGS)
 AM_CXXFLAGS = -pthread -fPIC -std=c++17 -I. -Werror -Wall -Wshadow -Wunused -Wnull-dereference -Wformat=2 -pedantic -Wnon-virtual-dtor -Woverloaded-virtual -Wpedantic -Weffc++ -I$(top_srcdir)/src -include config.h
 
+# Whole-tree ThreadSanitizer (empty unless --enable-tsan): the example binaries
+# link the instrumented libraries, so they must be built/linked with TSan too.
+AM_CXXFLAGS += $(TSAN_CXXFLAGS)
+AM_LDFLAGS = $(TSAN_LDFLAGS)
+
 bin_PROGRAMS =
 
 # fss-server.service.in is distributed unconditionally: a source template must

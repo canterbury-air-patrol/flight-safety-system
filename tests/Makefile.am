@@ -2,6 +2,18 @@ AUTOMAKE_OPTIONS = subdir-objects
 ACLOCAL_AMFLAGS = $(ACLOCAL_FLAGS)
 AM_CXXFLAGS = -pthread -fPIC -std=c++17 -I. -Werror -Wall -Wshadow -Wunused -Wnull-dereference -Wformat=2 -pedantic -Wnon-virtual-dtor -Woverloaded-virtual -Wpedantic -Weffc++ -I$(top_srcdir)/src -include config.h $(CODE_COVERAGE_CXXFLAGS)
 
+# Whole-tree ThreadSanitizer (empty unless --enable-tsan): instrument the test
+# objects and link all_test against the (also-instrumented) libraries with TSan.
+AM_CXXFLAGS += $(TSAN_CXXFLAGS)
+AM_LDFLAGS = $(TSAN_LDFLAGS)
+
+if ENABLE_TSAN
+# Under --enable-tsan the whole suite runs instrumented, so `make check` needs
+# the suppression file in the environment or the documented kernel-synchronised
+# false positives (see tsan.supp) would fail the run.
+AM_TESTS_ENVIRONMENT = TSAN_OPTIONS='suppressions=$(abs_srcdir)/tsan.supp halt_on_error=1'; export TSAN_OPTIONS;
+endif
+
 if ENABLE_TESTS
 TESTS = all_test
 check_PROGRAMS = all_test
@@ -98,11 +110,12 @@ certs/empty.crl.pem: certs
 	  --outfile certs/empty.crl.pem
 
 if ENABLE_TSAN
-# Separate binary built with -fsanitize=thread. NOT added to TESTS — it runs
-# only via `make check-tsan` so regular `make check` is unaffected. Shares no
-# objects with all_test because TSan instrumentation must reach into the
-# transport-layer sources (compiled in directly here, not linked via the .la
-# archive which is built without TSan flags).
+# Dedicated concurrency stress binary. It is NOT in TESTS (so `make check`
+# doesn't run it), and compiles the transport-layer sources in directly to keep
+# its own focused harness; under --enable-tsan the whole tree is instrumented,
+# so this binary is TSan-built via the AM_CXXFLAGS/AM_LDFLAGS above. The
+# per-target CXXFLAGS only forces object renaming (main.cpp is shared with
+# all_test).
 check_PROGRAMS += concurrency_tsan_test
 concurrency_tsan_test_SOURCES = main.cpp \
 	concurrency_connection_test.cpp \
@@ -113,15 +126,19 @@ concurrency_tsan_test_SOURCES = main.cpp \
 	../src/client_session.cpp \
 	../src/db-write-queue.cpp \
 	../src/fss-main.cpp
-concurrency_tsan_test_CXXFLAGS = $(AM_CXXFLAGS) $(TSAN_CXXFLAGS)
-concurrency_tsan_test_LDFLAGS = $(TSAN_LDFLAGS)
+concurrency_tsan_test_CXXFLAGS = $(AM_CXXFLAGS)
 concurrency_tsan_test_LDADD = $(CATCH2_LIBS) $(pthread_LIBS)
 
 EXTRA_DIST += tsan.supp
 
+# Run the full unit suite *and* the concurrency stress binary under TSan in one
+# command. `make check` already runs all_test under TSan (TESTS +
+# AM_TESTS_ENVIRONMENT); this target adds the concurrency binary, which is not
+# in TESTS, and re-runs all_test so a single command covers everything.
 .PHONY: check-tsan
 check-tsan:
-	$(MAKE) $(AM_MAKEFLAGS) concurrency_tsan_test
+	$(MAKE) $(AM_MAKEFLAGS) all_test concurrency_tsan_test
+	TSAN_OPTIONS="suppressions=$(srcdir)/tsan.supp halt_on_error=1" ./all_test
 	TSAN_OPTIONS="suppressions=$(srcdir)/tsan.supp halt_on_error=1" ./concurrency_tsan_test
 endif
 endif
