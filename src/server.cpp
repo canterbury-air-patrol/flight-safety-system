@@ -353,6 +353,13 @@ auto main(int argc, char *argv[]) -> int
                     FSS_LOG_ERROR("server", "DB write failures since start: " << current_failures);
                     last_failure_count = current_failures;
                 }
+                static uint64_t last_command_dropped = 0;
+                uint64_t current_command_dropped = writer->command_dropped_count();
+                if (current_command_dropped != last_command_dropped)
+                {
+                    FSS_LOG_ERROR("server", "command DB writes dropped since start: " << current_command_dropped);
+                    last_command_dropped = current_command_dropped;
+                }
                 dbc->tryReconnectIfNeeded();
             }
             if ((tick_counter % send_config_period_ticks) == 0)
