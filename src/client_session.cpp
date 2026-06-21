@@ -8,6 +8,8 @@
 #include <iostream>
 #include <memory>
 #include <mutex>
+#include <system_error>
+#include <thread>
 #include <utility>
 
 namespace fss = flight_safety_system;
@@ -176,10 +178,122 @@ void fss::server::fss_client::activate()
         this->activated_ms = this->clock->now_ms();
         this->activated = true;
     }
+    {
+        /* Start the outbound writer thread (todo/21) before wiring the handler,
+         * so it is ready for any send scheduled as a side effect of the first
+         * flushed message. */
+        std::scoped_lock guard(this->outbound_lock);
+        if (!this->outbound_started && !this->outbound_stopping)
+        {
+            this->outbound_started = true;
+            this->outbound_worker = std::thread(&fss_client::outboundWorkerRun, this);
+        }
+    }
     this->getConnection()->setHandler(this);
 }
 
-fss::server::fss_client::~fss_client() = default;
+void fss::server::fss_client::outboundWorkerRun()
+{
+    for (;;)
+    {
+        {
+            std::unique_lock<std::mutex> lock(this->outbound_lock);
+            this->outbound_cv.wait(lock,
+                                   [this]() -> bool { return this->outbound_stopping || this->out_command_pending; });
+            if (this->outbound_stopping)
+            {
+                /* Periodic sends are best-effort: a command not yet written will
+                 * be re-scheduled on the next tick if the client survives, and a
+                 * disconnecting client has nothing left to say. Exit promptly
+                 * rather than draining, so a join never waits on a send. */
+                return;
+            }
+            /* The only non-stop wake reason is a pending command. */
+            this->out_command_pending = false;
+        }
+        this->sendCommand();
+    }
+}
+
+void fss::server::fss_client::queueCommandSend()
+{
+    {
+        std::scoped_lock guard(this->outbound_lock);
+        if (this->outbound_stopping)
+        {
+            return;
+        }
+        this->out_command_pending = true;
+    }
+    this->outbound_cv.notify_one();
+}
+
+void fss::server::fss_client::requestOutboundStop()
+{
+    {
+        std::scoped_lock guard(this->outbound_lock);
+        if (this->outbound_stopping)
+        {
+            return;
+        }
+        this->outbound_stopping = true;
+    }
+    this->outbound_cv.notify_all();
+}
+
+void fss::server::fss_client::stopOutboundWorker()
+{
+    this->requestOutboundStop();
+    if (!this->outbound_worker.joinable())
+    {
+        return;
+    }
+    if (this->outbound_worker.get_id() == std::this_thread::get_id())
+    {
+        /* The worker must never join itself; detach so it can finish. This is
+         * not expected (the worker only performs sends, never disconnects), but
+         * mirrors the recv-thread guard in fss_connection::disconnect(). */
+        this->outbound_worker.detach();
+        this->outbound_worker = std::thread();
+        return;
+    }
+    try
+    {
+        this->outbound_worker.join();
+    }
+    catch (const std::system_error &e)
+    {
+        FSS_LOG_ERROR("server", "outbound_worker.join() failed, detaching: " << e.what());
+        this->outbound_worker.detach();
+        this->outbound_worker = std::thread();
+    }
+}
+
+void fss::server::fss_client::disconnect()
+{
+    /* Order matters (todo/21): signal the worker to stop, then close the socket
+     * so a worker blocked in a send() returns, then join it — all before the
+     * base class clears the connection. The worker only ever sees a non-null
+     * connection (its sends fail fast once the fd is closed), so it can never
+     * dereference a cleared connection. */
+    this->requestOutboundStop();
+    auto active_conn = this->getConnection();
+    if (active_conn != nullptr)
+    {
+        active_conn->disconnect(); // closes the fd (unblocking a stalled worker send) and joins the recv thread
+    }
+    this->stopOutboundWorker();
+    fss_message_cb::disconnect(); // a second disconnect() on the connection here is a safe no-op
+}
+
+fss::server::fss_client::~fss_client()
+{
+    /* Single teardown entry point: disconnect() stops the worker (closing the fd
+     * first so a blocked send returns) and clears the connection. It is
+     * idempotent, so this is safe whether or not disconnect() was already
+     * called. */
+    fss_client::disconnect();
+}
 
 auto fss::server::fss_client::isAircraft() -> bool
 {

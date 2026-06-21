@@ -6,11 +6,13 @@
 #include "rate-limiter.hpp"
 
 #include <atomic>
+#include <condition_variable>
 #include <memory>
 #include <stdexcept>
 #include <string>
 #include <list>
 #include <mutex>
+#include <thread>
 #include <vector>
 
 namespace flight_safety_system {
@@ -252,6 +254,31 @@ private:
      * (never reset); touched only on the recv thread (processMessage), used
      * to throttle the warning. */
     uint64_t duplicate_version_count{0};
+    /* Per-client outbound writer (todo/21). The server main loop schedules
+     * *what* to send by setting these pending flags; the worker thread does the
+     * actual blocking socket write, so one black-holed peer can only stall its
+     * own writer, never command dispatch or RTT handling for other clients.
+     * Flags coalesce — at most one of each kind is ever queued — which keeps the
+     * queue bounded and lets a command never sit behind stale periodic work.
+     * All four bools and the thread handle are guarded by outbound_lock. */
+    std::mutex outbound_lock{};
+    std::condition_variable outbound_cv{};
+    bool outbound_stopping{false};
+    bool outbound_started{false};
+    bool out_command_pending{false};
+    std::thread outbound_worker{};
+    /* The worker loop: waits for a pending flag, then performs the blocking
+     * send(s) off the main loop. */
+    void outboundWorkerRun();
+    /* Idempotent: set the stop flag and wake the worker. The single place that
+     * owns the stop signal, so disconnect() and stopOutboundWorker() cannot
+     * drift apart. */
+    void requestOutboundStop();
+    /* Idempotent: request the stop (above) and join the worker. Safe to call more
+     * than once and from any thread other than the worker itself. The caller must
+     * have already closed the connection's fd if the worker might be blocked in
+     * a socket send, otherwise the join can hang for the send timeout. */
+    void stopOutboundWorker();
 public:
     fss_client(std::shared_ptr<transport::fss_connection> conn, IDatabase *t_dbc,
                std::shared_ptr<db_write_queue> t_writer, fss_client_handler *t_handler);
@@ -263,6 +290,10 @@ public:
     /* Wire this client as the connection's message handler. Call only after
      * per-client config (timeout, rate limits) is set; see the constructor. */
     void activate();
+    /* Stops the per-client outbound writer thread and the connection (todo/21).
+     * Overrides fss_message_cb::disconnect so a stalled writer is unblocked and
+     * joined before the connection is torn down. */
+    void disconnect() override;
     void processMessage(std::shared_ptr<transport::fss_message> message) override;
     void sendRTTRequest(const std::shared_ptr<transport::fss_message_rtt_request> &rtt_req);
     /* Synchronous DB read; called from the command poller thread (and once
@@ -271,6 +302,12 @@ public:
     /* Sends the cached settings only; no DB access. */
     void sendSMMSettings();
     void sendCommand();
+    /* Schedule a command send on this client's outbound worker thread instead of
+     * sending inline (todo/21). Returns immediately; the worker performs the
+     * blocking write. The server main loop uses this so a stalled peer cannot
+     * delay command dispatch to other clients. No-op once disconnecting, or if
+     * the worker was never started (activate() starts it). */
+    void queueCommandSend();
     auto isAircraft() -> bool;
     auto getCachedAssetId() -> uint64_t { return this->cached_asset_id.load(); }
     /* The smoothed client↔server clock offset (ms; positive = client ahead)

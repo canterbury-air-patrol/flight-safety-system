@@ -216,9 +216,12 @@ public:
     };
     void sendCommand()
     {
+        /* Schedule on each client's outbound writer thread rather than sending
+         * inline (todo/21): a peer with a black-holed socket can then only stall
+         * its own writer, never command dispatch for the other clients. */
         for (const auto &client : this->snapshotClients())
         {
-            client->sendCommand();
+            client->queueCommandSend();
         }
     };
     auto disconnectRevokedClients(const std::string &crl_file) -> std::size_t
