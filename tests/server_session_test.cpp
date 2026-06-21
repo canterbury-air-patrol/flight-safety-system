@@ -1926,6 +1926,41 @@ TEST_CASE("session: sendRTTRequest skips second request within retry interval")
     REQUIRE(handler.disconnects == 0);
 }
 
+TEST_CASE("session: a failed RTT send creates no outstanding request and is not throttled")
+{
+    /* todo/22: a failed RTT write must not create a phantom outstanding request.
+     * If it did, the retry throttle would suppress the next request and the
+     * liveness timeout would later fire against a local send failure rather than
+     * genuine peer silence. The chosen failure policy disconnects the client. */
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 5;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+    auto clock = std::make_shared<FakeClock>();
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    session->setClock(clock);
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+
+    conn->fail_sends = true;
+    const std::size_t attempts_before = conn->send_attempts.size();
+
+    auto rtt1 = std::make_shared<fss::transport::fss_message_rtt_request>();
+    session->sendRTTRequest(rtt1);
+    REQUIRE(conn->send_attempts.size() == attempts_before + 1);
+    /* Failure policy: the broken connection is reaped immediately. */
+    REQUIRE(handler.disconnects > 0);
+
+    /* No outstanding request was recorded, so a second request issued within the
+     * rtt_retry_interval (clock not advanced) is NOT throttled — it is attempted
+     * again rather than silently suppressed. */
+    auto rtt2 = std::make_shared<fss::transport::fss_message_rtt_request>();
+    session->sendRTTRequest(rtt2);
+    REQUIRE(conn->send_attempts.size() == attempts_before + 2);
+}
+
 TEST_CASE("asset_command: altitude above uint16_t max survives pack/decode round-trip")
 {
     /* Regression: altitude was stored as uint16_t, silently truncating any
