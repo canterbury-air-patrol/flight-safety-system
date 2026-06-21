@@ -28,13 +28,9 @@ using flight_safety_system::transport::message_type_closed;
 
 namespace {
 
-std::shared_ptr<fss_connection> accepted_oversized;
-
-auto accept_oversized_cb(std::shared_ptr<fss_connection> new_conn) -> bool
-{
-    accepted_oversized = std::move(new_conn);
-    return true;
-}
+/* The listener's accept callback runs on its worker thread; hand the accepted
+ * connection to the main thread through the mutex-guarded handoff. */
+fss_test::connection_handoff handoff;
 
 auto raw_connect_oversized(uint16_t port) -> int
 {
@@ -59,16 +55,17 @@ auto raw_connect_oversized(uint16_t port) -> int
 
 TEST_CASE("negative: oversized declared length closes connection")
 {
-    accepted_oversized = nullptr;
+    handoff.reset();
     uint16_t port = fss_test::pick_port();
     REQUIRE(port != 0);
-    auto listen = std::make_shared<fss_listen>(port, accept_oversized_cb);
+    auto listen = std::make_shared<fss_listen>(port, handoff.callback());
     REQUIRE(listen != nullptr);
 
     int fd = raw_connect_oversized(port);
     REQUIRE(fd >= 0);
 
-    REQUIRE(fss_test::wait_for([]() { return accepted_oversized != nullptr; }));
+    auto accepted_oversized = handoff.wait();
+    REQUIRE(accepted_oversized != nullptr);
 
     /* Declare 0xFFFF bytes — well over FSS_MAX_MESSAGE_BYTES. */
     const uint8_t header[2] = {0xFF, 0xFF};
@@ -87,5 +84,5 @@ TEST_CASE("negative: oversized declared length closes connection")
     REQUIRE(n == 0);
 
     ::close(fd);
-    accepted_oversized = nullptr;
+    handoff.reset();
 }

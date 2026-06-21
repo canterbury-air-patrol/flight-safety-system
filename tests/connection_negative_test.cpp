@@ -48,13 +48,9 @@ public:
 
 namespace {
 
-std::shared_ptr<fss_connection> accepted;
-
-auto accept_cb(std::shared_ptr<fss_connection> new_conn) -> bool
-{
-    accepted = std::move(new_conn);
-    return true;
-}
+/* The listener's accept callback runs on its worker thread; route the accepted
+ * connection to the main thread through the mutex-guarded handoff. */
+fss_test::connection_handoff handoff;
 
 /* Open a raw IPv6 TCP connection to localhost. Tests use this to play
  * the role of a misbehaving peer (partial writes, long silences). */
@@ -82,7 +78,7 @@ auto raw_connect(uint16_t port) -> int
 TEST_CASE("negative: binding the same port twice fails cleanly")
 {
     constexpr uint16_t port = 20509;
-    auto first = std::make_shared<fss_listen>(port, accept_cb);
+    auto first = std::make_shared<fss_listen>(port, handoff.callback());
     REQUIRE(first != nullptr);
 
     /* Second bind on the same port must not crash or abort the process;
@@ -94,7 +90,7 @@ TEST_CASE("negative: binding the same port twice fails cleanly")
     bool survived = true;
     try
     {
-        auto second = std::make_shared<fss_listen>(port, accept_cb);
+        auto second = std::make_shared<fss_listen>(port, handoff.callback());
         (void)second;
     }
     catch (...)
@@ -107,9 +103,9 @@ TEST_CASE("negative: binding the same port twice fails cleanly")
 
 TEST_CASE("negative: partial peer — header then close yields closed sentinel")
 {
-    accepted = nullptr;
+    handoff.reset();
     constexpr uint16_t port = 20510;
-    auto listen = std::make_shared<fss_listen>(port, accept_cb);
+    auto listen = std::make_shared<fss_listen>(port, handoff.callback());
     REQUIRE(listen != nullptr);
 
     int fd = raw_connect(port);
@@ -121,7 +117,8 @@ TEST_CASE("negative: partial peer — header then close yields closed sentinel")
     REQUIRE(::send(fd, partial, sizeof(partial), 0) == static_cast<ssize_t>(sizeof(partial)));
     ::close(fd);
 
-    REQUIRE(fss_test::wait_for([]() { return accepted != nullptr; }));
+    auto accepted = handoff.wait();
+    REQUIRE(accepted != nullptr);
 
     std::shared_ptr<fss_message> msg;
     REQUIRE(fss_test::wait_for([&]() {
@@ -130,14 +127,14 @@ TEST_CASE("negative: partial peer — header then close yields closed sentinel")
     }));
     REQUIRE(msg->getType() == message_type_closed);
 
-    accepted = nullptr;
+    handoff.reset();
 }
 
 TEST_CASE("negative: slow peer — one byte per 50ms still decodes full message")
 {
-    accepted = nullptr;
+    handoff.reset();
     constexpr uint16_t port = 20511;
-    auto listen = std::make_shared<fss_listen>(port, accept_cb);
+    auto listen = std::make_shared<fss_listen>(port, handoff.callback());
     REQUIRE(listen != nullptr);
 
     /* Build a valid identity message using the library's own packer,
@@ -150,7 +147,8 @@ TEST_CASE("negative: slow peer — one byte per 50ms still decodes full message"
 
     int fd = raw_connect(port);
     REQUIRE(fd >= 0);
-    REQUIRE(fss_test::wait_for([]() { return accepted != nullptr; }));
+    auto accepted = handoff.wait();
+    REQUIRE(accepted != nullptr);
 
     std::thread slow_writer([fd, bytes, len]() {
         for (uint16_t i = 0; i < len; ++i)
@@ -175,7 +173,7 @@ TEST_CASE("negative: slow peer — one byte per 50ms still decodes full message"
     REQUIRE(ident != nullptr);
     REQUIRE(ident->getName() == "slow");
 
-    accepted = nullptr;
+    handoff.reset();
 }
 
 TEST_CASE("negative: zero-length message header is skipped and next message decoded")
@@ -183,15 +181,16 @@ TEST_CASE("negative: zero-length message header is skipped and next message deco
     /* A 2-byte header with data_length==0 triggers the total_length < sizeof(uint16_t)
      * guard in recvMsg(), returning nullptr. processMessages() must log the warning
      * and continue, so the next valid message is still received. */
-    accepted = nullptr;
+    handoff.reset();
     constexpr uint16_t port = 20513;
-    auto listen = std::make_shared<fss_listen>(port, accept_cb);
+    auto listen = std::make_shared<fss_listen>(port, handoff.callback());
     REQUIRE(listen != nullptr);
 
     int fd = raw_connect(port);
     REQUIRE(fd >= 0);
 
-    REQUIRE(fss_test::wait_for([]() { return accepted != nullptr; }));
+    auto accepted = handoff.wait();
+    REQUIRE(accepted != nullptr);
 
     /* Zero-length header: data_length = 0 in network byte order. */
     const uint8_t zero_hdr[2] = {0x00, 0x00};
@@ -214,7 +213,7 @@ TEST_CASE("negative: zero-length message header is skipped and next message deco
     REQUIRE(ident->getName() == "after-zero");
 
     ::close(fd);
-    accepted = nullptr;
+    handoff.reset();
 }
 
 TEST_CASE("sendMsg(buf_len): returns false immediately when fd is -1")

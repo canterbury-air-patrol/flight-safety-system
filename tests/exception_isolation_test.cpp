@@ -51,30 +51,27 @@ public:
     }
 };
 
-static std::shared_ptr<flight_safety_system::transport::fss_connection> exception_test_conn;
-
-auto exception_test_accept_cb(std::shared_ptr<flight_safety_system::transport::fss_connection> new_conn) -> bool
-{
-    exception_test_conn = std::move(new_conn);
-    return true;
-}
+/* The listener's accept callback runs on its worker thread; hand the accepted
+ * connection to the main thread through the mutex-guarded handoff. */
+fss_test::connection_handoff handoff;
 
 } // namespace
 
 TEST_CASE("processMessages: throwing handler does not kill recv loop")
 {
-    exception_test_conn = nullptr;
+    handoff.reset();
     const auto port = fss_test::pick_port();
     REQUIRE(port != 0);
 
-    auto listen = std::make_shared<flight_safety_system::transport::fss_listen>(port, exception_test_accept_cb);
+    auto listen = std::make_shared<flight_safety_system::transport::fss_listen>(port, handoff.callback());
     REQUIRE(listen != nullptr);
 
     auto sender = std::make_shared<flight_safety_system::transport::fss_connection>();
     REQUIRE(sender != nullptr);
     REQUIRE(sender->connectTo("localhost", port));
 
-    REQUIRE(fss_test::wait_for([]() { return exception_test_conn != nullptr; }));
+    auto exception_test_conn = handoff.wait();
+    REQUIRE(exception_test_conn != nullptr);
 
     auto cb = std::make_shared<throwing_message_cb>(exception_test_conn);
     exception_test_conn->setHandler(cb.get());
@@ -92,4 +89,5 @@ TEST_CASE("processMessages: throwing handler does not kill recv loop")
     cb->disconnect();
     sender = nullptr;
     exception_test_conn = nullptr;
+    handoff.reset();
 }
