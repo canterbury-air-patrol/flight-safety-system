@@ -38,6 +38,12 @@ class FakeConnection : public fss::transport::fss_connection {
 public:
     std::vector<std::shared_ptr<fss::transport::fss_message>> sent{};
     std::list<std::string> cert_names{};
+    /* When true, sendMsg() reports the socket write failed (as the real
+     * transport does on EPIPE / a closed fd). The framed message is still
+     * decoded and pushed to send_attempts so a test can count attempts, but it
+     * is NOT added to `sent` — it never reached the peer. */
+    bool fail_sends{false};
+    std::vector<std::shared_ptr<fss::transport::fss_message>> send_attempts{};
 
     FakeConnection() = default;
     FakeConnection(const FakeConnection &) = delete;
@@ -51,6 +57,14 @@ protected:
     auto sendMsg(const std::shared_ptr<fss::transport::buf_len> &bl) -> bool override
     {
         auto msg = fss::transport::fss_message::decode(bl);
+        if (msg != nullptr)
+        {
+            send_attempts.push_back(msg);
+        }
+        if (fail_sends)
+        {
+            return false;
+        }
         if (msg != nullptr)
         {
             sent.push_back(msg);
@@ -409,6 +423,85 @@ TEST_CASE("session: rapid sendCommand does not duplicate a single pending comman
     }
 
     REQUIRE(count_sent<fss::transport::fss_message_asset_command>(conn->sent) == 1);
+}
+
+TEST_CASE("session: a failed command send records no dispatch and retries on the next tick")
+{
+    /* todo/19: a socket write that fails must not mark the command dispatched
+     * (that would record in the DB a command the aircraft never received) and
+     * must not advance the 10 s resend window (the command has to be retried
+     * promptly, not after the timeout). */
+    fss_test::MockDatabase mock;
+    constexpr uint64_t asset_id = 11;
+    mock.asset_ids["craft"] = asset_id;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+    auto clock = std::make_shared<FakeClock>();
+
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    session->setClock(clock);
+    /* Identify with no pending command in the DB, so the command queued below is
+     * the first one sendCommand ever attempts. */
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+
+    conn->fail_sends = true;
+    auto cmd = std::make_shared<fss::server::asset_command>(/*dbid*/ 77, /*ts*/ 500, "TERM", 0.0, 0.0, 0);
+    session->setPendingCommand(cmd);
+
+    const std::size_t attempts_before = conn->send_attempts.size();
+    session->sendCommand();
+    /* One attempt was made, but the failed write means nothing reached the peer. */
+    REQUIRE(conn->send_attempts.size() == attempts_before + 1);
+    REQUIRE(count_sent<fss::transport::fss_message_asset_command>(conn->sent) == 0);
+    /* Nothing was enqueued on a failed send, so the sink can never observe a
+     * dispatch — an immediate check is reliable. */
+    REQUIRE(mock.getDispatches().empty());
+
+    /* The clock has not advanced past the 10 s resend window, yet the next tick
+     * must retry because the previous attempt never reached the aircraft. */
+    session->sendCommand();
+    REQUIRE(conn->send_attempts.size() == attempts_before + 2);
+
+    /* Once the socket recovers, the retry goes through and records exactly one
+     * dispatch for this command. */
+    conn->fail_sends = false;
+    session->sendCommand();
+    REQUIRE(count_sent<fss::transport::fss_message_asset_command>(conn->sent) == 1);
+    REQUIRE(fss_test::wait_for([&]() -> bool { return mock.getDispatches().size() == 1; }));
+    REQUIRE(mock.getDispatches().front().command_dbid == 77);
+}
+
+TEST_CASE("session: a successful command send records exactly one dispatch and suppresses resends")
+{
+    /* todo/19: the success path must remain unchanged — one dispatch id is
+     * recorded and repeated ticks within the resend window do not resend or
+     * re-record. */
+    fss_test::MockDatabase mock;
+    constexpr uint64_t asset_id = 12;
+    mock.asset_ids["craft"] = asset_id;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+    auto clock = std::make_shared<FakeClock>();
+
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    session->setClock(clock);
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+
+    auto cmd = std::make_shared<fss::server::asset_command>(/*dbid*/ 88, /*ts*/ 500, "RTL", 0.0, 0.0, 0);
+    session->setPendingCommand(cmd);
+    for (int i = 0; i < 5; ++i)
+    {
+        session->sendCommand();
+    }
+    REQUIRE(count_sent<fss::transport::fss_message_asset_command>(conn->sent) == 1);
+    REQUIRE(fss_test::wait_for([&]() -> bool { return mock.getDispatches().size() == 1; }));
+    REQUIRE(mock.getDispatches().front().command_dbid == 88);
 }
 
 TEST_CASE("session: a freshly queued command is delivered after the poller updates the cache")
