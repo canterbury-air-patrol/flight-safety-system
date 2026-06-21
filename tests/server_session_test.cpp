@@ -619,6 +619,29 @@ TEST_CASE("session: a blocked client's writer does not stall command dispatch fo
     client_b->disconnect();
 }
 
+TEST_CASE("session: queueRTTRequest sends an RTT request on the outbound worker thread")
+{
+    /* todo/21: RTT requests are scheduled on the writer thread too, each client
+     * building its own request instance. Verify one reaches the wire. */
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 3;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+    session->activate();
+
+    REQUIRE(count_sent<fss::transport::fss_message_rtt_request>(conn->sentSnapshot()) == 0);
+    session->queueRTTRequest();
+    REQUIRE(fss_test::wait_for(
+        [&]() -> bool { return count_sent<fss::transport::fss_message_rtt_request>(conn->sentSnapshot()) == 1; }));
+
+    session->disconnect();
+}
+
 TEST_CASE("session: a freshly queued command is delivered after the poller updates the cache")
 {
     /* Commands are delivered in two steps: the background poller fetches

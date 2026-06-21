@@ -196,11 +196,15 @@ public:
         std::scoped_lock guard(this->lock);
         return this->cached_server_list;
     };
-    void sendRTTRequest(const std::shared_ptr<flight_safety_system::transport::fss_message_rtt_request> &rtt_req)
+    void sendRTTRequest()
     {
+        /* Schedule on each client's outbound writer thread (todo/21). Each client
+         * builds its own request, so there is no shared rtt_request instance to
+         * race the per-connection id stamp, and a stalled peer cannot hold up RTT
+         * scheduling for the others. */
         for (const auto &client : this->snapshotClients())
         {
-            client->sendRTTRequest(rtt_req);
+            client->queueRTTRequest();
         }
     };
     void pollCommands(flight_safety_system::server::IDatabase *dbc)

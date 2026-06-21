@@ -266,9 +266,20 @@ private:
     bool outbound_stopping{false};
     bool outbound_started{false};
     bool out_command_pending{false};
+    bool out_rtt_pending{false};
     std::thread outbound_worker{};
-    /* The worker loop: waits for a pending flag, then performs the blocking
-     * send(s) off the main loop. */
+    /* What the worker should do this wake-up. Returned by waitForOutboundWork so
+     * the worker performs the (blocking) sends with no lock held. */
+    struct outbound_work {
+        bool stop{false};
+        bool command{false};
+        bool rtt{false};
+    };
+    /* Block until there is work or a stop request, then atomically take and clear
+     * the pending flags. */
+    auto waitForOutboundWork() -> outbound_work;
+    /* The worker loop: waits for work, then performs the blocking send(s) off the
+     * main loop. */
     void outboundWorkerRun();
     /* Idempotent: set the stop flag and wake the worker. The single place that
      * owns the stop signal, so disconnect() and stopOutboundWorker() cannot
@@ -308,6 +319,11 @@ public:
      * delay command dispatch to other clients. No-op once disconnecting, or if
      * the worker was never started (activate() starts it). */
     void queueCommandSend();
+    /* Schedule an RTT request on this client's outbound worker thread (todo/21).
+     * The worker builds a fresh rtt_request per client — the request instance is
+     * never shared across connections, so the per-connection id stamp cannot
+     * race (the C8 invariant). Returns immediately; no-op once disconnecting. */
+    void queueRTTRequest();
     auto isAircraft() -> bool;
     auto getCachedAssetId() -> uint64_t { return this->cached_asset_id.load(); }
     /* The smoothed client↔server clock offset (ms; positive = client ahead)
