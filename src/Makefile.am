@@ -10,6 +10,11 @@ AM_CXXFLAGS += $(CODE_COVERAGE_CXXFLAGS)
 AM_CPPFLAGS += $(CODE_COVERAGE_CPPFLAGS)
 AM_LDFLAGS = $(CODE_COVERAGE_LDFLAGS)
 
+# Whole-tree ThreadSanitizer (empty unless --enable-tsan). Coverage and TSan are
+# mutually exclusive at configure time, so at most one of these is non-empty.
+AM_CXXFLAGS += $(TSAN_CXXFLAGS)
+AM_LDFLAGS += $(TSAN_LDFLAGS)
+
 bin_PROGRAMS =
 sbin_PROGRAMS =
 lib_LTLIBRARIES = libfss.la libfss-transport.la

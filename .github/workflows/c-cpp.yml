@@ -219,7 +219,7 @@ jobs:
         cd e2e
         .venv/bin/pytest -v --timeout=120
 
-  # ─── 6. ThreadSanitizer concurrency tests ────────────────────────────────
+  # ─── 6. ThreadSanitizer: full unit suite + concurrency stress tests ──────
   thread-sanitizer:
     runs-on: ubuntu-latest
     needs: build-and-check
@@ -235,16 +235,27 @@ jobs:
     - name: autogen
       run: ./autogen.sh
 
-    # --enable-tsan is mutually exclusive with --enable-coverage; this job is
-    # separate from the coverage job for that reason.
+    # --enable-tsan instruments the whole tree (libraries + tests + concurrency
+    # binary), so the full all_test runs race-checked — not just the dedicated
+    # concurrency binary. Mutually exclusive with --enable-coverage, so this is
+    # its own job.
     - name: configure with thread sanitizer
       run: ./configure --enable-tests --enable-tsan
 
     - name: make
       run: make -j$(nproc)
 
-    - name: run thread sanitizer tests
+    # check-tsan runs the full all_test *and* the concurrency stress binary under
+    # TSan in one step, with tests/tsan.supp (narrowly-scoped, documented
+    # kernel-synchronised false positives). `make check` would also run all_test
+    # under TSan (AM_TESTS_ENVIRONMENT wires the suppressions in), but that would
+    # double-run the slow suite, so this job uses check-tsan alone.
+    - name: run the full suite + concurrency stress tests under TSan
       run: make -C tests check-tsan
+
+    - name: show test logs on failure
+      if: failure()
+      run: cat tests/*.log 2>/dev/null || true
 
   # ─── 7. AddressSanitizer + UndefinedBehaviorSanitizer ────────────────────
   sanitizers:
