@@ -349,6 +349,7 @@ auto fss::server::fss_client::isTimedOut() -> bool
 void fss::server::fss_client::sendRTTRequest(const std::shared_ptr<fss::transport::fss_message_rtt_request> &rtt_req)
 {
     bool timed_out = false;
+    bool send_failed = false;
     {
         std::scoped_lock guard(this->client_lock);
         uint64_t now = this->clock->now_ms();
@@ -365,12 +366,32 @@ void fss::server::fss_client::sendRTTRequest(const std::shared_ptr<fss::transpor
         }
         if (!timed_out)
         {
-            this->getConnection()->sendMsg(rtt_req);
-            this->outstanding_rtt_requests.push_back(std::make_shared<fss_client_rtt>(now, rtt_req->getId()));
+            /* Only track an outstanding request once the write actually went out.
+             * todo/22: pushing on a failed send would leave a phantom request the
+             * peer never received, and would arm the retry throttle on a send
+             * that never happened — later timeout behaviour would then reflect a
+             * local send failure rather than peer silence. */
+            if (this->getConnection()->sendMsg(rtt_req))
+            {
+                this->outstanding_rtt_requests.push_back(std::make_shared<fss_client_rtt>(now, rtt_req->getId()));
+            }
+            else
+            {
+                send_failed = true;
+            }
         }
     }
     if (timed_out)
     {
+        this->client_handler->clientDisconnected(this);
+    }
+    else if (send_failed)
+    {
+        /* The socket write failed, so the connection is broken. Reap the client
+         * now rather than waiting out the liveness timeout against a peer that
+         * can never answer (the recv thread's closed-message path would also get
+         * here, but disconnecting directly is immediate and idempotent). */
+        FSS_LOG_WARN("server", "Failed to send RTT request to " << this->getName() << "; disconnecting");
         this->client_handler->clientDisconnected(this);
     }
 }
