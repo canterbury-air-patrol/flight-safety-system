@@ -10,8 +10,10 @@
 #error No catch header
 #endif
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -33,9 +35,30 @@ struct CapturingSink {
     std::vector<uint64_t> asset_ids{};
     std::atomic<uint64_t> count{0};
     std::chrono::milliseconds delay{0};
+    /* Optional gate: while closed, the worker parks at the start of the sink
+     * (after recording that it entered) so a test can hold the queue in a known
+     * state. Open by default, so existing tests are unaffected. */
+    std::mutex gate_mtx{};
+    std::condition_variable gate_cv{};
+    bool gate_open{true};
+    std::atomic<uint64_t> entered{0};
+
+    void open_gate()
+    {
+        {
+            std::lock_guard<std::mutex> guard(gate_mtx);
+            gate_open = true;
+        }
+        gate_cv.notify_all();
+    }
 
     void operator()(const fss::server::db_write_task &task)
     {
+        entered.fetch_add(1);
+        {
+            std::unique_lock<std::mutex> gate(gate_mtx);
+            gate_cv.wait(gate, [this]() -> bool { return gate_open; });
+        }
         if (delay.count() > 0)
         {
             std::this_thread::sleep_for(delay);
@@ -219,6 +242,136 @@ TEST_CASE("db_write_queue: drop log message appears on stderr when queue fills")
     auto out = cerr_capture.str();
     REQUIRE(out.find("db-writer") != std::string::npos);
     REQUIRE(out.find("dropped") != std::string::npos);
+}
+
+TEST_CASE("db_write_queue: a command dispatch survives a telemetry overflow")
+{
+    /* todo/20: telemetry pressure must never evict a queued command write. Fill
+     * the queue with telemetry, slip in a command dispatch, then bury it under
+     * far more telemetry. The command must still reach the sink, and no command
+     * may be counted as dropped. */
+    auto cap = std::make_shared<CapturingSink>();
+    cap->delay = std::chrono::milliseconds(50); /* slow sink so the queue stays full */
+
+    constexpr std::size_t depth = 5;
+    fss::server::db_write_queue q(depth, [cap](const fss::server::db_write_task &t) -> void { (*cap)(t); });
+
+    constexpr uint64_t cmd_id = 1000000; /* distinct from any telemetry asset id below */
+    for (uint64_t i = 1; i <= depth; ++i)
+    {
+        q.enqueue(fss::server::rtt_write{i, 0});
+    }
+    q.enqueue(fss::server::command_dispatch_write{cmd_id, 7});
+    for (uint64_t i = 100; i < 200; ++i)
+    {
+        q.enqueue(fss::server::rtt_write{i, 0});
+    }
+
+    q.stop(); /* drains remaining work */
+
+    auto seen = cap->snapshot();
+    REQUIRE(std::find(seen.begin(), seen.end(), cmd_id) != seen.end());
+    REQUIRE(q.command_dropped_count() == 0);
+}
+
+TEST_CASE("db_write_queue: a command ack survives a telemetry overflow")
+{
+    /* todo/20: same protection for command acks — losing one drops the recorded
+     * outcome of a dispatched command. */
+    auto cap = std::make_shared<CapturingSink>();
+    cap->delay = std::chrono::milliseconds(50);
+
+    constexpr std::size_t depth = 5;
+    fss::server::db_write_queue q(depth, [cap](const fss::server::db_write_task &t) -> void { (*cap)(t); });
+
+    constexpr uint64_t ack_dispatch_id = 2000000;
+    for (uint64_t i = 1; i <= depth; ++i)
+    {
+        q.enqueue(fss::server::position_write{i, 0.0, 0.0, 0});
+    }
+    q.enqueue(fss::server::command_ack_write{42, ack_dispatch_id, 0, 0, 0});
+    for (uint64_t i = 100; i < 200; ++i)
+    {
+        q.enqueue(fss::server::position_write{i, 0.0, 0.0, 0});
+    }
+
+    q.stop();
+
+    auto seen = cap->snapshot();
+    REQUIRE(std::find(seen.begin(), seen.end(), ack_dispatch_id) != seen.end());
+    REQUIRE(q.command_dropped_count() == 0);
+}
+
+TEST_CASE("db_write_queue: command overload drops on a distinct command-specific path")
+{
+    /* todo/20: if the queue fills entirely with command writes (genuine command
+     * overload, not telemetry pressure) a command may have to be dropped to stay
+     * bounded — but on a distinct, observable error path, never the generic
+     * telemetry drop counter/log. */
+    auto cap = std::make_shared<CapturingSink>();
+    cap->delay = std::chrono::milliseconds(50);
+
+    fss_test::scoped_log_level guard("error");
+    fss_test::capture_cerr cerr_capture;
+
+    {
+        constexpr std::size_t depth = 3;
+        fss::server::db_write_queue q(depth, [cap](const fss::server::db_write_task &t) -> void { (*cap)(t); });
+        for (uint64_t i = 1; i <= 10; ++i)
+        {
+            q.enqueue(fss::server::command_dispatch_write{i, i});
+        }
+        q.stop();
+
+        REQUIRE(q.command_dropped_count() > 0);
+        /* The telemetry drop path must not have been used. */
+        REQUIRE(q.dropped_count() == 0);
+    }
+
+    auto out = cerr_capture.str();
+    REQUIRE(out.find("db-writer") != std::string::npos);
+    REQUIRE(out.find("command") != std::string::npos);
+}
+
+TEST_CASE("db_write_queue: telemetry is rejected without evicting a command when the queue is full of commands")
+{
+    /* todo/20: the complement of the eviction tests. When the queue is full of
+     * protected command writes and a telemetry task arrives, there is nothing to
+     * evict — the telemetry must be rejected outright, never displacing a
+     * command. Gate the sink so the queue can be held full deterministically. */
+    auto cap = std::make_shared<CapturingSink>();
+    cap->gate_open = false; /* the worker will park on the first task */
+
+    constexpr std::size_t depth = 3;
+    fss::server::db_write_queue q(depth, [cap](const fss::server::db_write_task &t) -> void { (*cap)(t); });
+
+    /* Park the worker on a first command so the remaining slots fill predictably. */
+    q.enqueue(fss::server::command_dispatch_write{1, 1});
+    REQUIRE(fss_test::wait_for([&]() -> bool { return cap->entered.load() >= 1; }));
+
+    /* Fill the queue to capacity with commands — reaching depth exactly drops
+     * nothing. */
+    for (uint64_t i = 2; i <= depth + 1; ++i)
+    {
+        q.enqueue(fss::server::command_dispatch_write{i, i});
+    }
+    REQUIRE(q.pending_count() == depth);
+    REQUIRE(q.command_dropped_count() == 0);
+    REQUIRE(q.dropped_count() == 0);
+
+    /* Telemetry arrives with no telemetry to evict: it is rejected, and no
+     * command is dropped to make room. */
+    constexpr uint64_t telemetry_id = 9999;
+    q.enqueue(fss::server::rtt_write{telemetry_id, 0});
+    REQUIRE(q.command_dropped_count() == 0);
+    REQUIRE(q.dropped_count() == 1);
+    REQUIRE(q.pending_count() == depth);
+
+    /* Release the worker and drain: the rejected telemetry was never recorded. */
+    cap->open_gate();
+    q.stop();
+    auto seen = cap->snapshot();
+    REQUIRE(std::find(seen.begin(), seen.end(), telemetry_id) == seen.end());
 }
 
 TEST_CASE("db_write_queue: write_failure_count tracks sink exceptions")

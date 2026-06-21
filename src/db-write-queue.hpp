@@ -58,6 +58,14 @@ using db_write_task = std::variant<rtt_write, position_write, status_write, sear
                                    command_ack_write>;
 using db_write_sink = std::function<void(const db_write_task &)>;
 
+/* Command dispatch/ack writes carry safety/audit state (the link between a sent
+ * command and its ack) and must not be silently dropped under telemetry
+ * pressure, unlike the loss-tolerant telemetry tasks (todo/20). */
+inline auto is_command_task(const db_write_task &task) -> bool
+{
+    return std::holds_alternative<command_dispatch_write>(task) || std::holds_alternative<command_ack_write>(task);
+}
+
 /* C++17 overload helper for std::visit. */
 template<class... Ts> struct overloaded : Ts... {
     using Ts::operator()...;
@@ -73,10 +81,14 @@ private:
     std::deque<db_write_task> q{};
     bool stopping{false};
     std::atomic<uint64_t> dropped{0};
+    std::atomic<uint64_t> command_dropped{0};
     std::atomic<uint64_t> write_failures{0};
     std::thread worker{};
 
     void run();
+    /* Remove the oldest telemetry (non-command) task from the queue, if any.
+     * Caller must hold mtx. Returns true if one was evicted. */
+    auto evict_oldest_telemetry() -> bool;
 public:
     db_write_queue(std::size_t t_max_depth, db_write_sink t_sink);
     ~db_write_queue();
@@ -88,6 +100,7 @@ public:
     void enqueue(db_write_task task);
     void stop();
     auto dropped_count() const -> uint64_t;
+    auto command_dropped_count() const -> uint64_t;
     auto write_failure_count() const -> uint64_t;
     auto pending_count() const -> std::size_t;
 };
