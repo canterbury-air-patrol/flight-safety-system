@@ -196,7 +196,7 @@ auto fss::server::fss_client::waitForOutboundWork() -> fss::server::fss_client::
 {
     std::unique_lock<std::mutex> lock(this->outbound_lock);
     this->outbound_cv.wait(lock, [this]() -> bool {
-        return this->outbound_stopping || this->out_command_pending || this->out_rtt_pending;
+        return this->outbound_stopping || this->out_command_pending || this->out_rtt_pending || this->out_smm_pending;
     });
     outbound_work work;
     if (this->outbound_stopping)
@@ -206,8 +206,10 @@ auto fss::server::fss_client::waitForOutboundWork() -> fss::server::fss_client::
     }
     work.command = this->out_command_pending;
     work.rtt = this->out_rtt_pending;
+    work.smm = this->out_smm_pending;
     this->out_command_pending = false;
     this->out_rtt_pending = false;
+    this->out_smm_pending = false;
     return work;
 }
 
@@ -235,6 +237,10 @@ void fss::server::fss_client::outboundWorkerRun()
              * invariant on fss_connection::sendMsg). */
             this->sendRTTRequest(std::make_shared<fss::transport::fss_message_rtt_request>());
         }
+        if (work.smm)
+        {
+            this->sendSMMSettings();
+        }
     }
 }
 
@@ -260,6 +266,19 @@ void fss::server::fss_client::queueRTTRequest()
             return;
         }
         this->out_rtt_pending = true;
+    }
+    this->outbound_cv.notify_one();
+}
+
+void fss::server::fss_client::queueSMMSettings()
+{
+    {
+        std::scoped_lock guard(this->outbound_lock);
+        if (this->outbound_stopping)
+        {
+            return;
+        }
+        this->out_smm_pending = true;
     }
     this->outbound_cv.notify_one();
 }

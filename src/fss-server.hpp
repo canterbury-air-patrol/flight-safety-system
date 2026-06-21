@@ -267,6 +267,7 @@ private:
     bool outbound_started{false};
     bool out_command_pending{false};
     bool out_rtt_pending{false};
+    bool out_smm_pending{false};
     std::thread outbound_worker{};
     /* What the worker should do this wake-up. Returned by waitForOutboundWork so
      * the worker performs the (blocking) sends with no lock held. */
@@ -274,6 +275,7 @@ private:
         bool stop{false};
         bool command{false};
         bool rtt{false};
+        bool smm{false};
     };
     /* Block until there is work or a stop request, then atomically take and clear
      * the pending flags. */
@@ -324,6 +326,9 @@ public:
      * never shared across connections, so the per-connection id stamp cannot
      * race (the C8 invariant). Returns immediately; no-op once disconnecting. */
     void queueRTTRequest();
+    /* Schedule a cached-SMM-settings send on this client's outbound worker
+     * thread (todo/21). Returns immediately; no-op once disconnecting. */
+    void queueSMMSettings();
     auto isAircraft() -> bool;
     auto getCachedAssetId() -> uint64_t { return this->cached_asset_id.load(); }
     /* The smoothed client↔server clock offset (ms; positive = client ahead)
