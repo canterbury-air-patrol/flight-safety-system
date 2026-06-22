@@ -208,6 +208,16 @@ db_asset_command_get(const char *conn_arg, unsigned long long asset_id_arg)
 
     EXEC SQL AT :conn SELECT 1, AC.id, (extract(epoch from AC.timestamp) * 1000)::bigint, AC.command, ST_Y(AC.position::geometry), ST_X(AC.position::geometry), AC.altitude INTO :success, :id, :ts, :command, :lat :lat_ind, :lng :lng_ind, :alt :alt_ind FROM assets_assetcommand AS AC WHERE AC.asset_id = :asset_id ORDER BY AC.timestamp DESC LIMIT 1;
 
+    if (success == 1 && sqlca.sqlwarn[1] == 'W')
+    {
+        /* The command host variable was truncated (a DB command string longer
+         * than COMMAND_LEN). A truncated command must not be dispatched: it
+         * would silently become a different (or unknown) command. Treat the row
+         * as absent and say why, mirroring the truncation guard in
+         * db_asset_smm_settings_get. */
+        fprintf(stderr, "command for asset %llu exceeds buffer size; ignoring row\n", asset_id);
+        success = 0;
+    }
 
     struct asset_command_s *res = NULL;
     if (success == 1)
