@@ -7,37 +7,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-06-22
+
 ### Added
+- Command acknowledgements. An aircraft client (FMU) now sends a
+  `command_ack` back to the server for each `asset_command`, and the server
+  routes and stores it against the originating command. The ack carries the
+  acked command's id (matched per-connection, not "last command seen"), the
+  outcome (`received`, `actioned`, `superseded`, `noop`, `rejected`) and, when
+  superseded, a dedicated reason (`low_battery`, `comms_loss`,
+  `newer_command`) kept distinct from the command value because the
+  low-battery and comms-loss safety latches both resolve to RTL. The ack DB
+  match is scoped by asset so a `dispatch_id` collision between assets can
+  never cross acks, and only the latest command row is updated. Gated by the
+  `command-ack` optional capability and appended as a new message type, so
+  legacy peers are unaffected. (todo/17 item 1)
+- Optional-capability negotiation in the protocol version handshake. The
+  handshake's `feature_flags` field is now a bitmask of capabilities each peer
+  supports; the negotiated set is the intersection of the two, recorded on the
+  connection. This lets new optional features be added without a
+  protocol-version bump — a peer that does not advertise a capability never has
+  it used, and a peer cannot enable one this build does not implement. Two
+  capabilities are enabled in this release (`rtt-offset` and `command-ack`); a
+  legacy peer advertises none, negotiates the empty set, and is wire-compatible
+  as before.
 - The position-staleness gate now corrects for a measured client↔server clock
   offset, so a client whose clock is skewed but whose link is healthy no longer
   has all its positions dropped. The offset is estimated from RTT responses: a
-  peer that negotiates the new `rtt-offset` capability stamps its wall clock
+  peer that negotiates the `rtt-offset` capability stamps its wall clock
   into each `rtt_response`, and the server folds `client - server` (bounded by
   half the round trip, smoothed across samples) into the gate. The stored
   timestamp is never rewritten — only the accept/reject window shifts. A peer
   that does not negotiate the capability is unaffected and the gate stays a
   plain symmetric window.
-- Optional-capability negotiation in the protocol version handshake. The
-  handshake's `feature_flags` field is now a bitmask of capabilities each peer
-  supports; the negotiated set is the intersection of the two, recorded on the
-  connection. This lets new optional features (see todo/17) be added without a
-  protocol-version bump — a peer that does not advertise a capability never has
-  it used, and a peer cannot enable one this build does not implement. No
-  capability bits are enabled yet, so this is wire-compatible with existing
-  peers (which advertise none).
+- `fss_client::isConfigured()` lets a consumer detect that a client loaded a
+  usable configuration (an asset name plus at least one server) and fail fast
+  on a missing or malformed config file. The flag stays accurate however the
+  client is built — the file constructor and the programmatic
+  `setAssetName()`/`connectTo()` path both keep it current — and no-throw
+  construction is preserved. (todo/18)
 
-### Security
-- The TLS handshake no longer runs inline on the accept thread. A peer that
-  completed the TCP connection but then stalled the handshake (sending no or
-  partial ClientHello) previously blocked the accept thread inside a blocking
-  handshake `recv` with no timeout, halting *all* new connections to the
-  server — a trivial unauthenticated denial of service. Connection setup now
-  runs on a bounded pool of worker threads, each handshake is bounded by
-  `gnutls_handshake_set_timeout` (configurable via `tls_handshake_timeout_ms`,
-  default 10 s), and concurrent in-progress handshakes are capped
-  (`max_concurrent_handshakes`, default 64) so the worker path cannot itself
-  be used to exhaust threads/memory. The client side also bounds its handshake
-  so a stalled server cannot hang `connectTo()`.
+### Changed
+- Library ABI: `-version-info` for `libfss`, `libfss-transport`,
+  `libfss-transport-ssl` and `libfss-client-ssl` is bumped to `2:0:0`. This
+  release changes installed-header interfaces (new `command_ack` message type
+  and enums, enlarged `fss_connection`/`fss_listen`/`rtt_response`, added
+  constructor parameters on the SSL transport, new `fss_client` virtuals), so
+  binaries built against 1.0.x must be relinked against 1.1.0.
+- Command dispatch, RTT requests and SMM-settings sends now run on a
+  per-client writer thread instead of the server main loop. A slow or
+  black-holed peer can no longer stall the main loop, command/RTT work for
+  other clients, or unrelated server processing. (todo/21)
+- `make check` now fails fast with a clear error when the tree was configured
+  without `--enable-tests`, instead of silently reporting success with zero
+  tests run.
 
 ### Fixed
 - A position report from an aircraft with no GPS fix is no longer recorded and
@@ -57,9 +80,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   future-dated reports too, escalates from a single WARN to an ERROR naming the
   suspected skew once a client trips it repeatedly (instead of a per-message
   WARN drip), and is configurable via `position_staleness_ms` (default 30000,
-  0 disables). The gate carries a per-client clock-offset correction that is
-  currently 0 — a later change will measure it so a skewed-but-healthy client's
-  positions are accepted rather than dropped.
+  0 disables). The gate also carries the per-client clock-offset correction
+  described under Added, so a skewed-but-healthy client's positions are
+  accepted rather than dropped.
+- A command dispatch is recorded only after `sendMsg()` succeeds. A failed
+  send no longer leaves a false audit record of a command that never went out;
+  failed sends are surfaced and retried promptly. (todo/19)
+- Command dispatch and ack DB writes are protected from telemetry-queue
+  overflow. A burst of telemetry can no longer cause command/ack records to be
+  silently dropped from the write queue. (todo/20)
+- An RTT request is tracked as outstanding only after it is successfully sent,
+  so a failed send no longer creates a phantom liveness probe that never gets
+  a response and skews link measurements. (todo/22)
+- A peer that streams a bounded number of consecutive undecodable frames is now
+  disconnected instead of being logged at line rate forever; a single
+  decodable frame in between resets the counter, so a version-skewed-but-honest
+  peer sending the odd unknown message type is never dropped. (todo/11)
+- A truncated active-server list read mid-cursor is now discarded rather than
+  returned partially; the ECPG C structures in the read getters are freed on
+  the out-of-memory path; and the rate limiter's token refill stays accurate
+  above 1000 tokens/s. (todo/14)
+- The client's `configured` flag now has a coherent locking model, guarded
+  consistently across the file-load and programmatic configuration paths.
+- Configured TCP ports are validated on load. The server (`port`,
+  `postgres.port`) and the client (each `servers[].port`) now reject a
+  non-integer or out-of-range value (outside 1–65535) with a clear error
+  instead of silently truncating it to a wrong `uint16_t`: the server refuses
+  to start and the client skips the malformed server entry.
+- The out-of-order / duplicate (v2 sequence) message warning is now throttled
+  (first, then every 100th). Because the sequence check runs before the
+  per-client rate limiter, a peer streaming wrong sequence numbers could
+  otherwise flood the log at line rate; valid traffic is unaffected.
+- A command row whose `command` string exceeds the read buffer is now rejected
+  instead of being dispatched truncated (which could become a different or an
+  unknown command). The ECPG truncation warning is checked, mirroring the
+  existing guard on SMM-settings credentials.
+
+### Security
+- The TLS handshake no longer runs inline on the accept thread. A peer that
+  completed the TCP connection but then stalled the handshake (sending no or
+  partial ClientHello) previously blocked the accept thread inside a blocking
+  handshake `recv` with no timeout, halting *all* new connections to the
+  server — a trivial unauthenticated denial of service. Connection setup now
+  runs on a bounded pool of worker threads, each handshake is bounded by
+  `gnutls_handshake_set_timeout` (configurable via `tls_handshake_timeout_ms`,
+  default 10 s), and concurrent in-progress handshakes are capped
+  (`max_concurrent_handshakes`, default 64) so the worker path cannot itself
+  be used to exhaust threads/memory. The client side also bounds its handshake
+  so a stalled server cannot hang `connectTo()`.
 
 ## [1.0.3] - 2026-06-13
 

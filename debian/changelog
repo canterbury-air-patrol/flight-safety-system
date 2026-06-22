@@ -1,3 +1,42 @@
+flight-safety-system (1.1.0) stable; urgency=medium
+
+  * Add command acknowledgements: the FMU acks each asset_command and the
+    server routes and stores the outcome (received/actioned/superseded/noop/
+    rejected) against the originating command, scoped per asset.
+  * Negotiate optional capabilities via the version handshake's feature_flags;
+    enable the rtt-offset and command-ack capabilities (legacy peers
+    unaffected).
+  * Correct the position-staleness gate for a measured client-server clock
+    offset estimated from RTT responses, so a skewed-but-healthy client's
+    positions are no longer dropped.
+  * Add fss_client::isConfigured() so a consumer can fail fast on a missing or
+    malformed configuration.
+  * Run command dispatch, RTT requests and SMM-settings sends on a per-client
+    writer thread so a slow peer cannot stall the main loop or other clients.
+  * Record a command dispatch only after a successful send; track RTT requests
+    only after a successful send; protect command/ack DB writes from telemetry
+    queue overflow.
+  * Disconnect peers streaming consecutive undecodable frames; reset on any
+    valid frame.
+  * Discard a truncated active-server list read mid-cursor, free ECPG structs
+    on the OOM path, and keep the rate-limiter refill accurate above 1000
+    tokens/s.
+  * Run the TLS handshake off the accept thread on a bounded, timeout-bounded
+    worker pool, closing an unauthenticated accept-thread-stall denial of
+    service.
+  * Bump library -version-info to 2:0:0 (installed-header ABI changed; relink
+    binaries built against 1.0.x).
+  * Validate configured TCP ports (server port/postgres.port and each client
+    servers[].port); reject non-integer or out-of-range values instead of
+    truncating to a wrong port.
+  * Throttle the out-of-order/duplicate message warning (first, then every
+    100th) so a peer streaming wrong sequence numbers cannot flood the log.
+  * Reject a command row whose command string exceeds the read buffer instead
+    of dispatching a truncated command.
+  * Fail make check fast when the tree was configured without --enable-tests.
+
+ -- Scott Parlane <sjp@canterburyairpatrol.org>  Mon, 22 Jun 2026 00:00:00 +0000
+
 flight-safety-system (1.0.3) stable; urgency=medium
 
   * Verify client certificates chain to the configured CA during the TLS
