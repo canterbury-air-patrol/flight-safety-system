@@ -118,6 +118,28 @@ TEST_CASE("client: malformed JSON config leaves client unconfigured")
     std::remove(tmppath);
 }
 
+TEST_CASE("client: config file skips server entries with invalid ports")
+{
+    const char *tmppath = "/tmp/fss_test_client_bad_port.json";
+    {
+        std::ofstream f(tmppath);
+        f << R"({
+            "name": "test-asset",
+            "ssl": {
+                "ca_public_key": "ca.pem",
+                "client_private_key": "client.key",
+                "client_public_key": "client.pem"
+            },
+            "servers": [
+                {"address": "localhost", "port": 70000}
+            ]
+        })";
+    }
+    fss::client_ssl::fss_client client(tmppath);
+    REQUIRE_FALSE(client.isConfigured());
+    std::remove(tmppath);
+}
+
 /* Exposes the protected config setter so a test can drive the programmatic
  * (non-file) configuration path. */
 class ProgrammaticClient : public fss::client_ssl::fss_client {

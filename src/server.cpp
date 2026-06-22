@@ -29,6 +29,29 @@ namespace flight_safety_system::server {
 auto build_server_list_msg(IDatabase *dbc) -> std::shared_ptr<transport::fss_message_server_list>;
 } // namespace flight_safety_system::server
 
+namespace {
+
+constexpr int min_tcp_port = 1;
+constexpr int max_tcp_port = 65535;
+
+auto read_tcp_port(const Json::Value &node, const char *path, int &out) -> bool
+{
+    if (!node.isInt())
+    {
+        FSS_LOG_ERROR("server", "Invalid config field " << path << ": must be an integer TCP port");
+        return false;
+    }
+    int port = node.asInt();
+    if (port < min_tcp_port || port > max_tcp_port)
+    {
+        FSS_LOG_ERROR("server", "Invalid config field " << path << ": " << port << " is outside 1-65535");
+        return false;
+    }
+    out = port;
+    return true;
+}
+
+} // namespace
 
 volatile sig_atomic_t running = 1;
 volatile sig_atomic_t reload_crl = 0;
@@ -141,10 +164,16 @@ auto main(int argc, char *argv[]) -> int
             return 1;
         }
 
-        listen_port = config["port"].asInt();
+        if (!read_tcp_port(config["port"], "port", listen_port))
+        {
+            return 1;
+        }
         if (config["postgres"].isMember("port"))
         {
-            pg_port = config["postgres"]["port"].asInt();
+            if (!read_tcp_port(config["postgres"]["port"], "postgres.port", pg_port))
+            {
+                return 1;
+            }
         }
         pg_host = config["postgres"]["host"].asString();
         pg_user = config["postgres"]["user"].asString();
