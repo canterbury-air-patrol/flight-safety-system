@@ -141,4 +141,8 @@ check-tsan:
 	TSAN_OPTIONS="suppressions=$(srcdir)/tsan.supp halt_on_error=1" ./all_test
 	TSAN_OPTIONS="suppressions=$(srcdir)/tsan.supp halt_on_error=1" ./concurrency_tsan_test
 endif
+else
+check-local:
+	@echo "ERROR: tests are disabled; re-run ./configure with --enable-tests before make check" >&2
+	@exit 1
 endif
