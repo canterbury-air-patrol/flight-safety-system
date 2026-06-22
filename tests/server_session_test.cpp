@@ -431,8 +431,19 @@ TEST_CASE("session: identify surfaces a mid-cursor server-list failure instead o
 
     auto writer = make_mock_writer(mock);
     auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
-    REQUIRE_THROWS_AS(session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft")),
-                      fss::server::database_error);
+    /* Assert the throw manually rather than via REQUIRE_THROWS_AS: older Catch2
+     * expands that macro to a by-value catch clause, which trips
+     * -Werror=catch-value on the polymorphic database_error type. */
+    bool threw_database_error = false;
+    try
+    {
+        session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+    }
+    catch (const fss::server::database_error &)
+    {
+        threw_database_error = true;
+    }
+    REQUIRE(threw_database_error);
 
     /* No server list was sent: the partial result was discarded, not shipped. */
     REQUIRE(find_sent<fss::transport::fss_message_server_list>(conn->sent) == nullptr);
