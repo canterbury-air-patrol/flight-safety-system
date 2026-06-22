@@ -730,8 +730,20 @@ void fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss
         {
             if (msg->getSeq() != wanted)
             {
-                FSS_LOG_WARN("server",
-                             "Out-of-order or duplicate message seq=" << msg->getSeq() << " expected=" << wanted);
+                /* This check runs before the rate limiter, so a peer that
+                 * deliberately or buggily sends wrong sequence numbers would
+                 * otherwise hit this WARN once per message at line rate.
+                 * Throttle to first + every 100th (matching the duplicate-
+                 * version and null-frame paths) so one misbehaving peer cannot
+                 * flood the log. */
+                ++this->out_of_order_count;
+                constexpr uint64_t log_every = 100;
+                if (this->out_of_order_count == 1 || (this->out_of_order_count % log_every) == 0)
+                {
+                    FSS_LOG_WARN("server", "Out-of-order or duplicate message seq="
+                                               << msg->getSeq() << " expected=" << wanted
+                                               << " (count=" << this->out_of_order_count << ")");
+                }
                 if (msg->getType() == fss::transport::message_type_identity ||
                     msg->getType() == fss::transport::message_type_identity_non_aircraft)
                 {
