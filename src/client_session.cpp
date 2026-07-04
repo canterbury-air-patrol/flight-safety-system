@@ -369,91 +369,129 @@ void fss::server::fss_client::setPendingCommand(std::shared_ptr<fss::server::ass
 
 void fss::server::fss_client::sendCommand()
 {
-    std::scoped_lock guard(this->client_lock);
-    if (this->cached_asset_id.load() == 0)
-    {
-        return;
-    }
-    uint64_t ts = this->clock->now_ms();
-    auto ac = this->pending_command;
-    if (ac == nullptr)
-    {
-        return;
-    }
-    constexpr int timeout_time = 10 * sec_to_msec;
-    bool is_new_command = ac->getDBId() != this->last_command_dbid;
-    bool resend_window_expired = ts > (this->last_command_send_ts + timeout_time);
-    if (!is_new_command && !resend_window_expired)
-    {
-        /* Same command we last handled and still inside the resend window. */
-        return;
-    }
-    /* Mark a command as handled for the current resend window: applied on a
-     * successful dispatch, and on a permanent validation rejection below (which
-     * can never succeed, so re-evaluating it every tick would only spam the
-     * log). Deliberately NOT applied on a transient send failure, which must
-     * stay eligible for retry on the next send tick. Takes the timestamp and
-     * dbid explicitly so the state it writes is visible at each call. */
-    auto mark_handled = [this](uint64_t handled_ts, uint64_t handled_dbid) -> void {
-        this->last_command_send_ts = handled_ts;
-        this->last_command_dbid = handled_dbid;
-    };
-    auto command = ac->getCommand();
-    if (command == fss::transport::asset_command_unknown)
-    {
-        mark_handled(ts, ac->getDBId());
-        FSS_LOG_ERROR("server", "Refusing to dispatch unknown command type to " << this->name
-                                                                                << " (dbid=" << ac->getDBId() << ")");
-        return;
-    }
-    if (command == fss::transport::asset_command_goto && !is_valid_coordinate(ac->getLatitude(), ac->getLongitude()))
-    {
-        mark_handled(ts, ac->getDBId());
-        FSS_LOG_ERROR("server", "Refusing to dispatch GOTO command with invalid coordinates to "
-                                    << this->name << " (dbid=" << ac->getDBId() << ", lat=" << ac->getLatitude()
-                                    << ", lon=" << ac->getLongitude() << ")");
-        return;
-    }
-    if (command == fss::transport::asset_command_altitude && !ac->isAltitudeValid())
-    {
-        /* A NULL altitude must not dispatch as 0 — that is a
-         * descend-to-ground instruction. */
-        mark_handled(ts, ac->getDBId());
-        FSS_LOG_ERROR("server", "Refusing to dispatch ALT command with NULL altitude to "
-                                    << this->name << " (dbid=" << ac->getDBId() << ")");
-        return;
-    }
+    /* todo/35: the dbid/resend-window checks and validation run under
+     * client_lock, but the send itself must not — a black-holed peer can
+     * block sendMsg() for up to TCP_USER_TIMEOUT, and isTimedOut() (called
+     * every main-loop tick, for every client) takes the same lock. Holding it
+     * across the send would freeze the whole fleet's command cadence behind
+     * one stuck peer. */
     std::shared_ptr<fss::transport::fss_message_asset_command> msg = nullptr;
-    switch (command)
+    uint64_t ts = 0;
+    uint64_t dbid = 0;
+    std::string client_name;
+    uint64_t prev_send_ts = 0;
+    uint64_t prev_dbid = 0;
     {
-        case fss::transport::asset_command_goto:
-            msg = std::make_shared<fss::transport::fss_message_asset_command>(command, ac->getTimeStamp(),
-                                                                              ac->getLatitude(), ac->getLongitude());
-            break;
-        case fss::transport::asset_command_altitude:
-            msg = std::make_shared<fss::transport::fss_message_asset_command>(command, ac->getTimeStamp(),
-                                                                              ac->getAltitude());
-            break;
-        default: msg = std::make_shared<fss::transport::fss_message_asset_command>(command, ac->getTimeStamp()); break;
-    }
+        std::scoped_lock guard(this->client_lock);
+        if (this->cached_asset_id.load() == 0)
+        {
+            return;
+        }
+        ts = this->clock->now_ms();
+        auto ac = this->pending_command;
+        if (ac == nullptr)
+        {
+            return;
+        }
+        client_name = this->name;
+        constexpr int timeout_time = 10 * sec_to_msec;
+        dbid = ac->getDBId();
+        bool is_new_command = dbid != this->last_command_dbid;
+        bool resend_window_expired = ts > (this->last_command_send_ts + timeout_time);
+        if (!is_new_command && !resend_window_expired)
+        {
+            /* Same command we last handled and still inside the resend window. */
+            return;
+        }
+        /* Mark a command as handled for the current resend window: applied on a
+         * permanent validation rejection below (which can never succeed, so
+         * re-evaluating it every tick would only spam the log). Deliberately
+         * NOT applied on a transient send failure, which must stay eligible
+         * for retry on the next send tick. */
+        auto mark_handled = [this](uint64_t handled_ts, uint64_t handled_dbid) -> void {
+            this->last_command_send_ts = handled_ts;
+            this->last_command_dbid = handled_dbid;
+        };
+        auto command = ac->getCommand();
+        if (command == fss::transport::asset_command_unknown)
+        {
+            mark_handled(ts, dbid);
+            FSS_LOG_ERROR("server",
+                          "Refusing to dispatch unknown command type to " << client_name << " (dbid=" << dbid << ")");
+            return;
+        }
+        if (command == fss::transport::asset_command_goto &&
+            !is_valid_coordinate(ac->getLatitude(), ac->getLongitude()))
+        {
+            mark_handled(ts, dbid);
+            FSS_LOG_ERROR("server", "Refusing to dispatch GOTO command with invalid coordinates to "
+                                        << client_name << " (dbid=" << dbid << ", lat=" << ac->getLatitude()
+                                        << ", lon=" << ac->getLongitude() << ")");
+            return;
+        }
+        if (command == fss::transport::asset_command_altitude && !ac->isAltitudeValid())
+        {
+            /* A NULL altitude must not dispatch as 0 — that is a
+             * descend-to-ground instruction. */
+            mark_handled(ts, dbid);
+            FSS_LOG_ERROR("server", "Refusing to dispatch ALT command with NULL altitude to "
+                                        << client_name << " (dbid=" << dbid << ")");
+            return;
+        }
+        switch (command)
+        {
+            case fss::transport::asset_command_goto:
+                msg = std::make_shared<fss::transport::fss_message_asset_command>(
+                    command, ac->getTimeStamp(), ac->getLatitude(), ac->getLongitude());
+                break;
+            case fss::transport::asset_command_altitude:
+                msg = std::make_shared<fss::transport::fss_message_asset_command>(command, ac->getTimeStamp(),
+                                                                                  ac->getAltitude());
+                break;
+            default:
+                msg = std::make_shared<fss::transport::fss_message_asset_command>(command, ac->getTimeStamp());
+                break;
+        }
+        /* Claim the resend window now, atomically with the check above, not
+         * after the send returns: the recv thread can also call sendCommand()
+         * directly (identify handling) while this outbound-worker call is
+         * still mid-flight in the blocking send below, and without an
+         * immediate claim both calls would see the stale (pre-send)
+         * last_command_dbid/ts and dispatch the same command twice. Rolled
+         * back on send failure, below, so a transient failure still retries
+         * on the very next tick rather than waiting out the resend window. */
+        prev_send_ts = this->last_command_send_ts;
+        prev_dbid = this->last_command_dbid;
+        this->last_command_send_ts = ts;
+        this->last_command_dbid = dbid;
+    } // client_lock released before the blocking send
+
     if (!this->getConnection()->sendMsg(msg))
     {
         /* The socket write failed, so the command never reached the aircraft.
-         * Do not record a dispatch and do not advance the resend window: the
-         * command must be retried on the next send tick rather than appearing in
-         * the DB as dispatched. A genuinely dead connection is reaped separately
-         * by the recv thread's closed-message path. */
-        FSS_LOG_WARN("server", "Failed to send command dbid=" << ac->getDBId() << " to " << this->name
-                                                              << "; will retry on next tick");
+         * Undo the claim above so the command is retried on the next send tick
+         * rather than appearing in the DB as dispatched — but only if nobody
+         * else has since claimed a newer command; otherwise leave their claim
+         * alone. A genuinely dead connection is reaped separately by the recv
+         * thread's closed-message path. */
+        {
+            std::scoped_lock guard(this->client_lock);
+            if (this->last_command_dbid == dbid && this->last_command_send_ts == ts)
+            {
+                this->last_command_dbid = prev_dbid;
+                this->last_command_send_ts = prev_send_ts;
+            }
+        }
+        FSS_LOG_WARN("server",
+                     "Failed to send command dbid=" << dbid << " to " << client_name << "; will retry on next tick");
         return;
     }
-    mark_handled(ts, ac->getDBId());
     /* sendMsg stamped the per-connection message id into msg; record it against
      * the command row (cached_asset_id is non-zero here — the early return above
      * guarantees it) so a later ack, which echoes this id as acked_command_id,
      * can be matched back to this specific command. */
-    this->writer->enqueue(command_dispatch_write{ac->getDBId(), msg->getId()});
-    FSS_LOG_INFO("server", "dispatched command dbid=" << ac->getDBId() << " to " << this->name);
+    this->writer->enqueue(command_dispatch_write{dbid, msg->getId()});
+    FSS_LOG_INFO("server", "dispatched command dbid=" << dbid << " to " << client_name);
 }
 
 void fss::server::fss_client::setClock(std::shared_ptr<fss::IClock> t_clock)
@@ -517,44 +555,37 @@ auto fss::server::fss_client::isTimedOut() -> bool
 
 void fss::server::fss_client::sendRTTRequest(const std::shared_ptr<fss::transport::fss_message_rtt_request> &rtt_req)
 {
+    /* todo/35: as in sendCommand(), client_lock must not be held across the
+     * blocking send. Unlike sendCommand, the outstanding-request bookkeeping
+     * must be keyed by the message id sendMsg() stamps onto rtt_req — and
+     * that stamp only happens inside sendMsg() itself (fss_connection::
+     * sendMsg, under its own send_lock, before the blocking write), so the
+     * real id is not known until the call returns. The entry is therefore
+     * pushed immediately after a successful send (todo/22: only a request
+     * that actually went out is tracked), not before it. */
     bool timed_out = false;
-    bool send_failed = false;
     {
         std::scoped_lock guard(this->client_lock);
-        uint64_t now = this->clock->now_ms();
+        uint64_t check_now = this->clock->now_ms();
         if (!this->outstanding_rtt_requests.empty())
         {
-            if (now - this->outstanding_rtt_requests.front()->getTimeStamp() > this->client_timeout_ms)
+            if (check_now - this->outstanding_rtt_requests.front()->getTimeStamp() > this->client_timeout_ms)
             {
                 timed_out = true;
             }
-            else if (now - this->outstanding_rtt_requests.back()->getTimeStamp() < rtt_retry_interval)
+            else if (check_now - this->outstanding_rtt_requests.back()->getTimeStamp() < rtt_retry_interval)
             {
                 return;
-            }
-        }
-        if (!timed_out)
-        {
-            /* Only track an outstanding request once the write actually went out.
-             * todo/22: pushing on a failed send would leave a phantom request the
-             * peer never received, and would arm the retry throttle on a send
-             * that never happened — later timeout behaviour would then reflect a
-             * local send failure rather than peer silence. */
-            if (this->getConnection()->sendMsg(rtt_req))
-            {
-                this->outstanding_rtt_requests.push_back(std::make_shared<fss_client_rtt>(now, rtt_req->getId()));
-            }
-            else
-            {
-                send_failed = true;
             }
         }
     }
     if (timed_out)
     {
         this->client_handler->clientDisconnected(this);
+        return;
     }
-    else if (send_failed)
+    uint64_t now = this->clock->now_ms();
+    if (!this->getConnection()->sendMsg(rtt_req))
     {
         /* The socket write failed, so the connection is broken. Reap the client
          * now rather than waiting out the liveness timeout against a peer that
@@ -562,6 +593,47 @@ void fss::server::fss_client::sendRTTRequest(const std::shared_ptr<fss::transpor
          * here, but disconnecting directly is immediate and idempotent). */
         FSS_LOG_WARN("server", "Failed to send RTT request to " << this->getName() << "; disconnecting");
         this->client_handler->clientDisconnected(this);
+        return;
+    }
+    uint64_t assigned_id = rtt_req->getId();
+    std::shared_ptr<fss_client_rtt> stray;
+    {
+        std::scoped_lock guard(this->client_lock);
+        auto found = std::find_if(
+            this->stray_rtt_responses.begin(), this->stray_rtt_responses.end(),
+            [assigned_id](const auto &candidate) -> bool { return candidate->getRequestId() == assigned_id; });
+        if (found != this->stray_rtt_responses.end())
+        {
+            stray = *found;
+        }
+        if (stray != nullptr)
+        {
+            /* The response for this very request already arrived and was
+             * recorded as unmatched (see the rtt_response handler) before this
+             * function could push its own bookkeeping entry. Consume it now
+             * instead of adding an outstanding entry that would otherwise
+             * never be answered and eventually force a false liveness
+             * disconnect. */
+            this->stray_rtt_responses.remove(stray);
+            this->last_rtt_response_time = this->clock->now_ms();
+        }
+        else
+        {
+            this->outstanding_rtt_requests.push_back(std::make_shared<fss_client_rtt>(now, assigned_id));
+        }
+    }
+    if (stray != nullptr)
+    {
+        uint64_t asset_id = this->cached_asset_id.load();
+        if (asset_id != 0)
+        {
+            /* stray->getTimeStamp() is when the response was actually
+             * received, which predates `now` (when this function resumed
+             * after the send) — using it gives a truer round-trip duration
+             * than clamping to `now` would. */
+            uint64_t rtt_ms = stray->getTimeStamp() > now ? stray->getTimeStamp() - now : 0;
+            this->writer->enqueue(rtt_write{asset_id, rtt_ms});
+        }
     }
 }
 
@@ -907,6 +979,23 @@ void fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss
                     {
                         this->outstanding_rtt_requests.remove(rtt_req);
                         this->last_rtt_response_time = this->clock->now_ms();
+                    }
+                    else
+                    {
+                        /* todo/35: sendRTTRequest() cannot push its bookkeeping
+                         * entry until sendMsg() returns (the id is only stamped
+                         * onto the message inside that call), so an
+                         * exceptionally fast response can arrive here first and
+                         * find no match. Remember it, bounded, so
+                         * sendRTTRequest() can reconcile instead of the request
+                         * being reaped as timed out despite an already-answered
+                         * peer. */
+                        if (this->stray_rtt_responses.size() >= max_stray_rtt_responses)
+                        {
+                            this->stray_rtt_responses.pop_front();
+                        }
+                        this->stray_rtt_responses.push_back(
+                            std::make_shared<fss_client_rtt>(current_ts, rtt_resp_msg->getRequestId()));
                     }
                 }
                 if (rtt_req != nullptr)
