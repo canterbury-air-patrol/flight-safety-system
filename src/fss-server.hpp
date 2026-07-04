@@ -199,6 +199,13 @@ private:
     std::string name{};
     std::mutex client_lock{};
     std::list<std::shared_ptr<fss_client_rtt>> outstanding_rtt_requests{};
+    /* Responses that arrived before sendRTTRequest() could push its matching
+     * outstanding entry (todo/35 — see the rtt_response handler and
+     * sendRTTRequest() in client_session.cpp). Bounded FIFO: legitimate
+     * traffic never needs more than one slot at a time; the cap defends
+     * against a peer spamming bogus ids growing this list unboundedly. */
+    static constexpr size_t max_stray_rtt_responses = 4;
+    std::list<std::shared_ptr<fss_client_rtt>> stray_rtt_responses{};
     auto getName() -> std::string;
     /* Fold one RTT round trip into the smoothed client↔server clock offset that
      * feeds the staleness gate (todo/17 item 3). client_timestamp is the peer's

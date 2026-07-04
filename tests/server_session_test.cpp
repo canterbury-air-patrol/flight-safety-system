@@ -10,6 +10,8 @@
 #error No catch header
 #endif
 
+#include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <cmath>
 #include <limits>
@@ -17,6 +19,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "fss-transport.hpp"
@@ -628,6 +631,182 @@ TEST_CASE("session: a blocked client's writer does not stall command dispatch fo
     /* disconnect() releases the block and joins A's writer cleanly. */
     client_a->disconnect();
     client_b->disconnect();
+}
+
+TEST_CASE("session: isTimedOut() is not blocked by the same client's stuck command send (todo/35)")
+{
+    /* todo/35: sendCommand() must release client_lock before the blocking
+     * send, or the main loop's once-per-tick isTimedOut() call — which takes
+     * the same lock — parks behind a black-holed peer's writer thread for up
+     * to TCP_USER_TIMEOUT. Probe isTimedOut() from a second thread while the
+     * writer is parked in a blocked send and require it to return well within
+     * that window. */
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 1;
+    NullClientHandler handler;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+    session->activate();
+
+    conn->setBlocked(true);
+    session->setPendingCommand(
+        std::make_shared<fss::server::asset_command>(/*dbid*/ 1, /*ts*/ 500, "RTL", 0.0, 0.0, 0));
+    session->queueCommandSend();
+
+    /* Give the outbound worker a moment to reach the blocked send before
+     * probing isTimedOut() below. */
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+    std::atomic<bool> check_done{false};
+    std::thread checker([&]() -> void {
+        session->isTimedOut();
+        check_done.store(true);
+    });
+
+    bool returned_promptly =
+        fss_test::wait_for([&]() -> bool { return check_done.load(); }, std::chrono::milliseconds(500));
+
+    /* Unblock so the writer (and, if the fix regressed, the checker thread
+     * too) can finish before teardown — this join must never be reached with
+     * the checker still holding the mutex wait unresolved. */
+    conn->setBlocked(false);
+    checker.join();
+    session->disconnect();
+
+    REQUIRE(returned_promptly);
+}
+
+TEST_CASE("session: isTimedOut() is not blocked by the same client's stuck RTT send (todo/35)")
+{
+    /* Same guarantee as above, for sendRTTRequest()'s writer-thread path. */
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 1;
+    NullClientHandler handler;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+    session->activate();
+
+    conn->setBlocked(true);
+    session->queueRTTRequest();
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+    std::atomic<bool> check_done{false};
+    std::thread checker([&]() -> void {
+        session->isTimedOut();
+        check_done.store(true);
+    });
+
+    bool returned_promptly =
+        fss_test::wait_for([&]() -> bool { return check_done.load(); }, std::chrono::milliseconds(500));
+
+    conn->setBlocked(false);
+    checker.join();
+    session->disconnect();
+
+    REQUIRE(returned_promptly);
+}
+
+TEST_CASE("session: sendRTTRequest reconciles a response that raced the bookkeeping push (todo/35)")
+{
+    /* sendRTTRequest() cannot push its outstanding-request bookkeeping entry
+     * until sendMsg() returns (the id is only stamped inside that call), so a
+     * response that arrives first finds no match. Prove the stray-response
+     * reconciliation path picks it up rather than leaving a bookkeeping entry
+     * that can never be answered and would eventually force a false liveness
+     * disconnect. The blocked send lets the response be processed while the
+     * send is still in flight — deterministic, not timing-dependent — which
+     * exercises the same "no match yet" code path the real (much narrower)
+     * race hits. */
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 1;
+    NullClientHandler handler;
+    auto clock = std::make_shared<FakeClock>();
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    session->setClock(clock);
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+
+    conn->setBlocked(true);
+    auto rtt_req = std::make_shared<fss::transport::fss_message_rtt_request>();
+    std::thread sender([&]() -> void { session->sendRTTRequest(rtt_req); });
+
+    /* setId() happens synchronously inside fss_connection::sendMsg before the
+     * blocked write, so the id is already correct once it stops being 0. */
+    REQUIRE(fss_test::wait_for([&]() -> bool { return rtt_req->getId() != 0; }));
+    uint64_t assigned_id = rtt_req->getId();
+
+    session->processMessage(std::make_shared<fss::transport::fss_message_rtt_response>(assigned_id));
+
+    conn->setBlocked(false);
+    sender.join();
+
+    /* Reconciled: last_rtt_response_time was refreshed and no outstanding
+     * entry was left behind to time out. */
+    REQUIRE_FALSE(session->isTimedOut());
+    clock->advance(30001);
+    REQUIRE(session->isTimedOut());
+
+    session->disconnect();
+}
+
+TEST_CASE("session: concurrent identify-time and worker-scheduled sendCommand do not double-dispatch (todo/35)")
+{
+    /* sendCommand() must claim the resend window atomically with its check,
+     * before releasing client_lock for the blocking send — not after the send
+     * succeeds — or two callers racing the same pending command (the recv
+     * thread calls sendCommand() directly at identify time; the outbound
+     * worker calls it via queueCommandSend()) can both pass the check and
+     * both dispatch. Block the send so the identify-time call is still
+     * in-flight when the worker's call races it. */
+    fss_test::MockDatabase mock;
+    constexpr uint64_t asset_id = 77;
+    mock.asset_ids["craft"] = asset_id;
+    auto cmd = std::make_shared<fss::server::asset_command>(/*dbid*/ 5, /*ts*/ 500, "RTL", 0.0, 0.0, 0);
+    mock.pushCommand(asset_id, cmd);
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    session->activate();
+
+    conn->setBlocked(true);
+
+    /* Simulates the recv thread: identify sets the pending command from the DB
+     * and calls sendCommand() directly, which blocks on the send below. */
+    std::thread identify_thread(
+        [&]() -> void { session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft")); });
+
+    /* Give the identify call time to claim the resend window and park in the
+     * blocked send before the worker's call races it. */
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    session->queueCommandSend();
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+    conn->setBlocked(false);
+    identify_thread.join();
+
+    REQUIRE(fss_test::wait_for(
+        [&]() -> bool { return count_sent<fss::transport::fss_message_asset_command>(conn->sentSnapshot()) >= 1; }));
+    /* Give an incorrect second dispatch a chance to land before asserting
+     * there is exactly one. */
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    REQUIRE(count_sent<fss::transport::fss_message_asset_command>(conn->sentSnapshot()) == 1);
+
+    session->disconnect();
 }
 
 TEST_CASE("session: queueRTTRequest sends an RTT request on the outbound worker thread")
