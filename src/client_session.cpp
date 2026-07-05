@@ -983,9 +983,56 @@ void fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss
     }
     else
     {
-        if (!this->msg_rate.consume(this->clock->now_ms()))
+        /* todo/37: rtt_response must never be rate-limited alongside bulk
+         * telemetry — a dropped response makes a live, healthy connection
+         * look timed out, since isTimedOut() only advances on a matched
+         * response. It is exempted outright rather than given its own bucket:
+         * an unmatched response only ever does bounded work (outstanding_rtt_
+         * requests and stray_rtt_responses are both small and hard-capped),
+         * so there is no flood vector to size a bucket against.
+         *
+         * command_ack gets its own small bucket instead of a blanket
+         * exemption. A dropped ack is a permanent loss of the command/ack
+         * audit link (the FMU sends one exactly once and never resends), but
+         * unlike rtt_response an ack is *not* naturally bounded: nothing
+         * in-session validates it against a command this server actually
+         * dispatched before enqueueing, and command_ack_write is a protected
+         * task in the shared db_write_queue that can evict other assets'
+         * telemetry and even other command writes under sustained pressure
+         * (todo/20). Fully exempting it would let one identified peer flood
+         * that queue at line rate. The dedicated bucket is sized well above
+         * any legitimate cadence (a command produces at most two acks) while
+         * still capping a flood far below "unbounded". */
+        bool exempt_from_rate_limit = msg->getType() == fss::transport::message_type_rtt_response;
+        bool is_command_ack = msg->getType() == fss::transport::message_type_command_ack;
+        bool rate_ok = exempt_from_rate_limit || (is_command_ack ? this->command_ack_rate.consume(this->clock->now_ms())
+                                                                 : this->msg_rate.consume(this->clock->now_ms()));
+        if (!rate_ok)
         {
             auto now_ms = this->clock->now_ms();
+            if (is_command_ack)
+            {
+                /* Distinct counters/log from telemetry drops (todo/37 item
+                 * 3): a lost ack must never look like an ordinary telemetry
+                 * drop in the logs. */
+                ++this->ack_rate_limit_rejects;
+                FSS_LOG_DEBUG("server", "Rate-limiting command_ack from "
+                                            << this->name << " (rejects=" << this->ack_rate_limit_rejects << ")");
+                if (this->last_ack_rate_limit_log_ms == 0)
+                {
+                    this->last_ack_rate_limit_log_ms = now_ms;
+                }
+                else if (now_ms - this->last_ack_rate_limit_log_ms >= 1000)
+                {
+                    FSS_LOG_WARN("server", "Rate-limiting command_ack from "
+                                               << this->name << " - dropped " << this->ack_rate_limit_rejects
+                                               << " acks in the last " << (now_ms - this->last_ack_rate_limit_log_ms)
+                                               << "ms");
+                    this->ack_rate_limit_rejects = 0;
+                    this->last_ack_rate_limit_log_ms = now_ms;
+                }
+                return;
+            }
             ++this->rate_limit_rejects;
             FSS_LOG_DEBUG("server",
                           "Rate-limiting client " << this->name << " (rejects=" << this->rate_limit_rejects << ")");
