@@ -7,6 +7,7 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <deque>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -177,10 +178,14 @@ class fss_client_handler {
 public:
     virtual ~fss_client_handler() = default;
     virtual void clientDisconnected(fss_client *client) = 0;
-    /* Sends msg to every client (bar `except`). Implementations must iterate
-     * the connections sequentially: fss_connection::sendMsg stamps a
-     * per-connection id into msg, so fanning one instance out concurrently
-     * would race that write (todo/12 C8). */
+    /* Sends msg to every client (bar `except`). fss_connection::sendMsg
+     * stamps a per-connection id into the message instance it is given
+     * (todo/12 C8), so implementations must never let two clients' sends run
+     * concurrently against the same instance — either by iterating
+     * sequentially on one thread (reusing one instance is fine there, since
+     * each send fully completes before the next starts), or (todo/36) by
+     * giving each recipient its own independent clone before fanning delivery
+     * out across separate per-client threads. */
     virtual void broadcastMsg(const std::shared_ptr<transport::fss_message> &msg, fss_client *except = nullptr) = 0;
 };
 
@@ -280,6 +285,25 @@ private:
     bool out_command_pending{false};
     bool out_rtt_pending{false};
     bool out_smm_pending{false};
+    /* Broadcasts routed onto this worker too (todo/36), so a black-holed peer
+     * can only stall its own broadcast delivery, never the main loop (server
+     * list, every 15s) or another client's recv thread (position relay).
+     * Coalescing: only the latest server-list matters, so a new one simply
+     * replaces any not-yet-sent previous one. Guarded by outbound_lock. */
+    std::shared_ptr<transport::fss_message> pending_server_list_broadcast{nullptr};
+    /* Bounded, drop-oldest (todo/36): position relay is loss-tolerant
+     * telemetry (mirrors the transport queue's drop policy and todo/20's
+     * command/telemetry distinction), so under sustained backlog the oldest
+     * queued report is dropped rather than growing unboundedly. Guarded by
+     * outbound_lock. */
+    static constexpr size_t max_pending_position_relay = 8;
+    std::deque<std::shared_ptr<transport::fss_message>> pending_position_relay{};
+    /* Cumulative reports dropped for this client by the cap above (never
+     * reset); guarded by outbound_lock alongside the queue it counts.
+     * Exposed so an operator (or a future metrics hook) can see the loss
+     * rather than it being silent, mirroring fss_connection::
+     * getDroppedMessages() for the transport-level inbound queue. */
+    uint64_t position_relay_dropped{0};
     std::thread outbound_worker{};
     /* What the worker should do this wake-up. Returned by waitForOutboundWork so
      * the worker performs the (blocking) sends with no lock held. */
@@ -288,6 +312,8 @@ private:
         bool command{false};
         bool rtt{false};
         bool smm{false};
+        std::shared_ptr<transport::fss_message> server_list_broadcast{nullptr};
+        std::vector<std::shared_ptr<transport::fss_message>> position_relay{};
     };
     /* Block until there is work or a stop request, then atomically take and clear
      * the pending flags. */
@@ -341,6 +367,23 @@ public:
     /* Schedule a cached-SMM-settings send on this client's outbound worker
      * thread (todo/21). Returns immediately; no-op once disconnecting. */
     void queueSMMSettings();
+    /* Schedule a server-list broadcast on this client's outbound worker thread
+     * (todo/36) instead of sending inline, so a black-holed peer cannot stall
+     * the main loop's periodic broadcast for other clients. Coalescing: a new
+     * call simply replaces any not-yet-sent previous one. `msg` must be an
+     * instance not shared with any other client (see broadcastMsg's C8 note).
+     * Returns immediately; no-op once disconnecting. */
+    void queueServerListBroadcast(std::shared_ptr<transport::fss_message> msg);
+    /* Schedule a relayed position report on this client's outbound worker
+     * thread (todo/36) instead of sending inline from the reporting client's
+     * recv thread, so one black-holed peer cannot stall every other client's
+     * telemetry relay. Bounded, drop-oldest: position relay is loss-tolerant.
+     * `msg` must be an instance not shared with any other client (see
+     * broadcastMsg's C8 note). Returns immediately; no-op once disconnecting. */
+    void queuePositionRelay(std::shared_ptr<transport::fss_message> msg);
+    /* Cumulative position reports dropped from this client's relay queue by
+     * the bounded-cap policy above. 0 unless the queue has ever overflowed. */
+    auto getPositionRelayDropped() -> uint64_t;
     auto isAircraft() -> bool;
     auto getCachedAssetId() -> uint64_t { return this->cached_asset_id.load(); }
     /* The smoothed client↔server clock offset (ms; positive = client ahead)

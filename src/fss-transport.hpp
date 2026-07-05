@@ -279,9 +279,10 @@ public:
     /* Sends one message on this connection. NOTE: this mutates the message —
      * it stamps the per-connection sequence id into msg (setId) before packing.
      * Invariant (todo/12 C8): a single fss_message instance must not be sent
-     * concurrently on multiple connections; the id stamp would race. The one
-     * path that fans a shared instance out — broadcastMsg (one msg to every
-     * client) — iterates the connections sequentially on a single thread.
+     * concurrently on multiple connections; the id stamp would race. Every
+     * broadcaster (server_clients::broadcastMsg, one msg logically bound for
+     * every client) satisfies this by giving each recipient its own
+     * independent clone (todo/36) rather than sharing one instance.
      * sendRTTRequest sends a single message and then reads its assigned id back
      * immediately after this returns, so it too relies on the stamp being
      * synchronous and unraced. (sendSMMSettings builds a fresh message per

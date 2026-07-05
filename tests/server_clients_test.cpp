@@ -10,8 +10,11 @@
 #error No catch header
 #endif
 
+#include <chrono>
+#include <condition_variable>
 #include <list>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -24,6 +27,7 @@
 #include "db-write-queue.hpp"
 #include "mock_database.hpp"
 #include "server-clients.hpp"
+#include "test_helpers.hpp"
 
 namespace fss = flight_safety_system;
 
@@ -43,9 +47,65 @@ public:
 
     auto getClientNames() -> std::list<std::string> override { return cert_names; }
     auto isPeerCertRevoked(const std::string & /*crl_file*/) const -> bool override { return revoked; }
+
+    /* Block (true) or release (false) any in-flight or future sendMsg,
+     * modelling a peer whose socket has black-holed (todo/36). Releasing wakes
+     * a blocked writer. */
+    void setBlocked(bool b)
+    {
+        {
+            std::scoped_lock guard(this->block_lock);
+            this->blocked = b;
+        }
+        this->block_cv.notify_all();
+    }
+    auto sentSnapshot() -> std::vector<std::shared_ptr<fss::transport::fss_message>>
+    {
+        std::scoped_lock guard(this->sent_lock);
+        return this->sent;
+    }
+    void disconnect() override
+    {
+        this->setBlocked(false);
+        fss::transport::fss_connection::disconnect();
+    }
 protected:
-    auto sendMsg(const std::shared_ptr<fss::transport::buf_len> & /*bl*/) -> bool override { return true; }
+    auto sendMsg(const std::shared_ptr<fss::transport::buf_len> &bl) -> bool override
+    {
+        {
+            std::unique_lock<std::mutex> lock(this->block_lock);
+            this->block_cv.wait(lock, [this]() -> bool { return !this->blocked; });
+        }
+        auto msg = fss::transport::fss_message::decode(bl);
+        std::scoped_lock guard(this->sent_lock);
+        if (msg != nullptr)
+        {
+            this->sent.push_back(msg);
+        }
+        return true;
+    }
+private:
+    std::mutex sent_lock{};
+    std::mutex block_lock{};
+    std::condition_variable block_cv{};
+    bool blocked{false};
+    std::vector<std::shared_ptr<fss::transport::fss_message>> sent{};
 };
+
+/* Count how many messages in `sent` decoded to a T. */
+template<typename T>
+auto count_sent(const std::vector<std::shared_ptr<fss::transport::fss_message>> &sent) -> std::size_t
+{
+    std::size_t count = 0;
+    for (const auto &m : sent)
+    {
+        if (std::dynamic_pointer_cast<T>(m))
+        {
+            ++count;
+        }
+    }
+    return count;
+}
 
 struct FakeClock : public fss::IClock {
     uint64_t t{0};
@@ -161,6 +221,98 @@ TEST_CASE("server_clients: broadcastMsg reaches aircraft clients only")
     // Broadcast should not crash and should only target aircraft
     auto msg = std::make_shared<fss::transport::fss_message_rtt_request>();
     sc.broadcastMsg(msg);
+}
+
+TEST_CASE("server_clients: broadcastMsg does not block on one black-holed client (todo/36)")
+{
+    /* todo/36: broadcastMsg must schedule sends on each client's outbound
+     * worker rather than sending inline, or a black-holed peer stalls the
+     * caller (the main loop, every 15s, for server-list; a reporting
+     * client's own recv thread for position relay) for up to
+     * TCP_USER_TIMEOUT. Block one client's socket and assert both that the
+     * call itself returns promptly and that the healthy client still
+     * receives the broadcast. */
+    server_clients sc;
+    fss_test::MockDatabase mock;
+    mock.asset_ids["stuck"] = 1;
+    mock.asset_ids["healthy"] = 2;
+
+    auto stuck_conn = std::make_shared<FakeConnection>();
+    stuck_conn->cert_names.push_back("stuck");
+    auto stuck_writer = make_null_writer();
+    auto stuck_client = std::make_shared<fss::server::fss_client>(stuck_conn, &mock, stuck_writer, &sc);
+    stuck_client->processMessage(std::make_shared<fss::transport::fss_message_identity>("stuck"));
+    sc.clientConnected(stuck_client);
+
+    auto healthy_conn = std::make_shared<FakeConnection>();
+    healthy_conn->cert_names.push_back("healthy");
+    auto healthy_writer = make_null_writer();
+    auto healthy_client = std::make_shared<fss::server::fss_client>(healthy_conn, &mock, healthy_writer, &sc);
+    healthy_client->processMessage(std::make_shared<fss::transport::fss_message_identity>("healthy"));
+    sc.clientConnected(healthy_client);
+
+    /* Both clients already received one server_list send as a side effect of
+     * identify (independent of broadcastMsg) — baseline before the broadcast
+     * under test, so the assertions below only see what *this* call
+     * delivers. */
+    std::size_t stuck_before = count_sent<fss::transport::fss_message_server_list>(stuck_conn->sentSnapshot());
+    std::size_t healthy_before = count_sent<fss::transport::fss_message_server_list>(healthy_conn->sentSnapshot());
+
+    stuck_conn->setBlocked(true);
+
+    auto server_list = std::make_shared<fss::transport::fss_message_server_list>();
+    server_list->addServer("10.0.0.1", 1234);
+
+    auto start = std::chrono::steady_clock::now();
+    sc.broadcastMsg(server_list);
+    auto elapsed = std::chrono::steady_clock::now() - start;
+    REQUIRE(elapsed < std::chrono::milliseconds(500));
+
+    REQUIRE(fss_test::wait_for([&]() -> bool {
+        return count_sent<fss::transport::fss_message_server_list>(healthy_conn->sentSnapshot()) == healthy_before + 1;
+    }));
+    /* The stuck client's socket is still blocked, so this broadcast has not
+     * reached it. */
+    REQUIRE(count_sent<fss::transport::fss_message_server_list>(stuck_conn->sentSnapshot()) == stuck_before);
+
+    stuck_conn->setBlocked(false);
+    stuck_client->disconnect();
+    healthy_client->disconnect();
+}
+
+TEST_CASE("server_clients: position relay drops oldest and counts drops once the queue is full (todo/36)")
+{
+    /* Position relay is a bounded, drop-oldest queue (max_pending_position_relay
+     * = 8 in fss-server.hpp, private so hard-coded here) — loss-tolerant
+     * telemetry, but the loss must be observable. Push directly via
+     * queuePositionRelay() without ever starting the outbound worker (skip
+     * activate()/clientConnected()), so nothing drains the queue between
+     * pushes and the resulting drop count is deterministic rather than
+     * racing worker scheduling. */
+    server_clients sc;
+    fss_test::MockDatabase mock;
+    mock.asset_ids["stuck"] = 1;
+
+    auto stuck_conn = std::make_shared<FakeConnection>();
+    stuck_conn->cert_names.push_back("stuck");
+    auto stuck_writer = make_null_writer();
+    /* Deliberately not registered via sc.clientConnected(): that would call
+     * activate(), starting the outbound worker that drains the very queue
+     * this test needs undrained. */
+    auto stuck_client = std::make_shared<fss::server::fss_client>(stuck_conn, &mock, stuck_writer, &sc);
+    stuck_client->processMessage(std::make_shared<fss::transport::fss_message_identity>("stuck"));
+
+    constexpr int reports_sent = 10;
+    constexpr uint64_t queue_cap = 8;
+    for (int i = 0; i < reports_sent; ++i)
+    {
+        auto position = std::make_shared<fss::transport::fss_message_position_report>(
+            0.0, 0.0, 0U, 0U, 0U, int16_t{0}, 0U, std::string{}, 0U, uint8_t{0}, 0U, uint8_t{0}, uint8_t{0},
+            uint64_t{0});
+        stuck_client->queuePositionRelay(position);
+    }
+
+    REQUIRE(stuck_client->getPositionRelayDropped() == reports_sent - queue_cap);
 }
 
 TEST_CASE("server_clients: broadcastMsg skips the 'except' client")

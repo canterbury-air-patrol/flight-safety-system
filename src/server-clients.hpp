@@ -147,14 +147,44 @@ public:
             this->clients.erase(it);
         }
     };
+    /* todo/36: broadcasts are scheduled on each client's outbound writer
+     * thread rather than sent inline, so a black-holed peer can only stall its
+     * own broadcast delivery — never the main loop (server-list, every 15s)
+     * or another client's recv thread (position relay, called from the
+     * *reporting* client's recv thread). fss_connection::sendMsg stamps a
+     * per-connection id into the message instance it is given (the C8
+     * invariant), so each client must get its own instance: decode() over
+     * getPacked() builds an independent clone per client rather than sharing
+     * `msg` (packed once, since the bytes don't depend on the recipient). */
     void broadcastMsg(const std::shared_ptr<flight_safety_system::transport::fss_message> &msg,
                       flight_safety_system::server::fss_client *except = nullptr) override
     {
+        bool is_server_list = msg->getType() == flight_safety_system::transport::message_type_server_list;
+        auto packed = msg->getPacked();
+        /* decode() failing is a property of `packed` (truncated/corrupt bytes
+         * or a type it refuses to reconstruct), not of any one recipient, so
+         * check once here rather than per-client: a per-client `continue`
+         * would look like "skip this one client" but actually silently drops
+         * the whole broadcast, one client at a time, with no record of why. */
+        if (flight_safety_system::transport::fss_message::decode(packed) == nullptr)
+        {
+            FSS_LOG_ERROR("server", "broadcastMsg: message of type "
+                                        << msg->getType() << " did not round-trip through pack/decode; dropping");
+            return;
+        }
         for (const auto &client : this->snapshotClients())
         {
             if (client->isAircraft() && client.get() != except)
             {
-                client->sendMsg(msg);
+                auto clone = flight_safety_system::transport::fss_message::decode(packed);
+                if (is_server_list)
+                {
+                    client->queueServerListBroadcast(std::move(clone));
+                }
+                else
+                {
+                    client->queuePositionRelay(std::move(clone));
+                }
             }
         }
     }
