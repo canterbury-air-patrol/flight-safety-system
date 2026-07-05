@@ -82,6 +82,20 @@ public:
         return this->sent;
     }
 
+    /* Thread-safe snapshot of the message currently parked in a blocked send
+     * (nullptr if none). This is a separate, independently-decoded clone —
+     * never the caller's own message object — so a test can safely read its
+     * id (e.g. to inject a matching response) while the sending thread is
+     * still inside the blocked write. Reading the id off the caller's own
+     * message object from another thread would race fss_message::setId(),
+     * which fss_connection::sendMsg() calls without any lock a test
+     * participates in. */
+    auto inFlightMessage() -> std::shared_ptr<fss::transport::fss_message>
+    {
+        std::scoped_lock guard(this->sent_lock);
+        return this->in_flight;
+    }
+
     /* Releasing a blocked send is also needed when the connection is torn down,
      * so a worker parked in sendMsg can exit and be joined. */
     void disconnect() override
@@ -92,12 +106,17 @@ public:
 protected:
     auto sendMsg(const std::shared_ptr<fss::transport::buf_len> &bl) -> bool override
     {
+        auto msg = fss::transport::fss_message::decode(bl);
+        {
+            std::scoped_lock guard(this->sent_lock);
+            this->in_flight = msg;
+        }
         {
             std::unique_lock<std::mutex> lock(this->block_lock);
             this->block_cv.wait(lock, [this]() -> bool { return !this->blocked; });
         }
-        auto msg = fss::transport::fss_message::decode(bl);
         std::scoped_lock guard(this->sent_lock);
+        this->in_flight = nullptr;
         if (msg != nullptr)
         {
             send_attempts.push_back(msg);
@@ -114,6 +133,7 @@ protected:
     }
 private:
     std::mutex sent_lock{};
+    std::shared_ptr<fss::transport::fss_message> in_flight{nullptr};
     std::mutex block_lock{};
     std::condition_variable block_cv{};
     bool blocked{false};
@@ -743,9 +763,15 @@ TEST_CASE("session: sendRTTRequest reconciles a response that raced the bookkeep
     std::thread sender([&]() -> void { session->sendRTTRequest(rtt_req); });
 
     /* setId() happens synchronously inside fss_connection::sendMsg before the
-     * blocked write, so the id is already correct once it stops being 0. */
-    REQUIRE(fss_test::wait_for([&]() -> bool { return rtt_req->getId() != 0; }));
-    uint64_t assigned_id = rtt_req->getId();
+     * blocked write, so the id is already correct once the connection has a
+     * message parked in the blocked send. Read it off inFlightMessage()'s
+     * independently-decoded clone, never off rtt_req itself: the sender
+     * thread's call into fss_message::setId() is not synchronized against
+     * this (the test's) thread, so polling rtt_req->getId() here would be a
+     * data race (caught by TSan) even though it happens to read the right
+     * value in practice. */
+    REQUIRE(fss_test::wait_for([&]() -> bool { return conn->inFlightMessage() != nullptr; }));
+    uint64_t assigned_id = conn->inFlightMessage()->getId();
 
     session->processMessage(std::make_shared<fss::transport::fss_message_rtt_response>(assigned_id));
 
