@@ -862,26 +862,24 @@ void fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss
         {
             if (msg->getSeq() != wanted)
             {
-                /* This check runs before the rate limiter, so a peer that
-                 * deliberately or buggily sends wrong sequence numbers would
-                 * otherwise hit this WARN once per message at line rate.
-                 * Throttle to first + every 100th (matching the duplicate-
-                 * version and null-frame paths) so one misbehaving peer cannot
-                 * flood the log. */
-                ++this->out_of_order_count;
-                constexpr uint64_t log_every = 100;
-                if (this->out_of_order_count == 1 || (this->out_of_order_count % log_every) == 0)
-                {
-                    FSS_LOG_WARN("server", "Out-of-order or duplicate message seq="
-                                               << msg->getSeq() << " expected=" << wanted
-                                               << " (count=" << this->out_of_order_count << ")");
-                }
-                if (msg->getType() == fss::transport::message_type_identity ||
-                    msg->getType() == fss::transport::message_type_identity_non_aircraft)
-                {
-                    this->client_handler->clientDisconnected(this);
-                    return;
-                }
+                /* todo/39: under this check's own stated assumptions (TLS
+                 * already rules out genuine reorder/replay at the record
+                 * layer), a mismatch on a live connection means either a
+                 * broken/misbehaving peer or a local framing bug (e.g. a
+                 * consumed-but-never-sent id — see todo/38) — either way,
+                 * expected_seq only advances on a match, so silently dropping
+                 * would freeze every subsequent message (positions, status,
+                 * RTT responses included) in a permanent drop loop until the
+                 * 30s liveness timeout eventually reaps the connection.
+                 * Disconnect immediately instead, exactly as the identity
+                 * case already did — a loud failure and clean reconnect beats
+                 * 30s of silently discarded telemetry. Only one such log line
+                 * can ever fire per session now (the session ends here), so
+                 * no throttling counter is needed. */
+                FSS_LOG_WARN("server", "Out-of-order or duplicate message seq=" << msg->getSeq() << " expected="
+                                                                                << wanted << " from " << this->getName()
+                                                                                << "; disconnecting");
+                this->client_handler->clientDisconnected(this);
                 return;
             }
             this->expected_seq.fetch_add(1);

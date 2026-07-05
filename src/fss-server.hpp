@@ -275,11 +275,6 @@ private:
      * (never reset); touched only on the recv thread (processMessage), used
      * to throttle the warning. */
     uint64_t duplicate_version_count{0};
-    /* Cumulative out-of-order / duplicate (v2 sequence) messages seen this
-     * session (never reset); touched only on the recv thread (processMessage),
-     * used to throttle the warning so a peer streaming wrong sequence numbers
-     * cannot flood the log (the seq check runs before the rate limiter). */
-    uint64_t out_of_order_count{0};
     /* Per-client outbound writer (todo/21). The server main loop schedules
      * *what* to send by setting these pending flags; the worker thread does the
      * actual blocking socket write, so one black-holed peer can only stall its
