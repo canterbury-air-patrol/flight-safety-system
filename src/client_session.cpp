@@ -196,7 +196,8 @@ auto fss::server::fss_client::waitForOutboundWork() -> fss::server::fss_client::
 {
     std::unique_lock<std::mutex> lock(this->outbound_lock);
     this->outbound_cv.wait(lock, [this]() -> bool {
-        return this->outbound_stopping || this->out_command_pending || this->out_rtt_pending || this->out_smm_pending;
+        return this->outbound_stopping || this->out_command_pending || this->out_rtt_pending || this->out_smm_pending ||
+               this->pending_server_list_broadcast != nullptr || !this->pending_position_relay.empty();
     });
     outbound_work work;
     if (this->outbound_stopping)
@@ -210,6 +211,11 @@ auto fss::server::fss_client::waitForOutboundWork() -> fss::server::fss_client::
     this->out_command_pending = false;
     this->out_rtt_pending = false;
     this->out_smm_pending = false;
+    work.server_list_broadcast = std::move(this->pending_server_list_broadcast);
+    this->pending_server_list_broadcast = nullptr;
+    work.position_relay.assign(std::make_move_iterator(this->pending_position_relay.begin()),
+                               std::make_move_iterator(this->pending_position_relay.end()));
+    this->pending_position_relay.clear();
     return work;
 }
 
@@ -226,7 +232,8 @@ void fss::server::fss_client::outboundWorkerRun()
         {
             return;
         }
-        /* Commands are the highest priority — send them before periodic RTT. */
+        /* Commands are the highest priority — send them before periodic RTT,
+         * SMM settings, and broadcasts. */
         if (work.command)
         {
             this->sendCommand();
@@ -240,6 +247,14 @@ void fss::server::fss_client::outboundWorkerRun()
         if (work.smm)
         {
             this->sendSMMSettings();
+        }
+        if (work.server_list_broadcast != nullptr)
+        {
+            this->getConnection()->sendMsg(work.server_list_broadcast);
+        }
+        for (const auto &relay_msg : work.position_relay)
+        {
+            this->getConnection()->sendMsg(relay_msg);
         }
     }
 }
@@ -281,6 +296,51 @@ void fss::server::fss_client::queueSMMSettings()
         this->out_smm_pending = true;
     }
     this->outbound_cv.notify_one();
+}
+
+void fss::server::fss_client::queueServerListBroadcast(std::shared_ptr<fss::transport::fss_message> msg)
+{
+    {
+        std::scoped_lock guard(this->outbound_lock);
+        if (this->outbound_stopping)
+        {
+            return;
+        }
+        this->pending_server_list_broadcast = std::move(msg);
+    }
+    this->outbound_cv.notify_one();
+}
+
+void fss::server::fss_client::queuePositionRelay(std::shared_ptr<fss::transport::fss_message> msg)
+{
+    uint64_t dropped = 0;
+    {
+        std::scoped_lock guard(this->outbound_lock);
+        if (this->outbound_stopping)
+        {
+            return;
+        }
+        if (this->pending_position_relay.size() >= max_pending_position_relay)
+        {
+            this->pending_position_relay.pop_front();
+            dropped = ++this->position_relay_dropped;
+        }
+        this->pending_position_relay.push_back(std::move(msg));
+    }
+    this->outbound_cv.notify_one();
+    /* Logged outside outbound_lock: getName() takes client_lock, and name is
+     * guarded by that lock, not outbound_lock. */
+    if (dropped == 1 || (dropped != 0 && dropped % 100 == 0))
+    {
+        FSS_LOG_WARN("server", "Position relay queue full for " << this->getName()
+                                                                << ", dropping oldest. Total dropped: " << dropped);
+    }
+}
+
+auto fss::server::fss_client::getPositionRelayDropped() -> uint64_t
+{
+    std::scoped_lock guard(this->outbound_lock);
+    return this->position_relay_dropped;
 }
 
 void fss::server::fss_client::requestOutboundStop()
