@@ -1247,12 +1247,17 @@ auto establish_v2_session(std::shared_ptr<fss::server::fss_client> &session, uin
 }
 } // namespace
 
-TEST_CASE("session: v2 replayed data message is dropped")
+TEST_CASE("session: v2 replayed data message disconnects (todo/39)")
 {
-    /* m7.1 phase 2: a position report whose seq matches a message the server
-     * already processed (a duplicate within the session) must be discarded.
-     * This is in-order/duplicate detection, not a security replay defence —
-     * TLS already prevents record-layer replay. */
+    /* m7.1 phase 2 established that a position report whose seq matches a
+     * message the server already processed (a duplicate within the session)
+     * must not be forwarded — this is in-order/duplicate detection, not a
+     * security replay defence, since TLS already prevents record-layer
+     * replay. todo/39: expected_seq only ever advances on a match, so
+     * silently dropping (the original m7.1 behaviour) would freeze every
+     * subsequent message in a permanent drop loop until the 30s liveness
+     * timeout eventually reaped the connection. Disconnect immediately
+     * instead, the same as the identity case already did. */
     fss_test::MockDatabase mock;
     mock.asset_ids["craft"] = 1;
 
@@ -1278,7 +1283,42 @@ TEST_CASE("session: v2 replayed data message is dropped")
     replay->setId(next_id); // duplicate seq — replay
     session->processMessage(replay);
     REQUIRE(handler.broadcasts.size() == 1); // not forwarded
-    REQUIRE(handler.disconnects == 0);       // connection stays up
+    REQUIRE(handler.disconnects > 0);        // disconnected, not silently frozen
+}
+
+TEST_CASE("session: a seq mismatch disconnects immediately and names the mismatch in the log (todo/39)")
+{
+    /* Regression per the todo: disconnect must happen on the very next
+     * message (not after waiting out the 30s liveness timeout), and the log
+     * must name the seq/expected values rather than reading as a generic
+     * telemetry drop. */
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 1;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+
+    uint64_t next_id = 1;
+    establish_v2_session(session, next_id);
+    REQUIRE(handler.disconnects == 0);
+
+    fss_test::capture_cerr capture;
+    fss_test::scoped_log_level level("warn");
+
+    /* Jump ahead of expected_seq (next_id) rather than repeat it, so this
+     * exercises a genuine out-of-order gap, not just a duplicate. */
+    auto skipped = make_position_msg(fss::fss_current_timestamp());
+    skipped->setId(next_id + 5);
+    session->processMessage(skipped);
+
+    REQUIRE(handler.disconnects == 1); // immediate — no liveness timeout involved
+    auto log = capture.str();
+    REQUIRE(log.find("seq=") != std::string::npos);
+    REQUIRE(log.find("expected=") != std::string::npos);
 }
 
 TEST_CASE("session: duplicate version message is ignored without derailing the session")
