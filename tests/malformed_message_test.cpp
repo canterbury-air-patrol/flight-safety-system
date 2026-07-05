@@ -296,6 +296,23 @@ TEST_CASE("malformed: decode returns nullptr for unknown message type")
     REQUIRE(fss_message::decode(bl) == nullptr);
 }
 
+TEST_CASE("malformed: decode validates the wire type before casting (todo/40)")
+{
+    /* fss_message_type is an unscoped enum with no fixed underlying type, so
+     * its representable range is only the smallest bit-field that covers its
+     * enumerators (0..15 today, for the 15 values 0..14) — casting an
+     * arbitrary untrusted uint16_t straight into it is UB per [dcl.enum]/8
+     * for anything past that range (e.g. 5000). decode_message_type() must
+     * map every value that isn't a defined enumerator to message_type_unknown
+     * (undecodable) rather than ever performing that cast — checked here one
+     * past the last enumerator (in-range but still not a defined value), a
+     * mid-range unused byte, and the full 16-bit maximum (genuinely UB to
+     * cast). */
+    REQUIRE(fss_message::decode(fss_test::make_framed_buffer(15U, 1, "", 12)) == nullptr);
+    REQUIRE(fss_message::decode(fss_test::make_framed_buffer(255U, 2, "", 12)) == nullptr);
+    REQUIRE(fss_message::decode(fss_test::make_framed_buffer(0xFFFFU, 3, "", 12)) == nullptr);
+}
+
 TEST_CASE("malformed: decode returns nullptr for message_type_unknown")
 {
     auto bl = fss_test::make_framed_buffer(static_cast<uint16_t>(message_type_unknown), 1, "", 12);
