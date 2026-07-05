@@ -308,13 +308,22 @@ auto flight_safety_system::transport::fss_connection::connectTo(const std::strin
 auto flight_safety_system::transport::fss_connection::sendMsg(const std::shared_ptr<fss_message> &msg) -> bool
 {
     std::scoped_lock lock_holder(this->send_lock);
-    msg->setId(this->getMessageId());
+    uint64_t assigned_id = this->getMessageId();
+    msg->setId(assigned_id);
     auto bl = msg->getPacked();
 #ifdef DEBUG
     std::cout << "Sending message (len=" << bl->getLength() << ") to " << this->fd << std::endl;
 #endif
     if (!bl->isValid())
     {
+        /* todo/38: the message never went out (most commonly because it
+         * exceeds the 16-bit length field and updateSize() invalidated the
+         * buffer), so the id just assigned above must not leave a gap — the
+         * peer's v2 sequence check treats any gap as out-of-order (todo/39).
+         * Roll back under send_lock (still held here), the same lock
+         * getMessageId() incremented it under, so no concurrent sender can
+         * observe or reuse the rolled-back value. */
+        --this->last_msg_id;
         return false;
     }
     bool ret = this->sendMsg(bl);

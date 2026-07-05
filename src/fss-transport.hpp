@@ -194,6 +194,12 @@ public:
     void writeAt(size_t offset, const void *src, size_t len);
     auto getData() -> const char *;
     auto getLength() -> size_t;
+    /* Marks an already-built buffer as unusable (todo/38): clears the content
+     * so isValid() reports false. Used when a packed message turns out too
+     * large to frame — the buffer already holds the unframed bytes by that
+     * point, and this is the ABI-neutral way to fail it (no new data member,
+     * so no layout change to this installed-header class). */
+    void invalidate();
 };
 
 class fss_message_cb {
