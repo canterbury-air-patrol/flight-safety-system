@@ -238,6 +238,15 @@ private:
     rate_limiter msg_rate{100, 20};
     uint64_t rate_limit_rejects{0};
     uint64_t last_rate_limit_log_ms{0};
+    /* todo/37: command_ack gets its own bucket rather than sharing msg_rate
+     * (which would make it a bulk-telemetry casualty) or being exempted
+     * outright (unlike rtt_response, an ack is not naturally bounded — see
+     * the comment in processMessage()). Sized well above any legitimate
+     * cadence (a command produces at most two acks) while still capping a
+     * flood of unvalidated acks into the shared db_write_queue. */
+    rate_limiter command_ack_rate{10, 5};
+    uint64_t ack_rate_limit_rejects{0};
+    uint64_t last_ack_rate_limit_log_ms{0};
     /* Cumulative position reports discarded for having no GPS fix (NaN
      * coordinates) this session; touched only on the recv thread
      * (processMessage), used to throttle the warning. */

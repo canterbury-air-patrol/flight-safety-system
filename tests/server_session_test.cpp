@@ -1091,6 +1091,107 @@ TEST_CASE("rate limiter: refill allows messages after bucket drains")
     REQUIRE(handler.disconnects == 0);
 }
 
+TEST_CASE("rate limiter: rtt_response and command_ack are exempt (todo/37)")
+{
+    /* rtt_response and command_ack must never be casualties of the bucket
+     * that protects the server from bulk telemetry: a dropped rtt_response
+     * makes a live connection look timed out, and a dropped command_ack is a
+     * permanent loss of the command/ack audit link (the FMU never resends
+     * one). Drain a tiny, non-refilling bucket with position reports, then
+     * prove both message types still land. */
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 1;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    conn->setNegotiatedFeatureFlags(fss::transport::FSS_FEATURE_COMMAND_ACK);
+    NullClientHandler handler;
+
+    auto clock = std::make_shared<FakeClock>();
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    session->setClock(clock);
+    session->setRateLimits(2, 0); // 2-message burst, no refill
+
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+
+    /* A real outstanding request to reconcile the response against. */
+    auto rtt_req = std::make_shared<fss::transport::fss_message_rtt_request>();
+    session->sendRTTRequest(rtt_req);
+    uint64_t assigned_id = rtt_req->getId();
+    clock->advance(20000);
+
+    /* Drain (and exceed) the tiny bucket with ordinary telemetry. */
+    auto pos = std::make_shared<fss::transport::fss_message_position_report>(
+        0.0, 0.0, 0U, 0U, 0U, int16_t{0}, 0U, std::string{}, 0U, uint8_t{0}, 0U, uint8_t{0}, uint8_t{0}, uint64_t{0});
+    for (int i = 0; i < 10; ++i)
+    {
+        session->processMessage(pos);
+    }
+    REQUIRE(handler.broadcasts.size() == 2); // only the burst capacity got through
+
+    /* Bucket is still drained: without the fix this would be dropped too,
+     * leaving last_rtt_response_time stale. */
+    session->processMessage(std::make_shared<fss::transport::fss_message_rtt_response>(assigned_id));
+    clock->advance(25000); // 45s since identify, but only 25s since the response
+    REQUIRE_FALSE(session->isTimedOut());
+    clock->advance(6000); // 31s since the response
+    REQUIRE(session->isTimedOut());
+
+    /* Bucket is still drained: without the fix this ack would be silently
+     * dropped before ever reaching the writer. */
+    constexpr uint64_t acked_id = 42;
+    auto ack = std::make_shared<fss::transport::fss_message_command_ack>(acked_id, fss::transport::asset_command_hold,
+                                                                         fss::transport::command_ack_actioned,
+                                                                         fss::transport::supersede_none, uint64_t{500});
+    session->processMessage(ack);
+    REQUIRE(fss_test::wait_for([&]() -> bool { return !mock.getAcks().empty(); }));
+    REQUIRE(mock.getAcks().front().dispatch_id == acked_id);
+}
+
+TEST_CASE("rate limiter: a command_ack flood is capped, not exempted outright (todo/37)")
+{
+    /* Unlike rtt_response, a command_ack is not naturally bounded: nothing
+     * in-session validates it against a command this server actually
+     * dispatched before enqueueing, and command_ack_write is a protected task
+     * in the shared db_write_queue that can evict other assets' telemetry
+     * and even other command writes under sustained pressure. A blanket
+     * exemption would let one identified peer flood that queue at line rate,
+     * so command_ack gets its own small bucket (10 burst, 5/s refill in
+     * fss-server.hpp) instead. Flood well past that cap and assert only the
+     * bucket's worth land. */
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 1;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    conn->setNegotiatedFeatureFlags(fss::transport::FSS_FEATURE_COMMAND_ACK);
+    NullClientHandler handler;
+
+    auto clock = std::make_shared<FakeClock>();
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    session->setClock(clock);
+
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+
+    constexpr int acks_sent = 30;
+    for (int i = 0; i < acks_sent; ++i)
+    {
+        auto ack = std::make_shared<fss::transport::fss_message_command_ack>(
+            static_cast<uint64_t>(i), fss::transport::asset_command_hold, fss::transport::command_ack_actioned,
+            fss::transport::supersede_none, uint64_t{500});
+        session->processMessage(ack);
+    }
+
+    /* FakeClock never advances during the flood, so the bucket's lazy refill
+     * never triggers: exactly its 10-token burst capacity gets through,
+     * deterministically. */
+    constexpr std::size_t bucket_capacity = 10;
+    REQUIRE(fss_test::wait_for([&]() -> bool { return mock.getAcks().size() >= bucket_capacity; }));
+    REQUIRE(mock.getAcks().size() == bucket_capacity);
+}
+
 TEST_CASE("session: legacy client (no version handshake) is accepted")
 {
     /* Pre-versioning clients send identity directly. The server must
