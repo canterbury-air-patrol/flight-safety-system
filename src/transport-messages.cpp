@@ -113,6 +113,39 @@ static auto decode_command_ack_reason(uint8_t reason) -> flight_safety_system::t
     }
 }
 
+/* Validate an untrusted wire value and map it to the matching
+ * fss_message_type enumerator. fss_message_type is an unscoped enum with no
+ * fixed underlying type, so its value range is only the bits needed for its
+ * enumerators (todo/12 C7); casting an arbitrary uint16_t straight into it
+ * (a value like 5000 from a malicious/buggy peer) is undefined behaviour per
+ * [dcl.enum]/8. Any value that is not a defined enumerator maps to
+ * message_type_unknown instead, mirroring decode_asset_command et al. above
+ * — message type is the one wire enum decode() did not already validate this
+ * way, being the very first untrusted field read off the wire. */
+static auto decode_message_type(uint16_t type_n) -> flight_safety_system::transport::fss_message_type
+{
+    using namespace flight_safety_system::transport;
+    switch (type_n)
+    {
+        case static_cast<uint16_t>(message_type_unknown): return message_type_unknown;
+        case static_cast<uint16_t>(message_type_closed): return message_type_closed;
+        case static_cast<uint16_t>(message_type_identity): return message_type_identity;
+        case static_cast<uint16_t>(message_type_rtt_request): return message_type_rtt_request;
+        case static_cast<uint16_t>(message_type_rtt_response): return message_type_rtt_response;
+        case static_cast<uint16_t>(message_type_position_report): return message_type_position_report;
+        case static_cast<uint16_t>(message_type_system_status): return message_type_system_status;
+        case static_cast<uint16_t>(message_type_search_status): return message_type_search_status;
+        case static_cast<uint16_t>(message_type_command): return message_type_command;
+        case static_cast<uint16_t>(message_type_server_list): return message_type_server_list;
+        case static_cast<uint16_t>(message_type_smm_settings): return message_type_smm_settings;
+        case static_cast<uint16_t>(message_type_identity_non_aircraft): return message_type_identity_non_aircraft;
+        case static_cast<uint16_t>(message_type_identity_required): return message_type_identity_required;
+        case static_cast<uint16_t>(message_type_version): return message_type_version;
+        case static_cast<uint16_t>(message_type_command_ack): return message_type_command_ack;
+        default: return message_type_unknown;
+    }
+}
+
 static void packStringRaw(const std::shared_ptr<flight_safety_system::transport::buf_len> &bl, const char *data,
                           size_t str_len)
 {
@@ -1333,7 +1366,7 @@ auto flight_safety_system::transport::fss_message::decode(const std::shared_ptr<
     const char *data = bl->getData();
     uint16_t type_n;
     memcpy(&type_n, data + sizeof(uint16_t), sizeof(uint16_t));
-    auto type = static_cast<fss_message_type>(fss_be16toh(type_n));
+    auto type = decode_message_type(fss_be16toh(type_n));
     uint64_t msg_id;
     memcpy(&msg_id, data + sizeof(uint16_t) + sizeof(uint16_t), sizeof(uint64_t));
     msg_id = fss_be64toh(msg_id);
