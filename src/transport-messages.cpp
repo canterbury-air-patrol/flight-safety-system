@@ -373,6 +373,11 @@ auto flight_safety_system::transport::buf_len::getLength() -> size_t
     return this->data.length();
 }
 
+void flight_safety_system::transport::buf_len::invalidate()
+{
+    this->data.clear();
+}
+
 flight_safety_system::transport::fss_message_cb::fss_message_cb(std::shared_ptr<fss_connection> t_conn)
     : conn(std::move(t_conn))
 {
@@ -517,6 +522,13 @@ void flight_safety_system::transport::fss_message::updateSize(const std::shared_
         if (length > std::numeric_limits<uint16_t>::max())
         {
             FSS_LOG_ERROR("transport", "Message of " << length << " bytes exceeds 16-bit length field; not framing");
+            /* todo/38: bl already holds the unframed header+payload at this
+             * point (createHeader/packData ran before updateSize). Leaving it
+             * as-is would let the caller's isValid() (merely "non-empty")
+             * pass and transmit the whole thing unframed, desyncing the
+             * peer's stream. Invalidate it so sendMsg() fails the send
+             * instead. */
+            bl->invalidate();
             return;
         }
         /* Set the length (the unpadded content length; the receiver re-derives
