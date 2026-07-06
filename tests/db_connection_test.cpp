@@ -223,7 +223,19 @@ TEST_CASE("db_connection: getActiveServers throws when a server address is trunc
      * shipping a partial list to aircraft. */
     LIVE_DB_OR_SKIP(dbc);
     scoped_truncated_server_active guard;
-    REQUIRE_THROWS_AS(dbc->getActiveServers(), flight_safety_system::server::database_error);
+    /* Assert the throw manually rather than via REQUIRE_THROWS_AS: older Catch2
+     * expands that macro to a by-value catch clause, which trips
+     * -Werror=catch-value on the polymorphic database_error type. */
+    bool threw_database_error = false;
+    try
+    {
+        dbc->getActiveServers();
+    }
+    catch (const flight_safety_system::server::database_error &)
+    {
+        threw_database_error = true;
+    }
+    REQUIRE(threw_database_error);
 }
 
 TEST_CASE("db_connection: tryReconnectIfNeeded returns when connection is healthy")
