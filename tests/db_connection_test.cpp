@@ -164,6 +164,68 @@ TEST_CASE("db_connection: getActiveServers returns pre-configured server")
     REQUIRE(found);
 }
 
+namespace {
+/* Flip the todo/41 truncation-fixture row's active flag via psql, mirroring
+ * docker/db-unit-test-entrypoint.sh's own fixture-seeding approach (no raw
+ * SQL capability is exposed through db_connection's public API). The row is
+ * seeded inactive by that script so no other getActiveServers() test ever
+ * sees it; this helper activates it only for the duration of one test. */
+auto set_truncated_server_active(bool active) -> int
+{
+    const char *host = std::getenv("TEST_DB_HOST");
+    const char *port = std::getenv("TEST_DB_PORT");
+    const char *user = std::getenv("TEST_DB_USER");
+    const char *pass = std::getenv("TEST_DB_PASS");
+    const char *dbname = std::getenv("TEST_DB_NAME");
+    std::string cmd = "PGPASSWORD='";
+    cmd += (pass != nullptr ? pass : "password");
+    cmd += "' psql -h ";
+    cmd += (host != nullptr ? host : "db");
+    cmd += " -p ";
+    cmd += (port != nullptr ? port : "5432");
+    cmd += " -U ";
+    cmd += (user != nullptr ? user : "postgres");
+    cmd += " -d ";
+    cmd += (dbname != nullptr ? dbname : "postgres");
+    cmd += " -c \"UPDATE config_serverconfig SET active = ";
+    cmd += (active ? "true" : "false");
+    cmd += " WHERE name = 'test-server-truncated'\" > /dev/null";
+    return std::system(cmd.c_str());
+}
+
+/* RAII: guarantees the fixture row is deactivated again even if the body of
+ * the test that activated it fails an assertion partway through. The
+ * deactivate call in the destructor uses CHECK, not REQUIRE: this destructor
+ * is implicitly noexcept, and a REQUIRE failure throws Catch2's internal
+ * test-failure exception, which would call std::terminate if thrown from
+ * here -- especially likely to happen exactly when unwinding from the
+ * activating test's own REQUIRE failure. */
+class scoped_truncated_server_active {
+public:
+    scoped_truncated_server_active() { REQUIRE(set_truncated_server_active(true) == 0); }
+    scoped_truncated_server_active(const scoped_truncated_server_active &) = delete;
+    scoped_truncated_server_active(scoped_truncated_server_active &&) = delete;
+    auto operator=(const scoped_truncated_server_active &) -> scoped_truncated_server_active & = delete;
+    auto operator=(scoped_truncated_server_active &&) -> scoped_truncated_server_active & = delete;
+    ~scoped_truncated_server_active() { CHECK(set_truncated_server_active(false) == 0); }
+};
+} // namespace
+
+TEST_CASE("db_connection: getActiveServers throws when a server address is truncated (todo/41)")
+{
+    /* A FETCH that truncates server_address ends the cursor loop with a
+     * warning (sqlcode >= 0), not an error. Before todo/41's fix, getActive
+     * Servers() would see fetch_error == 0 and return whatever was
+     * accumulated before the bad row as the complete set -- silently
+     * dropping every server sorted after it. It must now throw
+     * database_error instead, exactly like a mid-cursor read error, so the
+     * poller's exception_guard keeps the previous good cache rather than
+     * shipping a partial list to aircraft. */
+    LIVE_DB_OR_SKIP(dbc);
+    scoped_truncated_server_active guard;
+    REQUIRE_THROWS_AS(dbc->getActiveServers(), flight_safety_system::server::database_error);
+}
+
 TEST_CASE("db_connection: tryReconnectIfNeeded returns when connection is healthy")
 {
     LIVE_DB_OR_SKIP(dbc);

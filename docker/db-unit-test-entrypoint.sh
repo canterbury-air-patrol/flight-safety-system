@@ -26,6 +26,15 @@ INSERT INTO config_assetconfig (asset_id, smm_id, smm_login, smm_password)
 INSERT INTO config_serverconfig (address, client_port, active, name, config_port, https)
     VALUES ('fss.example.com', 20202, true, 'test-server', 8090, false);
 
+-- todo/41 fixture: an address of 255 two-byte UTF-8 characters (510 bytes)
+-- fits VARCHAR(255) (which counts characters, not bytes) but overflows the
+-- 256-byte ECPG host variable server_address is fetched into, triggering a
+-- truncation warning. Seeded inactive so it is invisible to every other
+-- getActiveServers() test; the todo/41 regression test flips it active for
+-- the duration of that one test only.
+INSERT INTO config_serverconfig (address, client_port, active, name, config_port, https)
+    VALUES (repeat('é', 255), 20203, false, 'test-server-truncated', 8091, false);
+
 -- A pending command for test-asset, so the getCommand DB test finds a row.
 INSERT INTO assets_assetcommand (asset_id, command)
     SELECT a.id, 'RTL' FROM assets_asset a WHERE a.name = 'test-asset';

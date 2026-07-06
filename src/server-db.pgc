@@ -408,6 +408,28 @@ db_active_fss_servers_get(const char *conn_arg, int *error_out)
         *error_out = 1;
     }
 
+    /* A FETCH that truncates server_address (longer than SMM_SERVER_LEN-1)
+     * raises a warning, not an error: WHENEVER SQLWARNING DO BREAK above ends
+     * the loop with sqlcode staying >= 0, so the check above alone misses it.
+     * The truncated row is never appended (same as a real fetch failure) and
+     * no further rows are read -- but without this check the caller would see
+     * fetch_error == 0 and ship the partial list as the complete set, exactly
+     * what the mid-cursor guard above exists to prevent. Treat it identically:
+     * fail the whole read, mirroring the truncation guards in
+     * db_asset_command_get / db_asset_smm_settings_get. */
+    if (error_out != NULL && sqlca.sqlwarn[0] == 'W')
+    {
+        /* server_address is not guaranteed NUL-terminated when this is the
+         * fetch that truncated it -- ECPG fills the buffer to capacity with
+         * no room left for a terminator. Bound the print with the buffer
+         * size as a precision (stopping at an earlier NUL if present, but
+         * never reading past it) rather than "%s", which would read past the
+         * end of the buffer into adjacent stack memory. */
+        fprintf(stderr, "active server list FETCH truncated a host variable (address='%.*s'); failing the read\n",
+                (int)sizeof(server_address), server_address);
+        *error_out = 1;
+    }
+
     EXEC SQL AT :conn CLOSE cur1;
     EXEC SQL AT :conn SET AUTOCOMMIT TO ON;
 
