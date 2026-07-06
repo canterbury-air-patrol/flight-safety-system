@@ -16,6 +16,7 @@
 #include <csignal>
 #include <thread>
 
+#include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <pthread.h>
 #include <sys/socket.h>
@@ -238,6 +239,64 @@ TEST_CASE("set_tcp_keepalive bounds unacked data with TCP_USER_TIMEOUT")
     REQUIRE(::getsockopt(sock, IPPROTO_TCP, TCP_USER_TIMEOUT, &val, &len) == 0);
     REQUIRE(val == 30000);
 #endif
+}
+
+namespace {
+/* Exposes the protected fd so a test can pin socket options on it (todo/42);
+ * otherwise identical to the base fss_listen. */
+class fd_visible_listen : public flight_safety_system::transport::fss_listen {
+public:
+    fd_visible_listen(uint16_t t_port, flight_safety_system::transport::fss_connect_cb t_cb)
+        : fss_listen(t_port, std::move(t_cb), defer_start_t{})
+    {
+        /* Start the accept thread only once this derived object is fully
+         * constructed; the auto-starting base constructor would let the thread
+         * virtual-dispatch into newConnection() before the vptr settles
+         * (the same TSan-flagged vptr-race hazard small_queue_listen above
+         * already avoids this way). */
+        this->startListening();
+    }
+    auto testGetFd() -> int { return this->getFd(); }
+};
+} // namespace
+
+TEST_CASE("fss_listen: startListening requests dual-stack (IPV6_V6ONLY=0) (todo/42)")
+{
+    /* Regression-pin that startListening() explicitly requests dual-stack,
+     * the same pin-the-socket-option pattern as TCP_USER_TIMEOUT above.
+     * Without this, whether an IPv4 client can connect at all silently
+     * depends on the host's net.ipv6.bindv6only sysctl. */
+    client_handoff.reset();
+    const auto port = fss_test::pick_port();
+    REQUIRE(port != 0);
+    fd_visible_listen listener(port, client_handoff.callback());
+
+    int val = -1;
+    socklen_t len = sizeof(val);
+    REQUIRE(::getsockopt(listener.testGetFd(), IPPROTO_IPV6, IPV6_V6ONLY, &val, &len) == 0);
+    REQUIRE(val == 0);
+
+    /* Functional case: an IPv4 (well, IPv4-mapped, since connectTo always
+     * resolves and connects over the family the address returns) client can
+     * still complete a message round-trip. This already passes today on the
+     * default sysctl -- the option pin above is what protects a hardened
+     * host where it would otherwise silently refuse. */
+    auto conn = std::make_shared<flight_safety_system::transport::fss_connection>();
+    REQUIRE(conn != nullptr);
+    REQUIRE(conn->connectTo("127.0.0.1", port));
+    conn->sendMsg(std::make_shared<flight_safety_system::transport::fss_message_identity>("v4Client"));
+
+    auto server_conn = client_handoff.wait();
+    REQUIRE(server_conn != nullptr);
+
+    std::shared_ptr<flight_safety_system::transport::fss_message> msg;
+    REQUIRE(fss_test::wait_for([&]() -> bool {
+        msg = server_conn->getMsg();
+        return msg != nullptr;
+    }));
+    REQUIRE(msg->getType() == flight_safety_system::transport::message_type_identity);
+
+    client_handoff.reset();
 }
 
 TEST_CASE("fss_connection: base isPeerCertRevoked always returns false")

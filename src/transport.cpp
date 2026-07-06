@@ -723,6 +723,19 @@ auto flight_safety_system::transport::fss_listen::startListening() -> bool
     {
         FSS_PERROR("transport", "setsockopt SO_REUSEADDR failed on port " + std::to_string(this->port));
     }
+    /* Explicitly request dual-stack: this socket must accept both IPv6 and
+     * IPv4-mapped connections, matching connectTo()'s ability to reach either
+     * family. Without this, whether IPv4 clients can connect at all depends
+     * on the host's net.ipv6.bindv6only sysctl -- 0 (the Linux default)
+     * happens to give dual-stack, but 1 (some hardening baselines, and the
+     * default on some BSDs) silently refuses every IPv4 client with nothing
+     * in the log to say why. A failed setsockopt here just means the sysctl
+     * default applies, same as before this call existed. */
+    int v6only = 0;
+    if (setsockopt(this->getFd(), IPPROTO_IPV6, IPV6_V6ONLY, &v6only, sizeof(v6only)) < 0)
+    {
+        FSS_PERROR("transport", "setsockopt IPV6_V6ONLY failed on port " + std::to_string(this->port));
+    }
     struct sockaddr_in6 bind_addr = {};
     bind_addr.sin6_family = AF_INET6;
     bind_addr.sin6_port = htons(this->port);
