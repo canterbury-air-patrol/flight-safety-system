@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-07-06
+
+### Fixed
+- `sendCommand`/`sendRTTRequest` no longer hold `client_lock` across a
+  blocking send (up to 30 s on a black-holed peer); the main loop's
+  `checkTimeouts()` takes the same lock, so one stuck peer could freeze the
+  100 ms command-dispatch tick fleet-wide. Completes todo/21's per-client
+  writer-thread guarantee, which this partially reopened. (todo/35)
+- `broadcastMsg` now routes through the per-client outbound workers (each
+  recipient gets its own message clone) instead of sending inline: the 15 s
+  server-list broadcast no longer blocks the main loop, and position relay no
+  longer blocks the reporting client's recv thread per message. (todo/36)
+- `rtt_response` and `command_ack` are now exempt from the per-client rate
+  limiter (acks get their own bucket), fixing a spurious liveness reap of a
+  chatty-but-healthy client and a permanent audit-link loss when an ack got
+  rate-limited (acks are never resent). (todo/37)
+- A message too large to frame (>64 KB) is no longer transmitted unframed
+  with a zero length field — which desynced the peer's stream into a
+  mass-undecodable-frame disconnect. `sendMsg()` now fails the send outright
+  and rolls back the consumed message id so no sequence gap is left behind.
+  (todo/38)
+- A v2 sequence mismatch now disconnects the session immediately, matching
+  the existing identity-mismatch behaviour, instead of silently freezing
+  `expected_seq` and discarding all further telemetry until the 30 s liveness
+  reap. (todo/39)
+- The wire message type is now validated (via a new `decode_message_type`
+  helper) before being cast to `fss_message_type`, closing the last wire enum
+  that was cast straight from an untrusted byte without validation. (todo/40)
+- `db_active_fss_servers_get` now fails the read when a FETCH truncates a
+  server address instead of silently shipping the partial list as complete:
+  the mid-cursor `database_error` guard now also fires on the
+  `WHENEVER SQLWARNING DO BREAK` exit path, so the poller keeps its previous
+  good cache. (todo/41)
+- The PF_INET6 listener now explicitly sets `IPV6_V6ONLY=0` before `bind()`,
+  so IPv4 clients are no longer silently refused on hosts with
+  `net.ipv6.bindv6only=1`. (todo/42)
+
 ## [1.1.0] - 2026-06-22
 
 ### Added
