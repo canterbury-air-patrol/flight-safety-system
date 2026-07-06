@@ -1,3 +1,25 @@
+flight-safety-system (1.1.1) stable; urgency=medium
+
+  * Release client_lock before the blocking send in sendCommand/sendRTTRequest
+    so a black-holed peer can no longer freeze the main-loop's command-dispatch
+    tick fleet-wide.
+  * Route broadcastMsg through the per-client outbound workers instead of
+    sending inline, so the server-list broadcast and position relay can no
+    longer block the main loop or a reporting client's recv thread.
+  * Exempt rtt_response and command_ack from the per-client rate limiter,
+    fixing spurious liveness reaps and permanent audit-link loss.
+  * Fail sendMsg() outright on a message too large to frame instead of
+    transmitting it unframed and desyncing the peer's stream.
+  * Disconnect immediately on any v2 sequence mismatch instead of silently
+    freezing the session until the liveness timeout.
+  * Validate the wire message type before casting it to fss_message_type.
+  * Fail the active-server read when a FETCH truncates a server address,
+    instead of shipping a partial list as complete.
+  * Set IPV6_V6ONLY=0 on the PF_INET6 listener so IPv4 clients are not
+    silently refused on bindv6only=1 hosts.
+
+ -- Scott Parlane <sjp@canterburyairpatrol.org>  Mon, 06 Jul 2026 00:00:00 +0000
+
 flight-safety-system (1.1.0) stable; urgency=medium
 
   * Add command acknowledgements: the FMU acks each asset_command and the
