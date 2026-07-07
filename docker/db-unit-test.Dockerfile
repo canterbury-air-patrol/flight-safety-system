@@ -17,7 +17,8 @@ WORKDIR /code
 
 RUN ./autogen.sh \
     && ./configure --enable-tests --enable-server --enable-coverage \
-    && make -j"$(nproc)"
+    && make -j"$(nproc)" \
+    && make -j"$(nproc)" -C tests all_test
 
 WORKDIR /code/tests
 
