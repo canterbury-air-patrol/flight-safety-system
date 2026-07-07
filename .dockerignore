@@ -2,7 +2,13 @@
 .git/
 
 # ── Everything in .gitignore (build artefacts from a dirty local tree) ────────
-.DS_Store
+# NOTE: bare patterns like `*.o` only match files at the context root, not in
+# subdirectories (unlike .gitignore) -- Docker's ignore-file matching requires
+# an explicit `**/` prefix for that. Patterns below that can appear inside
+# src/, tests/, or examples/ (object files, Makefiles, .libs/, coverage data,
+# ...) are prefixed accordingly so a build/coverage run on the host doesn't
+# leak stale, possibly foreign-ABI artefacts into the image.
+**/.DS_Store
 aclocal.m4
 ar-lib
 autom4te.cache/
@@ -10,35 +16,35 @@ compile
 m4/
 !m4/ax_cxx_compile_stdcxx.m4
 missing
-.libs/
-.deps/
+**/.libs/
+**/.deps/
 install-sh
 libtool
 ltmain.sh
 test-driver
 stamp-h1
-*.dSYM
-*.la
-Makefile
-Makefile.in
+**/*.dSYM
+**/*.la
+**/Makefile
+**/Makefile.in
 configure
 configure.in
 config.*
 depcomp
-*.lo
-*.o
-*.pc
+**/*.lo
+**/*.o
+**/*.pc
 todo/
-*~
+**/*~
 clang-tidy.log
 compile_commands.json
 __pycache__/
 .venv/
 .pytest_cache/
-.dirstamp
+**/.dirstamp
 *.tar.gz
-*.gcno
-*.gcda
+**/*.gcno
+**/*.gcda
 
 # ── Coverage reports (untracked, not in .gitignore) ───────────────────────────
 coverage*.info
