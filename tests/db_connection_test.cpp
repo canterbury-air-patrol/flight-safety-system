@@ -10,6 +10,8 @@
 #error No catch header
 #endif
 
+#include <array>
+#include <cstdio>
 #include <cstdlib>
 #include <limits>
 #include <memory>
@@ -297,4 +299,123 @@ TEST_CASE("db_connection: getCommand returns non-null for asset with pending com
     REQUIRE(asset_id != 0);
     auto cmd = dbc->getCommand(asset_id);
     REQUIRE(cmd != nullptr);
+}
+
+namespace {
+
+/* Run a psql query against the TEST_DB_* database and return its unaligned,
+ * tuples-only output with the trailing newline stripped -- e.g. a single
+ * column's value, or an empty string for SQL NULL. recordCommandDispatch and
+ * recordCommandAck have no read-back accessor of their own (asset_command
+ * only exposes the command fields, not the ack columns), so this is the only
+ * way to verify what they actually wrote. */
+auto psql_query(const std::string &sql) -> std::string
+{
+    const char *host = std::getenv("TEST_DB_HOST");
+    const char *port = std::getenv("TEST_DB_PORT");
+    const char *user = std::getenv("TEST_DB_USER");
+    const char *pass = std::getenv("TEST_DB_PASS");
+    const char *dbname = std::getenv("TEST_DB_NAME");
+    std::string cmd = "PGPASSWORD='";
+    cmd += (pass != nullptr ? pass : "password");
+    cmd += "' psql -t -A -h ";
+    cmd += (host != nullptr ? host : "db");
+    cmd += " -p ";
+    cmd += (port != nullptr ? port : "5432");
+    cmd += " -U ";
+    cmd += (user != nullptr ? user : "postgres");
+    cmd += " -d ";
+    cmd += (dbname != nullptr ? dbname : "postgres");
+    cmd += " -c \"";
+    cmd += sql;
+    cmd += "\"";
+
+    std::array<char, 256> buffer{};
+    std::string result;
+    FILE *pipe = popen(cmd.c_str(), "r");
+    REQUIRE(pipe != nullptr);
+    while (fgets(buffer.data(), buffer.size(), pipe) != nullptr)
+    {
+        result += buffer.data();
+    }
+    REQUIRE(pclose(pipe) == 0);
+    while (!result.empty() && (result.back() == '\n' || result.back() == '\r'))
+    {
+        result.pop_back();
+    }
+    return result;
+}
+
+/* Inserts a fresh command row for asset_id and returns its id, so each test
+ * targets its own row rather than mutating the shared test-asset RTL fixture
+ * (which other tests, e.g. getCommand above, read without expecting its
+ * dispatch/ack columns to change). */
+auto insert_test_command(uint64_t asset_id) -> uint64_t
+{
+    std::string sql = "INSERT INTO assets_assetcommand (asset_id, command) VALUES (";
+    sql += std::to_string(asset_id);
+    sql += ", 'RTL') RETURNING id";
+    return std::stoull(psql_query(sql));
+}
+
+auto get_command_column(uint64_t command_id, const std::string &column) -> std::string
+{
+    std::string sql = "SELECT ";
+    sql += column;
+    sql += " FROM assets_assetcommand WHERE id = ";
+    sql += std::to_string(command_id);
+    return psql_query(sql);
+}
+
+} // namespace
+
+TEST_CASE("db_connection: recordCommandDispatch stores the dispatch id")
+{
+    LIVE_DB_OR_SKIP(dbc);
+    auto asset_id = dbc->getAssetId("test-asset");
+    REQUIRE(asset_id != 0);
+    auto command_id = insert_test_command(asset_id);
+
+    dbc->recordCommandDispatch(command_id, uint64_t{4242});
+
+    REQUIRE(get_command_column(command_id, "dispatch_id") == "4242");
+}
+
+TEST_CASE("db_connection: recordCommandAck stores ack_state, ack_timestamp and ack_superseded_by")
+{
+    LIVE_DB_OR_SKIP(dbc);
+    auto asset_id = dbc->getAssetId("test-asset");
+    REQUIRE(asset_id != 0);
+    auto command_id = insert_test_command(asset_id);
+    dbc->recordCommandDispatch(command_id, uint64_t{5555});
+
+    dbc->recordCommandAck(
+        asset_id, uint64_t{5555}, static_cast<uint8_t>(flight_safety_system::transport::command_ack_superseded),
+        uint64_t{1700000000000}, static_cast<uint8_t>(flight_safety_system::transport::supersede_low_battery));
+
+    REQUIRE(get_command_column(command_id, "ack_state") == "2");
+    REQUIRE(get_command_column(command_id, "ack_timestamp") == "1700000000000");
+    REQUIRE(get_command_column(command_id, "ack_superseded_by") == "1");
+}
+
+TEST_CASE("db_connection: recordCommandAck does not regress an already-terminal ack")
+{
+    /* A late "received" (state 0) must never clobber a settled outcome -- see
+     * the comment above the UPDATE in db_command_record_ack(). Simulate an
+     * out-of-order ack arrival: actioned first, then a stale "received". */
+    LIVE_DB_OR_SKIP(dbc);
+    auto asset_id = dbc->getAssetId("test-asset");
+    REQUIRE(asset_id != 0);
+    auto command_id = insert_test_command(asset_id);
+    dbc->recordCommandDispatch(command_id, uint64_t{6666});
+
+    dbc->recordCommandAck(asset_id, uint64_t{6666},
+                          static_cast<uint8_t>(flight_safety_system::transport::command_ack_actioned), uint64_t{100},
+                          static_cast<uint8_t>(flight_safety_system::transport::supersede_none));
+    dbc->recordCommandAck(asset_id, uint64_t{6666},
+                          static_cast<uint8_t>(flight_safety_system::transport::command_ack_received), uint64_t{200},
+                          static_cast<uint8_t>(flight_safety_system::transport::supersede_none));
+
+    REQUIRE(get_command_column(command_id, "ack_state") == "1");
+    REQUIRE(get_command_column(command_id, "ack_timestamp") == "100");
 }
