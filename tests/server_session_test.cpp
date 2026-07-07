@@ -1192,6 +1192,66 @@ TEST_CASE("rate limiter: a command_ack flood is capped, not exempted outright (t
     REQUIRE(mock.getAcks().size() == bucket_capacity);
 }
 
+TEST_CASE("rate limiter: sustained command_ack rate-limiting logs a warning after 1 s")
+{
+    /* Mirrors "rate limiter: sustained rate-limiting logs a warning after 1
+     * s" below, but for the dedicated command_ack bucket (10 burst, 5/s
+     * refill -- fixed, unlike msg_rate there is no setRateLimits() seam for
+     * it). Drain the real bucket, force one rejection to arm
+     * last_ack_rate_limit_log_ms, then burn off the tokens the 1 s wait
+     * refills before the next ack so it is rejected too -- only a rejection
+     * that far after the first one exercises the >=1 s warning branch (as
+     * opposed to the every-rejection FSS_LOG_DEBUG a few lines above it). */
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 1;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    conn->setNegotiatedFeatureFlags(fss::transport::FSS_FEATURE_COMMAND_ACK);
+    NullClientHandler handler;
+
+    auto clock = std::make_shared<FakeClock>();
+    /* Non-zero start, same reasoning as the msg_rate version: 0 is the
+     * sentinel for "never dropped" in last_ack_rate_limit_log_ms. */
+    clock->advance(1000);
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    session->setClock(clock);
+
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+
+    auto make_ack = [](uint64_t dispatch_id) {
+        return std::make_shared<fss::transport::fss_message_command_ack>(
+            dispatch_id, fss::transport::asset_command_hold, fss::transport::command_ack_actioned,
+            fss::transport::supersede_none, uint64_t{500});
+    };
+
+    /* Drain the 10-token burst capacity. */
+    for (uint64_t i = 0; i < 10; ++i)
+    {
+        session->processMessage(make_ack(i));
+    }
+    /* First drop -- sets last_ack_rate_limit_log_ms to the current clock. */
+    session->processMessage(make_ack(100));
+
+    /* Advance past the 1 s warning threshold. At 5 tokens/s this also
+     * refills 5 tokens, so burn them with accepted acks before the next
+     * rejection -- otherwise that ack would be accepted instead of hitting
+     * the warning branch. */
+    clock->advance(1001);
+    for (uint64_t i = 0; i < 5; ++i)
+    {
+        session->processMessage(make_ack(200 + i));
+    }
+
+    fss_test::capture_cerr cap;
+    /* This drop is > 1 s after the first drop -> the warning fires. */
+    session->processMessage(make_ack(999));
+
+    REQUIRE(cap.str().find("Rate-limiting command_ack") != std::string::npos);
+    REQUIRE(handler.disconnects == 0);
+}
+
 TEST_CASE("session: legacy client (no version handshake) is accepted")
 {
     /* Pre-versioning clients send identity directly. The server must
