@@ -10,6 +10,8 @@ Layout:
 """
 from __future__ import annotations
 
+import datetime
+import json
 import os
 import shutil
 import signal
@@ -18,6 +20,7 @@ import string
 import subprocess
 import time
 import uuid
+from collections import defaultdict
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
@@ -33,6 +36,69 @@ SCHEMA_DIR = E2E_ROOT / "schema"
 
 POSTGIS_IMAGE = "postgis/postgis:18-3.6-alpine"
 STARTUP_TIMEOUT_S = 60
+
+TRACEABILITY_REPORT = E2E_ROOT / "traceability.json"
+
+
+# --- Traceability (todo/27) ---------------------------------------------
+#
+# Vendored from CAP's Tier-3 collector (tools/test/helpers/traceability.py)
+# so this Tier-2 suite emits the same {test_id: [{"nodeid", "outcome"}]}
+# artifact shape and the master-plan audit can merge evidence across tiers.
+
+
+def _collect_satisfied_ids(items: list) -> dict[str, list[str]]:
+    """Return a mapping from satisfied test-plan ID to pytest node IDs."""
+    satisfied: dict[str, list[str]] = defaultdict(list)
+    for item in items:
+        for marker in item.iter_markers(name="satisfies"):
+            for test_id in marker.args:
+                satisfied[str(test_id)].append(item.nodeid)
+    return dict(sorted(satisfied.items()))
+
+
+def _build_traceability_report(items: list, stats: dict) -> dict[str, list[dict[str, str]]]:
+    """Combine satisfies markers with run outcomes from terminalreporter.stats."""
+    outcomes: dict[str, str] = {}
+    for category in ("passed", "failed", "error", "skipped"):
+        for report in stats.get(category, []):
+            nodeid = getattr(report, "nodeid", None)
+            if nodeid is not None:
+                outcomes[nodeid] = "failed" if category == "error" else category
+    return {
+        test_id: [
+            {"nodeid": nodeid, "outcome": outcomes.get(nodeid, "not-run")}
+            for nodeid in nodeids
+        ]
+        for test_id, nodeids in _collect_satisfied_ids(items).items()
+    }
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list) -> None:
+    """Keep collected items available for terminal traceability reporting."""
+    config.traceability_items = items
+
+
+def pytest_terminal_summary(terminalreporter: object, config: pytest.Config) -> None:
+    """Emit traceability evidence at the end of the run."""
+    items = getattr(config, "traceability_items", [])
+    satisfied = _collect_satisfied_ids(items)
+    terminalreporter.section("traceability")
+    if not satisfied:
+        terminalreporter.write_line("No satisfies markers collected.")
+    else:
+        for test_id, nodeids in satisfied.items():
+            terminalreporter.write_line(f"{test_id}:")
+            for nodeid in nodeids:
+                terminalreporter.write_line(f"  - {nodeid}")
+
+    report = _build_traceability_report(items, terminalreporter.stats)
+    payload = {
+        "generated": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "test_ids": report,
+    }
+    TRACEABILITY_REPORT.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    terminalreporter.write_line(f"traceability report: {TRACEABILITY_REPORT}")
 
 
 def _pick_port() -> int:
