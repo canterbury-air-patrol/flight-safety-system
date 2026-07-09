@@ -6,6 +6,7 @@ import time
 import pytest
 
 
+@pytest.mark.satisfies("TC-SRV-004")
 @pytest.mark.requires_docker
 def test_goto_command_delivered(db_conn, fake_client):
     """Server polls assets_assetcommand and sends asset_command_goto to any

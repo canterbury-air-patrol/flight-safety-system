@@ -44,6 +44,7 @@ def hold_table_lock(db_info: dict[str, object], table: str) -> Iterator[None]:
         conn.close()
 
 
+@pytest.mark.satisfies("TC-SRV-007")
 @pytest.mark.requires_docker
 @pytest.mark.slow
 def test_slow_db_does_not_stall(db_conn, fake_client, migrated_db, server_proc):

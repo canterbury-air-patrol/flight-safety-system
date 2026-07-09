@@ -32,6 +32,7 @@ from conftest import (
 UNREACHABLE_DB_HOST = "192.0.2.1"
 
 
+@pytest.mark.satisfies("TC-SRV-007")
 @pytest.mark.requires_docker
 def test_server_exits_when_db_host_invalid(certs_dir, tmp_path, migrated_db):
     """fss-server must fail-stop when its configured DB host is unreachable.
@@ -106,6 +107,7 @@ def test_server_exits_when_db_host_invalid(certs_dir, tmp_path, migrated_db):
             s.connect(("127.0.0.1", port))
 
 
+@pytest.mark.satisfies("TC-SRV-007")
 @pytest.mark.requires_docker
 def test_unknown_asset_name_persists_no_data(db_conn, fake_client):
     """A client whose CN is signed by the trusted CA but not enrolled as an
