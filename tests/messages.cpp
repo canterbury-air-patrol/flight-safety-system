@@ -176,7 +176,7 @@ TEST_CASE("RTT Response without a timestamp is byte-identical to a legacy respon
     REQUIRE(bl_with_ts->getLength() == bl_without->getLength() + sizeof(uint64_t));
 }
 
-TEST_CASE("Position Report Message Check")
+TEST_CASE("Position Report Message Check", "[TC-FSS-001]")
 {
     auto msg_id = static_cast<uint64_t>(random());
     constexpr double pos_lat = -43.5;
@@ -341,7 +341,7 @@ TEST_CASE("Search Status Message Check")
     REQUIRE(decoded_generic_search->getSearchTotal() == search_total);
 }
 
-TEST_CASE("Asset Command Message Check - Basic")
+TEST_CASE("Asset Command Message Check - Basic", "[TC-FSS-002]")
 {
     auto msg_id = static_cast<uint64_t>(random());
     auto timestamp = static_cast<uint64_t>(random());
@@ -376,7 +376,7 @@ TEST_CASE("Asset Command Message Check - Basic")
     REQUIRE(decoded_generic_command->getTimeStamp() == timestamp);
 }
 
-TEST_CASE("Asset Command Message Check - Position")
+TEST_CASE("Asset Command Message Check - Position", "[TC-FSS-002]")
 {
     auto msg_id = static_cast<uint64_t>(random());
     auto timestamp = static_cast<uint64_t>(random());
@@ -420,7 +420,7 @@ TEST_CASE("Asset Command Message Check - Position")
     REQUIRE(decoded_generic->getLongitude() == goto_lng);
 }
 
-TEST_CASE("Asset Command Message Check - Altitude")
+TEST_CASE("Asset Command Message Check - Altitude", "[TC-FSS-002]")
 {
     auto msg_id = static_cast<uint64_t>(random());
     auto timestamp = static_cast<uint64_t>(random());
@@ -645,7 +645,7 @@ TEST_CASE("SMM Settings Message Check")
     REQUIRE(decoded_generic_smm->getPassword() == "password1");
 }
 
-TEST_CASE("Server List Message Check")
+TEST_CASE("Server List Message Check", "[TC-FSS-003]")
 {
     auto msg_id = static_cast<uint64_t>(random());
     constexpr int port_max = 65535;

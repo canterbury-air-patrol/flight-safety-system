@@ -67,7 +67,7 @@ auto pack_position_report(const std::string &callsign) -> size_t
 
 } // namespace
 
-TEST_CASE("alignment: non-aligned callsign lengths add no extra padding")
+TEST_CASE("alignment: non-aligned callsign lengths add no extra padding", "[TC-FSS-001]")
 {
     /* These lengths never hit the aligned edge in the buggy formula, so they
      * must pass both before and after the fix — guarding against regression
@@ -81,7 +81,7 @@ TEST_CASE("alignment: non-aligned callsign lengths add no extra padding")
     }
 }
 
-TEST_CASE("alignment: 8-byte-aligned callsign length adds 0 padding, not 8", "[bug10]")
+TEST_CASE("alignment: 8-byte-aligned callsign length adds 0 padding, not 8", "[bug10][TC-FSS-001]")
 {
     /* L where (header + fixed + 2 + L) % 8 == 0 triggers the bug.
      * header(12) + fixed_before_cs(32) + 2 = 46; L such that (46 + L) % 8 == 0:

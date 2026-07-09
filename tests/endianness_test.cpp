@@ -51,7 +51,7 @@ auto to_bytes(const std::shared_ptr<buf_len> &bl) -> std::vector<uint8_t>
 
 } // namespace
 
-TEST_CASE("endianness: identity decode matches hand-authored big-endian bytes")
+TEST_CASE("endianness: identity decode matches hand-authored big-endian bytes", "[TC-FSS-001]")
 {
     /* Layout:
      *   [0..1]  length       = 0x0010 (16 bytes declared length — "test" is 4 chars)
@@ -77,7 +77,7 @@ TEST_CASE("endianness: identity decode matches hand-authored big-endian bytes")
     REQUIRE(ident->getName() == "test");
 }
 
-TEST_CASE("endianness: identity pack produces the documented big-endian bytes")
+TEST_CASE("endianness: identity pack produces the documented big-endian bytes", "[TC-FSS-001]")
 {
     auto msg = std::make_shared<fss_message_identity>("test");
     msg->setId(42);
@@ -106,7 +106,7 @@ TEST_CASE("endianness: identity pack produces the documented big-endian bytes")
     REQUIRE(bytes[15] == 't');
 }
 
-TEST_CASE("endianness: rtt_response pack/unpack uses big-endian 64-bit id")
+TEST_CASE("endianness: rtt_response pack/unpack uses big-endian 64-bit id", "[TC-FSS-001]")
 {
     auto msg = std::make_shared<fss_message_rtt_response>(0x0102030405060708ULL);
     msg->setId(0xAABBCCDDEEFF0011ULL);
@@ -144,7 +144,7 @@ TEST_CASE("endianness: rtt_response pack/unpack uses big-endian 64-bit id")
     REQUIRE(rr->getRequestId() == 0x0102030405060708ULL);
 }
 
-TEST_CASE("endianness: search_status uses big-endian 64-bit fields")
+TEST_CASE("endianness: search_status uses big-endian 64-bit fields", "[TC-FSS-001]")
 {
     auto msg = std::make_shared<fss_message_search_status>(
         /*search_id*/ 0x1111111111111111ULL,

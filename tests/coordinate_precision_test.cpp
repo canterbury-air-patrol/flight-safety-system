@@ -66,7 +66,7 @@ auto round_trip_voltage(double voltage) -> double
 
 } // namespace
 
-TEST_CASE("coord: -43.5, 172.5 round-trip accurate to 1e-6")
+TEST_CASE("coord: -43.5, 172.5 round-trip accurate to 1e-6", "[TC-FSS-001]")
 {
     double lat = 0.0, lng = 0.0;
     std::tie(lat, lng) = round_trip(-43.5, 172.5);
@@ -74,21 +74,21 @@ TEST_CASE("coord: -43.5, 172.5 round-trip accurate to 1e-6")
     REQUIRE(std::fabs(lng - 172.5) < 1e-6);
 }
 
-TEST_CASE("coord: near +180 wraparound round-trip")
+TEST_CASE("coord: near +180 wraparound round-trip", "[TC-FSS-001]")
 {
     double lat = 0.0, lng = 0.0;
     std::tie(lat, lng) = round_trip(0.0, 179.999999);
     REQUIRE(std::fabs(lng - 179.999999) < 1e-6);
 }
 
-TEST_CASE("coord: near -180 wraparound round-trip")
+TEST_CASE("coord: near -180 wraparound round-trip", "[TC-FSS-001]")
 {
     double lat = 0.0, lng = 0.0;
     std::tie(lat, lng) = round_trip(0.0, -179.999999);
     REQUIRE(std::fabs(lng - (-179.999999)) < 1e-6);
 }
 
-TEST_CASE("coord: near zero round-trip")
+TEST_CASE("coord: near zero round-trip", "[TC-FSS-001]")
 {
     double lat = 0.0, lng = 0.0;
     std::tie(lat, lng) = round_trip(0.000001, 0.000001);
@@ -96,7 +96,7 @@ TEST_CASE("coord: near zero round-trip")
     REQUIRE(std::fabs(lng - 0.000001) < 1e-6);
 }
 
-TEST_CASE("coord: exact zero round-trip")
+TEST_CASE("coord: exact zero round-trip", "[TC-FSS-001]")
 {
     double lat = 0.0, lng = 0.0;
     std::tie(lat, lng) = round_trip(0.0, 0.0);
@@ -104,7 +104,7 @@ TEST_CASE("coord: exact zero round-trip")
     REQUIRE(lng == 0.0);
 }
 
-TEST_CASE("coord: southernmost latitudes round-trip")
+TEST_CASE("coord: southernmost latitudes round-trip", "[TC-FSS-001]")
 {
     for (double target : {-85.0, -89.0, -89.999999})
     {
@@ -115,7 +115,7 @@ TEST_CASE("coord: southernmost latitudes round-trip")
     }
 }
 
-TEST_CASE("coord: northernmost latitudes round-trip")
+TEST_CASE("coord: northernmost latitudes round-trip", "[TC-FSS-001]")
 {
     for (double target : {85.0, 89.0, 89.999999})
     {
@@ -126,7 +126,7 @@ TEST_CASE("coord: northernmost latitudes round-trip")
     }
 }
 
-TEST_CASE("coord: 7-decimal-place precision preserved")
+TEST_CASE("coord: 7-decimal-place precision preserved", "[TC-FSS-001]")
 {
     /* FSS_COORD_SCALE = 1e-7 gives int32 resolution of 0.1 µdegree, so
      * 7-decimal-place coordinates round-trip without loss. */
@@ -147,7 +147,7 @@ TEST_CASE("coord: 7-decimal-place precision preserved")
  * above the sentinel) so a clamped real value can never alias it.
  */
 
-TEST_CASE("coord: asset_command RTL (NaN lat/lng) round-trips to NaN, not Null Island")
+TEST_CASE("coord: asset_command RTL (NaN lat/lng) round-trips to NaN, not Null Island", "[TC-FSS-001]")
 {
     /* RTL constructed with (command, timestamp) leaves latitude and longitude
      * as NaN (it carries no position). That must decode back to NaN, not to
@@ -161,7 +161,7 @@ TEST_CASE("coord: asset_command RTL (NaN lat/lng) round-trips to NaN, not Null I
     REQUIRE(std::isnan(decoded->getLongitude()));
 }
 
-TEST_CASE("coord: asset_command HOLD (NaN lat/lng) round-trips to NaN, not Null Island")
+TEST_CASE("coord: asset_command HOLD (NaN lat/lng) round-trips to NaN, not Null Island", "[TC-FSS-001]")
 {
     auto orig = std::make_shared<fss_message_asset_command>(asset_command_hold, /*timestamp*/ 12345ULL);
     orig->setId(2);
@@ -172,7 +172,7 @@ TEST_CASE("coord: asset_command HOLD (NaN lat/lng) round-trips to NaN, not Null 
     REQUIRE(std::isnan(decoded->getLongitude()));
 }
 
-TEST_CASE("coord: position_report NaN lat/lng round-trips to NaN, not Null Island")
+TEST_CASE("coord: position_report NaN lat/lng round-trips to NaN, not Null Island", "[TC-FSS-001]")
 {
     /* A client with no GPS fix sends the default-NaN position. It must not be
      * indistinguishable from a real report at 0N 0E. */
@@ -190,7 +190,7 @@ TEST_CASE("coord: position_report NaN lat/lng round-trips to NaN, not Null Islan
     REQUIRE(std::isnan(decoded->getLongitude()));
 }
 
-TEST_CASE("coord: position_report Inf lat/lng round-trips to NaN, not Null Island")
+TEST_CASE("coord: position_report Inf lat/lng round-trips to NaN, not Null Island", "[TC-FSS-001]")
 {
     /* Infinity is also non-finite and maps to the no-fix sentinel. */
     auto orig = std::make_shared<fss_message_position_report>(
@@ -207,7 +207,7 @@ TEST_CASE("coord: position_report Inf lat/lng round-trips to NaN, not Null Islan
     REQUIRE(std::isnan(decoded->getLongitude()));
 }
 
-TEST_CASE("coord: out-of-range latitude clamps rather than wrapping")
+TEST_CASE("coord: out-of-range latitude clamps rather than wrapping", "[TC-FSS-001]")
 {
     /* A coordinate of 1e12 degrees scaled by 1e-7 exceeds INT32_MAX.
      * pack_scaled_coord must clamp to INT32_MAX rather than invoking UB. */
@@ -221,7 +221,7 @@ TEST_CASE("coord: out-of-range latitude clamps rather than wrapping")
     REQUIRE(lat > 0.0);
 }
 
-TEST_CASE("coord: large negative out-of-range latitude clamps rather than wrapping")
+TEST_CASE("coord: large negative out-of-range latitude clamps rather than wrapping", "[TC-FSS-001]")
 {
     double neg_large = -1e12;
     double lat = 0.0, lng = 0.0;
@@ -237,19 +237,19 @@ TEST_CASE("coord: large negative out-of-range latitude clamps rather than wrappi
 /* The system-status battery voltage is packed through the same scaled-int
  * helper, so it needs the same NaN/Inf/out-of-range guarding. */
 
-TEST_CASE("voltage: NaN and Inf battery voltage pack to zero")
+TEST_CASE("voltage: NaN and Inf battery voltage pack to zero", "[TC-FSS-001]")
 {
     REQUIRE(round_trip_voltage(std::numeric_limits<double>::quiet_NaN()) == 0.0);
     REQUIRE(round_trip_voltage(std::numeric_limits<double>::infinity()) == 0.0);
     REQUIRE(round_trip_voltage(-std::numeric_limits<double>::infinity()) == 0.0);
 }
 
-TEST_CASE("voltage: negative battery voltage clamps to zero")
+TEST_CASE("voltage: negative battery voltage clamps to zero", "[TC-FSS-001]")
 {
     REQUIRE(round_trip_voltage(-5.0) == 0.0);
 }
 
-TEST_CASE("voltage: out-of-range battery voltage clamps rather than wrapping")
+TEST_CASE("voltage: out-of-range battery voltage clamps rather than wrapping", "[TC-FSS-001]")
 {
     const double voltage = round_trip_voltage(1e12);
     REQUIRE(std::isfinite(voltage));

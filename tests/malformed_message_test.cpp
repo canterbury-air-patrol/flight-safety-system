@@ -48,7 +48,7 @@ using flight_safety_system::transport::message_type_smm_settings;
 using flight_safety_system::transport::message_type_system_status;
 using flight_safety_system::transport::message_type_unknown;
 
-TEST_CASE("malformed: undecodable frame stream is log-throttled and survivable")
+TEST_CASE("malformed: undecodable frame stream is log-throttled and survivable", "[TC-FSS-004]")
 {
     /* A connected peer streaming garbage frames used to emit one WARN per
      * frame — unbounded log growth at line rate.  The log is now throttled
@@ -98,7 +98,7 @@ TEST_CASE("malformed: undecodable frame stream is log-throttled and survivable")
     REQUIRE(occurrences == 3);
 }
 
-TEST_CASE("malformed: valid message mid-stream re-arms the log throttle")
+TEST_CASE("malformed: valid message mid-stream re-arms the log throttle", "[TC-FSS-004]")
 {
     /* The throttle counter resets on every successfully decoded message, so
      * a second garbage burst must log from its own frame 1 again - proving
@@ -156,7 +156,7 @@ TEST_CASE("malformed: valid message mid-stream re-arms the log throttle")
  * be updated alongside it. */
 static constexpr uint64_t kNullMsgDisconnectThreshold = 1000;
 
-TEST_CASE("malformed: a garbage-only stream is disconnected after the threshold")
+TEST_CASE("malformed: a garbage-only stream is disconnected after the threshold", "[TC-FSS-004]")
 {
     /* A peer streaming nothing but undecodable frames must be closed once it
      * crosses null_msg_disconnect_threshold consecutive nulls, rather than
@@ -195,7 +195,7 @@ TEST_CASE("malformed: a garbage-only stream is disconnected after the threshold"
     REQUIRE(logged.find("consecutive undecodable frames, closing") != std::string::npos);
 }
 
-TEST_CASE("malformed: a peer just below the threshold is not disconnected")
+TEST_CASE("malformed: a peer just below the threshold is not disconnected", "[TC-FSS-004]")
 {
     /* Boundary: threshold - 1 consecutive nulls must leave the session up,
      * and a following valid message resets the counter and is delivered. */
@@ -231,7 +231,7 @@ TEST_CASE("malformed: a peer just below the threshold is not disconnected")
     REQUIRE(capture.str().find("consecutive undecodable frames, closing") == std::string::npos);
 }
 
-TEST_CASE("malformed: valid traffic interleaved with garbage keeps the session alive")
+TEST_CASE("malformed: valid traffic interleaved with garbage keeps the session alive", "[TC-FSS-004]")
 {
     /* Forward-compat: a version-skewed peer sends the odd unknown message type
      * interleaved with valid traffic. Each valid message resets the
@@ -272,7 +272,7 @@ TEST_CASE("malformed: valid traffic interleaved with garbage keeps the session a
     REQUIRE(capture.str().find("consecutive undecodable frames, closing") == std::string::npos);
 }
 
-TEST_CASE("malformed: decode returns nullptr for buffer shorter than header")
+TEST_CASE("malformed: decode returns nullptr for buffer shorter than header", "[TC-FSS-004]")
 {
     /* Header is 2 + 2 + 8 = 12 bytes. Anything shorter must not crash. */
     auto bl = std::make_shared<buf_len>("\x00", 1);
@@ -283,20 +283,20 @@ TEST_CASE("malformed: decode returns nullptr for buffer shorter than header")
     REQUIRE(fss_message::decode(bl2) == nullptr);
 }
 
-TEST_CASE("malformed: decode returns nullptr for empty buffer")
+TEST_CASE("malformed: decode returns nullptr for empty buffer", "[TC-FSS-004]")
 {
     auto bl = std::make_shared<buf_len>();
     REQUIRE(fss_message::decode(bl) == nullptr);
 }
 
-TEST_CASE("malformed: decode returns nullptr for unknown message type")
+TEST_CASE("malformed: decode returns nullptr for unknown message type", "[TC-FSS-004]")
 {
     /* 0x00FF is an unused enum value; decode must not crash. */
     auto bl = fss_test::make_framed_buffer(0x00FFU, 42, "", 12);
     REQUIRE(fss_message::decode(bl) == nullptr);
 }
 
-TEST_CASE("malformed: decode validates the wire type before casting (todo/40)")
+TEST_CASE("malformed: decode validates the wire type before casting (todo/40)", "[TC-FSS-004]")
 {
     /* fss_message_type is an unscoped enum with no fixed underlying type, so
      * its representable range is only the smallest bit-field that covers its
@@ -313,13 +313,13 @@ TEST_CASE("malformed: decode validates the wire type before casting (todo/40)")
     REQUIRE(fss_message::decode(fss_test::make_framed_buffer(0xFFFFU, 3, "", 12)) == nullptr);
 }
 
-TEST_CASE("malformed: decode returns nullptr for message_type_unknown")
+TEST_CASE("malformed: decode returns nullptr for message_type_unknown", "[TC-FSS-004]")
 {
     auto bl = fss_test::make_framed_buffer(static_cast<uint16_t>(message_type_unknown), 1, "", 12);
     REQUIRE(fss_message::decode(bl) == nullptr);
 }
 
-TEST_CASE("malformed: wrong-type dynamic_pointer_cast returns nullptr, no UB")
+TEST_CASE("malformed: wrong-type dynamic_pointer_cast returns nullptr, no UB", "[TC-FSS-004]")
 {
     /* Regression for todo/13-dynamic-cast-null-checks.md:
      * a message decoded as identity must not be cast-convertible to an
@@ -336,7 +336,7 @@ TEST_CASE("malformed: wrong-type dynamic_pointer_cast returns nullptr, no UB")
     REQUIRE(wrong_cast == nullptr);
 }
 
-TEST_CASE("malformed: zero-length string field decodes to empty string")
+TEST_CASE("malformed: zero-length string field decodes to empty string", "[TC-FSS-004]")
 {
     auto original = std::make_shared<fss_message_identity>("");
     original->setId(1);
@@ -348,7 +348,7 @@ TEST_CASE("malformed: zero-length string field decodes to empty string")
 /* Regression for todo/13: decode() must return a message whose getType()
  * matches the type field in the header.  These round-trip each concrete
  * message class through getPacked() → decode() and verify the invariant. */
-TEST_CASE("decode type consistency: identity")
+TEST_CASE("decode type consistency: identity", "[TC-FSS-004]")
 {
     auto orig = std::make_shared<fss_message_identity>("asset");
     orig->setId(1);
@@ -358,7 +358,7 @@ TEST_CASE("decode type consistency: identity")
     REQUIRE(std::dynamic_pointer_cast<fss_message_identity>(decoded) != nullptr);
 }
 
-TEST_CASE("decode type consistency: rtt_request")
+TEST_CASE("decode type consistency: rtt_request", "[TC-FSS-004]")
 {
     auto orig = std::make_shared<fss_message_rtt_request>();
     orig->setId(2);
@@ -368,7 +368,7 @@ TEST_CASE("decode type consistency: rtt_request")
     REQUIRE(std::dynamic_pointer_cast<fss_message_rtt_request>(decoded) != nullptr);
 }
 
-TEST_CASE("decode type consistency: rtt_response")
+TEST_CASE("decode type consistency: rtt_response", "[TC-FSS-004]")
 {
     auto orig = std::make_shared<fss_message_rtt_response>(99ULL);
     orig->setId(3);
@@ -378,7 +378,7 @@ TEST_CASE("decode type consistency: rtt_response")
     REQUIRE(std::dynamic_pointer_cast<fss_message_rtt_response>(decoded) != nullptr);
 }
 
-TEST_CASE("decode type consistency: system_status")
+TEST_CASE("decode type consistency: system_status", "[TC-FSS-004]")
 {
     auto orig = std::make_shared<fss_message_system_status>(80, 1200, 12.4);
     orig->setId(4);
@@ -388,7 +388,7 @@ TEST_CASE("decode type consistency: system_status")
     REQUIRE(std::dynamic_pointer_cast<fss_message_system_status>(decoded) != nullptr);
 }
 
-TEST_CASE("decode type consistency: search_status")
+TEST_CASE("decode type consistency: search_status", "[TC-FSS-004]")
 {
     auto orig = std::make_shared<fss_message_search_status>(1ULL, 50ULL, 100ULL);
     orig->setId(5);
@@ -398,7 +398,7 @@ TEST_CASE("decode type consistency: search_status")
     REQUIRE(std::dynamic_pointer_cast<fss_message_search_status>(decoded) != nullptr);
 }
 
-TEST_CASE("decode type consistency: server_list")
+TEST_CASE("decode type consistency: server_list", "[TC-FSS-004]")
 {
     auto orig = std::make_shared<fss_message_server_list>();
     orig->setId(6);
@@ -408,7 +408,7 @@ TEST_CASE("decode type consistency: server_list")
     REQUIRE(std::dynamic_pointer_cast<fss_message_server_list>(decoded) != nullptr);
 }
 
-TEST_CASE("decode type consistency: identity_non_aircraft")
+TEST_CASE("decode type consistency: identity_non_aircraft", "[TC-FSS-004]")
 {
     auto orig = std::make_shared<fss_message_identity_non_aircraft>();
     orig->setId(7);
@@ -418,7 +418,7 @@ TEST_CASE("decode type consistency: identity_non_aircraft")
     REQUIRE(std::dynamic_pointer_cast<fss_message_identity_non_aircraft>(decoded) != nullptr);
 }
 
-TEST_CASE("malformed: string alignment overshoot does not read past the buffer")
+TEST_CASE("malformed: string alignment overshoot does not read past the buffer", "[TC-FSS-004]")
 {
     /* Regression for a heap over-read: unpackString rounds the offset up to
      * an 8-byte boundary, which can push it past the declared buffer length;
@@ -456,7 +456,7 @@ TEST_CASE("malformed: string alignment overshoot does not read past the buffer")
     REQUIRE(servers[0].second == 1);
 }
 
-TEST_CASE("decode type consistency: position_report")
+TEST_CASE("decode type consistency: position_report", "[TC-FSS-004]")
 {
     auto orig =
         std::make_shared<fss_message_position_report>(-33.8688, 151.2093, 100, 0, 0, 0, 0, "TEST", 0, 0, 0, 0, 0, 0ULL);
@@ -467,7 +467,7 @@ TEST_CASE("decode type consistency: position_report")
     REQUIRE(std::dynamic_pointer_cast<fss_message_position_report>(decoded) != nullptr);
 }
 
-TEST_CASE("decode type consistency: command")
+TEST_CASE("decode type consistency: command", "[TC-FSS-004]")
 {
     auto orig = std::make_shared<fss_message_asset_command>(asset_command_rtl, 0ULL);
     orig->setId(9);
@@ -477,7 +477,7 @@ TEST_CASE("decode type consistency: command")
     REQUIRE(std::dynamic_pointer_cast<fss_message_asset_command>(decoded) != nullptr);
 }
 
-TEST_CASE("decode type consistency: smm_settings")
+TEST_CASE("decode type consistency: smm_settings", "[TC-FSS-004]")
 {
     auto orig = std::make_shared<fss_message_smm_settings>(
         "http://example.com", flight_safety_system::secure_string(std::string_view("user")),
@@ -489,7 +489,7 @@ TEST_CASE("decode type consistency: smm_settings")
     REQUIRE(std::dynamic_pointer_cast<fss_message_smm_settings>(decoded) != nullptr);
 }
 
-TEST_CASE("decode type consistency: identity_required")
+TEST_CASE("decode type consistency: identity_required", "[TC-FSS-004]")
 {
     auto orig = std::make_shared<fss_message_identity_required>();
     orig->setId(8);
@@ -503,7 +503,7 @@ TEST_CASE("decode type consistency: identity_required")
  * out-of-range wire byte to fss_asset_command was undefined behaviour.
  * After the fix decode_asset_command() validates the byte first and maps
  * any unrecognised value to asset_command_unknown. */
-TEST_CASE("malformed: out-of-range asset command byte decodes to asset_command_unknown")
+TEST_CASE("malformed: out-of-range asset command byte decodes to asset_command_unknown", "[TC-FSS-004]")
 {
     /* Build a valid asset_command message via getPacked(), then replace the
      * last byte (the command byte on the wire) with an out-of-range value.
@@ -534,7 +534,7 @@ TEST_CASE("malformed: out-of-range asset command byte decodes to asset_command_u
 
 /* Regression for todo/13: a cast to the wrong subclass must yield nullptr,
  * not a non-null pointer to a mismatched object — checked for every type. */
-TEST_CASE("decode type consistency: wrong cast always returns nullptr")
+TEST_CASE("decode type consistency: wrong cast always returns nullptr", "[TC-FSS-004]")
 {
     auto id_msg = std::make_shared<fss_message_identity>("x");
     id_msg->setId(1);
@@ -549,7 +549,7 @@ TEST_CASE("decode type consistency: wrong cast always returns nullptr")
 
 /* Defensive: the length field in the header claims more bytes than the
  * buffer actually contains. decode() must not read past the buffer. */
-TEST_CASE("malformed: oversized declared length does not read past buffer")
+TEST_CASE("malformed: oversized declared length does not read past buffer", "[TC-FSS-004]")
 {
     /* Declare 0xFFFF in the length prefix but only provide a header + a tiny
      * payload. The identity decode path reads the declared length as the
