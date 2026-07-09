@@ -59,7 +59,7 @@ auto raw_connect_oversized(uint16_t port) -> int
 
 } // namespace
 
-TEST_CASE("negative: oversized declared length closes connection")
+TEST_CASE("negative: oversized declared length closes connection", "[TC-FSS-004]")
 {
     handoff.reset();
     uint16_t port = fss_test::pick_port();
@@ -93,7 +93,7 @@ TEST_CASE("negative: oversized declared length closes connection")
     handoff.reset();
 }
 
-TEST_CASE("negative: an oversized message fails the send without consuming a sequence id")
+TEST_CASE("negative: an oversized message fails the send without consuming a sequence id", "[TC-FSS-004]")
 {
     /* todo/38: a packed message over the 16-bit length field used to still
      * transmit unframed (updateSize() left the length placeholder at 0 and
