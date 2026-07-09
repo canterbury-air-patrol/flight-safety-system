@@ -39,6 +39,7 @@ WRITER_SETTLE_S = 2.0
 COMMAND_DELIVERY_TIMEOUT_S = 8.0
 
 
+@pytest.mark.satisfies("TC-SRV-007")
 @pytest.mark.requires_docker
 @pytest.mark.slow
 def test_command_read_not_blocked_by_write_stall(db_conn, fake_client, migrated_db, server_proc):

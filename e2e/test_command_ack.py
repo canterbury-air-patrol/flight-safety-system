@@ -150,6 +150,7 @@ def _poll_ack_state(db_conn, dbid: int, expected: int, timeout: float):
     return row[0] if row is not None else None
 
 
+@pytest.mark.satisfies("TC-SRV-004")
 @pytest.mark.requires_docker
 def test_command_ack_is_stored(db_conn, fake_client, server_proc):
     """A dispatched command, once acked by the client, lands its ack on the
@@ -206,6 +207,7 @@ def _dispatch_rtl(db_conn, asset_id: int) -> int:
     return new_dbid
 
 
+@pytest.mark.satisfies("TC-SRV-004")
 @pytest.mark.requires_docker
 def test_ack_does_not_cross_assets_on_dispatch_id_collision(
     db_conn, fake_client, server_proc
@@ -316,6 +318,7 @@ def test_ack_does_not_cross_assets_on_dispatch_id_collision(
         )
 
 
+@pytest.mark.satisfies("TC-SRV-004")
 @pytest.mark.requires_docker
 def test_ack_updates_only_the_latest_row_on_cross_session_dispatch_id_reuse(
     db_conn, fake_client, server_proc

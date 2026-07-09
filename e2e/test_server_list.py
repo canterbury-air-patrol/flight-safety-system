@@ -10,6 +10,7 @@ import time
 import pytest
 
 
+@pytest.mark.satisfies("TC-SRV-003")
 @pytest.mark.requires_docker
 def test_server_list_does_not_disrupt_session(db_conn, fake_client):
     with db_conn.cursor() as cur:
@@ -40,6 +41,7 @@ def test_server_list_does_not_disrupt_session(db_conn, fake_client):
     assert count >= 1, "no positions after server_list delivery"
 
 
+@pytest.mark.satisfies("TC-SRV-003")
 @pytest.mark.requires_docker
 def test_server_list_with_full_serverconfig_columns(db_conn, fake_client):
     """Rows with name/config_port/https populated must not break server_list delivery.

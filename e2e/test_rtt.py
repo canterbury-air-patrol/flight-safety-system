@@ -6,6 +6,7 @@ import pytest
 from conftest import wait_for_row
 
 
+@pytest.mark.satisfies("TC-SRV-005")
 @pytest.mark.requires_docker
 @pytest.mark.slow
 def test_rtt_round_trip_recorded(db_conn, fake_client):

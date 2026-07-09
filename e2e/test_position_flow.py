@@ -6,6 +6,7 @@ import time
 import pytest
 
 
+@pytest.mark.satisfies("TC-SRV-001")
 @pytest.mark.requires_docker
 def test_position_report_persisted(db_conn, fake_client):
     """fake-client sends position(lat=-43.5, lng=172.5) every 5s; after ~15s
@@ -34,6 +35,7 @@ def test_position_report_persisted(db_conn, fake_client):
         assert alt == 300
 
 
+@pytest.mark.satisfies("TC-SRV-001")
 @pytest.mark.requires_docker
 def test_status_and_search_persisted(db_conn, fake_client):
     with db_conn.cursor() as cur:
