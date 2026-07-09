@@ -41,3 +41,5 @@ __pycache__/
 # gcov coverage artefacts
 *.gcno
 *.gcda
+# Traceability report artifacts (todo/27)
+traceability-report.json
