@@ -55,6 +55,10 @@ flight_safety_system::client_ssl::fss_client::fss_client(const std::string &t_fi
         configfile >> config;
 
         this->setAssetName(config["name"].asString());
+        if (config.isMember("non_aircraft"))
+        {
+            this->setNonAircraft(config["non_aircraft"].asBool());
+        }
 
         this->ca_file = config["ssl"]["ca_public_key"].asString();
         this->private_key_file = config["ssl"]["client_private_key"].asString();
@@ -141,6 +145,13 @@ void flight_safety_system::client_ssl::fss_client::setAssetName(std::string t_as
      * reads it unlocked). Recompute the configured flag afterwards. */
     this->asset_name = std::move(t_asset_name);
     this->updateConfigured();
+}
+
+void flight_safety_system::client_ssl::fss_client::setNonAircraft(bool t_non_aircraft)
+{
+    /* Set once during configuration, before concurrent use (same as
+     * setAssetName above) -- no lock needed. */
+    this->non_aircraft = t_non_aircraft;
 }
 
 void flight_safety_system::client_ssl::fss_client::connectTo(const std::string &t_address, uint16_t t_port,
@@ -414,6 +425,14 @@ auto flight_safety_system::client_ssl::fss_server::getClient() -> fss_client *
 
 void flight_safety_system::client_ssl::fss_server::sendIdentify()
 {
+    if (this->client->isNonAircraft())
+    {
+        /* The server derives the identity from the peer cert's CN on this
+         * path (todo/28), not from a message field. */
+        this->getConnection()->sendMsg(
+            std::make_shared<flight_safety_system::transport::fss_message_identity_non_aircraft>());
+        return;
+    }
     auto ident_msg =
         std::make_shared<flight_safety_system::transport::fss_message_identity>(this->client->getAssetName());
     this->getConnection()->sendMsg(ident_msg);
