@@ -59,6 +59,10 @@ flight_safety_system::client_ssl::fss_client::fss_client(const std::string &t_fi
         {
             this->setNonAircraft(config["non_aircraft"].asBool());
         }
+        if (config.isMember("clock_offset_ms"))
+        {
+            this->setClockOffsetMs(config["clock_offset_ms"].asInt64());
+        }
 
         this->ca_file = config["ssl"]["ca_public_key"].asString();
         this->private_key_file = config["ssl"]["client_private_key"].asString();
@@ -152,6 +156,21 @@ void flight_safety_system::client_ssl::fss_client::setNonAircraft(bool t_non_air
     /* Set once during configuration, before concurrent use (same as
      * setAssetName above) -- no lock needed. */
     this->non_aircraft = t_non_aircraft;
+}
+
+void flight_safety_system::client_ssl::fss_client::setClockOffsetMs(int64_t t_offset_ms)
+{
+    /* Set once during configuration, before concurrent use (same as
+     * setAssetName above) -- no lock needed. */
+    this->clock_offset_ms = t_offset_ms;
+}
+
+auto flight_safety_system::client_ssl::fss_client::getSkewedTimestamp() const -> uint64_t
+{
+    /* The timestamp is well below 2^63, so the signed round trip cannot
+     * overflow for any offset an e2e test would configure. */
+    return static_cast<uint64_t>(static_cast<int64_t>(flight_safety_system::fss_current_timestamp()) +
+                                 this->clock_offset_ms);
 }
 
 void flight_safety_system::client_ssl::fss_client::connectTo(const std::string &t_address, uint16_t t_port,
@@ -601,10 +620,11 @@ void flight_safety_system::client_ssl::fss_server::processMessage(
                 bool report_clock =
                     active_conn != nullptr && (active_conn->getNegotiatedFeatureFlags() &
                                                flight_safety_system::transport::FSS_FEATURE_RTT_OFFSET) != 0;
+                auto skewed_timestamp = this->getClient()->getSkewedTimestamp();
                 auto reply_msg =
                     report_clock
-                        ? std::make_shared<flight_safety_system::transport::fss_message_rtt_response>(
-                              msg->getId(), flight_safety_system::fss_current_timestamp())
+                        ? std::make_shared<flight_safety_system::transport::fss_message_rtt_response>(msg->getId(),
+                                                                                                      skewed_timestamp)
                         : std::make_shared<flight_safety_system::transport::fss_message_rtt_response>(msg->getId());
                 this->sendMsg(reply_msg);
             }
