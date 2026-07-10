@@ -23,6 +23,8 @@ private:
     uint64_t position_staleness_ms{flight_safety_system::server::default_position_staleness_ms};
     uint64_t rate_capacity{100};
     uint64_t rate_refill_per_s{20};
+    flight_safety_system::server::duplicate_identity_policy duplicate_identity_policy_{
+        flight_safety_system::server::duplicate_identity_reject_newcomer};
     /* Guarded by lock. Built by the command poller thread (the only place
      * allowed to read the DB for it); broadcast by the main loop, which must
      * never perform a synchronous DB read. */
@@ -113,6 +115,10 @@ public:
     {
         this->rate_capacity = capacity;
         this->rate_refill_per_s = refill_per_s;
+    }
+    void setDuplicateIdentityPolicy(flight_safety_system::server::duplicate_identity_policy policy)
+    {
+        this->duplicate_identity_policy_ = policy;
     }
     void clientConnected(std::shared_ptr<flight_safety_system::server::fss_client> client)
     {
@@ -260,6 +266,39 @@ public:
             client->queueCommandSend();
         }
     };
+    /* todo/31: called from the identify path once asset_id is resolved, before
+     * `newcomer` is marked identified. Finds any other live session already
+     * identified for this asset_id and applies the configured policy.
+     *
+     * Narrow race: two brand-new connections identifying for the same asset_id
+     * at almost the same instant can each see the other as not-yet-identified
+     * (cached_asset_id still 0) and both proceed — the same class of benign
+     * race snapshotClients() already documents elsewhere (a client connected
+     * mid-iteration is covered by the caller's next pass). Not worth a second
+     * lock ordered with client_lock to close, given how rare simultaneous
+     * identify is in practice. */
+    auto resolveDuplicateIdentity(flight_safety_system::server::fss_client *newcomer, uint64_t asset_id)
+        -> bool override
+    {
+        auto snapshot = this->snapshotClients();
+        auto it = std::find_if(snapshot.begin(), snapshot.end(), [newcomer, asset_id](const auto &client) -> bool {
+            return client.get() != newcomer && client->getCachedAssetId() == asset_id;
+        });
+        std::shared_ptr<flight_safety_system::server::fss_client> existing = (it != snapshot.end()) ? *it : nullptr;
+        if (existing == nullptr)
+        {
+            return true;
+        }
+        if (this->duplicate_identity_policy_ == flight_safety_system::server::duplicate_identity_reject_newcomer)
+        {
+            return false;
+        }
+        FSS_LOG_WARN("server", "Duplicate identity for asset_id "
+                                   << asset_id << ": evicting the existing session (duplicate_identity_evict_oldest)");
+        existing->disconnect();
+        this->clientDisconnected(existing.get());
+        return true;
+    }
     auto disconnectRevokedClients(const std::string &crl_file) -> std::size_t
     {
         std::size_t disconnected_count = 0;

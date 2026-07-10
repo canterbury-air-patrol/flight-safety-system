@@ -176,6 +176,19 @@ public:
 
 class fss_client;
 
+/* Server policy when a second connection identifies as an asset that
+ * already has a live session (todo/31). mTLS proves the client cert, so a
+ * duplicate is far more likely to be a stale reconnect than a stolen-key
+ * hijack — but the default is still the conservative one, to avoid
+ * flip-flopping sessions on a genuine misconfiguration (e.g. two real
+ * assets sharing a cert). */
+enum duplicate_identity_policy {
+    /* Keep the existing session; refuse the new connection at identify. */
+    duplicate_identity_reject_newcomer,
+    /* Disconnect the existing session; the new connection proceeds. */
+    duplicate_identity_evict_oldest,
+};
+
 class fss_client_handler {
 public:
     virtual ~fss_client_handler() = default;
@@ -189,6 +202,14 @@ public:
      * giving each recipient its own independent clone before fanning delivery
      * out across separate per-client threads. */
     virtual void broadcastMsg(const std::shared_ptr<transport::fss_message> &msg, fss_client *except = nullptr) = 0;
+    /* Called from the identify path once asset_id is resolved, before
+     * `newcomer` is marked identified. Returns false if `newcomer` must be
+     * rejected outright (duplicate_identity_reject_newcomer hit an existing
+     * live session for this asset_id); true otherwise — no conflict, or the
+     * existing session was evicted (duplicate_identity_evict_oldest) and
+     * `newcomer` may proceed. Default no-op always returns true (no dedup),
+     * so existing fss_client_handler test mocks need not implement this. */
+    virtual auto resolveDuplicateIdentity(fss_client * /*newcomer*/, uint64_t /*asset_id*/) -> bool { return true; }
 };
 
 class fss_client : public transport::fss_message_cb {
