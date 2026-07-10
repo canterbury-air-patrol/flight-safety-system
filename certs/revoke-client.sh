@@ -39,10 +39,20 @@ for cert in "${REVOKED_DIR}"/*.public.pem; do
     LOAD_CERT_ARGS+=("--load-certificate" "${cert}")
 done
 
+# Without --template, certtool prompts interactively for "next CRL update in
+# (days)"; run non-interactively (as any script or test harness invoking this
+# does) and it hangs forever reading EOF from a closed stdin. crl_number must
+# increase on every regeneration or some TLS stacks treat the new CRL as
+# stale; a Unix timestamp is a simple monotonic source across repeated runs.
+CRL_TMPL=$(mktemp)
+trap 'rm -f "${CRL_TMPL}"' EXIT
+printf 'crl_next_update = 3650\ncrl_number = %s\n' "$(date +%s)" > "${CRL_TMPL}"
+
 certtool --generate-crl \
     --load-ca-privkey "${CA_PRIVATE_PEM}" \
     --load-ca-certificate "${CA_PUBLIC_PEM}" \
     "${LOAD_CERT_ARGS[@]}" \
+    --template "${CRL_TMPL}" \
     --outfile "${CRL_FILE}"
 
 echo "CRL updated: ${CRL_FILE}"

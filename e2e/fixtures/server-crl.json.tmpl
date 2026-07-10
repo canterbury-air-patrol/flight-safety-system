@@ -1,0 +1,17 @@
+{
+    "port": ${SERVER_PORT},
+    "log_level": "debug",
+    "postgres": {
+        "host": "${DB_HOST}",
+        "port": ${DB_PORT},
+        "user": "${DB_USER}",
+        "pass": "${DB_PASS}",
+        "db": "${DB_NAME}"
+    },
+    "ssl": {
+        "ca_public_key": "${CERTS_DIR}/ca.public.pem",
+        "server_private_key": "${CERTS_DIR}/localhost.private.pem",
+        "server_public_key": "${CERTS_DIR}/localhost.public.pem",
+        "crl_file": "${CRL_FILE}"
+    }
+}
