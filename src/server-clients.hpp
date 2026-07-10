@@ -336,4 +336,20 @@ public:
         }
         return disconnected_count;
     };
+    /* todo/34: unconditional version of disconnectRevokedClients above, for
+     * the main loop's sustained-DB-write-failure guard — every currently
+     * live session gets severed (Tier-3 Path M m05 expects this to trigger
+     * aircraft comms-loss RTL) rather than the server silently continuing
+     * to accept telemetry it cannot store. */
+    auto disconnectAll() -> std::size_t
+    {
+        std::size_t disconnected_count = 0;
+        for (const auto &client : this->snapshotClients())
+        {
+            client->disconnect();
+            this->clientDisconnected(client.get());
+            disconnected_count++;
+        }
+        return disconnected_count;
+    };
 };

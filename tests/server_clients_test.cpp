@@ -578,3 +578,31 @@ TEST_CASE("server_clients: duplicate identity check ignores distinct asset ids (
     REQUIRE(second->getCachedAssetId() == 2);
     REQUIRE(sc.getTotalClients() == 2);
 }
+
+TEST_CASE("server_clients: disconnectAll severs every live session (todo/34)")
+{
+    /* Unconditional counterpart of disconnectRevokedClients, used by the
+     * main loop's sustained-DB-write-failure guard: every connected client
+     * must be severed, revoked or not. */
+    server_clients sc;
+    fss_test::MockDatabase mock;
+
+    auto conn1 = std::make_shared<FakeConnection>();
+    conn1->revoked = false;
+    auto writer1 = make_null_writer();
+    auto client1 = std::make_shared<fss::server::fss_client>(conn1, &mock, writer1, &sc);
+    sc.clientConnected(client1);
+
+    auto conn2 = std::make_shared<FakeConnection>();
+    conn2->revoked = false;
+    auto writer2 = make_null_writer();
+    auto client2 = std::make_shared<fss::server::fss_client>(conn2, &mock, writer2, &sc);
+    sc.clientConnected(client2);
+
+    REQUIRE(sc.getTotalClients() == 2);
+    auto severed = sc.disconnectAll();
+    REQUIRE(severed == 2);
+
+    sc.cleanupRemovableClients();
+    REQUIRE(sc.getTotalClients() == 0);
+}
