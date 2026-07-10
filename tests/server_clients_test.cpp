@@ -480,3 +480,101 @@ TEST_CASE("server_clients: disconnectRevokedClients leaves non-revoked clients")
     // Client should remain connected — cleanupRemovableClients is a no-op
     sc.cleanupRemovableClients();
 }
+
+TEST_CASE("server_clients: duplicate identity rejects the newcomer by default (todo/31)")
+{
+    /* Default policy is duplicate_identity_reject_newcomer. A second
+     * connection identifying for an asset_id that already has a live
+     * session must be disconnected before ever being marked identified —
+     * the first session is untouched. */
+    server_clients sc;
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft1"] = 42;
+
+    auto conn1 = std::make_shared<FakeConnection>();
+    conn1->cert_names.push_back("craft1");
+    auto writer1 = make_null_writer();
+    auto first = std::make_shared<fss::server::fss_client>(conn1, &mock, writer1, &sc);
+    sc.clientConnected(first);
+    first->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft1"));
+    REQUIRE(first->getCachedAssetId() == 42);
+    REQUIRE(first->isAircraft());
+
+    auto conn2 = std::make_shared<FakeConnection>();
+    conn2->cert_names.push_back("craft1");
+    auto writer2 = make_null_writer();
+    auto second = std::make_shared<fss::server::fss_client>(conn2, &mock, writer2, &sc);
+    sc.clientConnected(second);
+    second->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft1"));
+
+    // The newcomer never identifies.
+    REQUIRE(second->getCachedAssetId() == 0);
+    REQUIRE_FALSE(second->isAircraft());
+    // The first session is unaffected.
+    REQUIRE(first->getCachedAssetId() == 42);
+    REQUIRE(first->isAircraft());
+
+    // The rejected newcomer was disconnected; only the first remains live.
+    sc.cleanupRemovableClients();
+    REQUIRE(sc.getTotalClients() == 1);
+}
+
+TEST_CASE("server_clients: duplicate identity evicts the oldest session when configured (todo/31)")
+{
+    server_clients sc;
+    sc.setDuplicateIdentityPolicy(fss::server::duplicate_identity_evict_oldest);
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft1"] = 7;
+
+    auto conn1 = std::make_shared<FakeConnection>();
+    conn1->cert_names.push_back("craft1");
+    auto writer1 = make_null_writer();
+    auto first = std::make_shared<fss::server::fss_client>(conn1, &mock, writer1, &sc);
+    sc.clientConnected(first);
+    first->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft1"));
+    REQUIRE(first->getCachedAssetId() == 7);
+
+    auto conn2 = std::make_shared<FakeConnection>();
+    conn2->cert_names.push_back("craft1");
+    auto writer2 = make_null_writer();
+    auto second = std::make_shared<fss::server::fss_client>(conn2, &mock, writer2, &sc);
+    sc.clientConnected(second);
+    second->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft1"));
+
+    // The newcomer proceeds and identifies normally.
+    REQUIRE(second->getCachedAssetId() == 7);
+    REQUIRE(second->isAircraft());
+
+    // The existing session was evicted -- only the newcomer remains live.
+    REQUIRE(sc.getTotalClients() == 2);
+    sc.cleanupRemovableClients();
+    REQUIRE(sc.getTotalClients() == 1);
+}
+
+TEST_CASE("server_clients: duplicate identity check ignores distinct asset ids (todo/31)")
+{
+    /* Two different aircraft identifying concurrently must never be treated
+     * as a conflict, under either policy. */
+    server_clients sc;
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft1"] = 1;
+    mock.asset_ids["craft2"] = 2;
+
+    auto conn1 = std::make_shared<FakeConnection>();
+    conn1->cert_names.push_back("craft1");
+    auto writer1 = make_null_writer();
+    auto first = std::make_shared<fss::server::fss_client>(conn1, &mock, writer1, &sc);
+    sc.clientConnected(first);
+    first->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft1"));
+
+    auto conn2 = std::make_shared<FakeConnection>();
+    conn2->cert_names.push_back("craft2");
+    auto writer2 = make_null_writer();
+    auto second = std::make_shared<fss::server::fss_client>(conn2, &mock, writer2, &sc);
+    sc.clientConnected(second);
+    second->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft2"));
+
+    REQUIRE(first->getCachedAssetId() == 1);
+    REQUIRE(second->getCachedAssetId() == 2);
+    REQUIRE(sc.getTotalClients() == 2);
+}

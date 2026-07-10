@@ -107,6 +107,7 @@ auto main(int argc, char *argv[]) -> int
     constexpr uint64_t default_position_staleness_ms = flight_safety_system::server::default_position_staleness_ms;
     constexpr uint64_t default_rate_capacity = 100;
     constexpr uint64_t default_rate_refill_per_s = 20;
+    constexpr auto default_duplicate_identity_policy = flight_safety_system::server::duplicate_identity_reject_newcomer;
     constexpr unsigned int default_tls_handshake_timeout_ms =
         flight_safety_system::transport_ssl::default_handshake_timeout_ms;
     constexpr std::size_t default_max_concurrent_handshakes = 64;
@@ -124,6 +125,7 @@ auto main(int argc, char *argv[]) -> int
     uint64_t position_staleness_ms = default_position_staleness_ms;
     uint64_t rate_capacity = default_rate_capacity;
     uint64_t rate_refill = default_rate_refill_per_s;
+    auto duplicate_identity_policy = default_duplicate_identity_policy;
     unsigned int tls_handshake_timeout_ms = default_tls_handshake_timeout_ms;
     std::size_t max_concurrent_handshakes = default_max_concurrent_handshakes;
     std::string ca_public_key;
@@ -205,6 +207,23 @@ auto main(int argc, char *argv[]) -> int
         {
             rate_refill = config["message_rate_refill"].asUInt64();
         }
+        if (config.isMember("duplicate_identity_policy"))
+        {
+            std::string policy_str = config["duplicate_identity_policy"].asString();
+            if (policy_str == "reject_newcomer")
+            {
+                duplicate_identity_policy = flight_safety_system::server::duplicate_identity_reject_newcomer;
+            }
+            else if (policy_str == "evict_oldest")
+            {
+                duplicate_identity_policy = flight_safety_system::server::duplicate_identity_evict_oldest;
+            }
+            else
+            {
+                FSS_LOG_ERROR("server", "Invalid duplicate_identity_policy '" << policy_str
+                                                                              << "'; using default (reject_newcomer)");
+            }
+        }
         if (config.isMember("tls_handshake_timeout_ms"))
         {
             tls_handshake_timeout_ms = config["tls_handshake_timeout_ms"].asUInt();
@@ -283,6 +302,7 @@ auto main(int argc, char *argv[]) -> int
     clients->setClientIdentifyTimeoutMs(identify_timeout_sec * msec_per_sec);
     clients->setClientStalenessMs(position_staleness_ms);
     clients->setClientRateLimits(rate_capacity, rate_refill);
+    clients->setDuplicateIdentityPolicy(duplicate_identity_policy);
 
     std::shared_ptr<flight_safety_system::transport::fss_listen> listen;
     FSS_LOG_INFO("server", "Starting fss server in TLS mode");

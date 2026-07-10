@@ -923,6 +923,18 @@ void fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss
                     this->client_handler->clientDisconnected(this);
                     return;
                 }
+                /* todo/31: apply the configured duplicate-identity policy
+                 * before this session is marked identified, so a rejected
+                 * newcomer never gets far enough to receive commands or
+                 * have its telemetry stored against the shared asset_id. */
+                if (!this->client_handler->resolveDuplicateIdentity(this, asset_id))
+                {
+                    FSS_LOG_WARN("server", "Rejecting duplicate identity for asset_id "
+                                               << asset_id << " (" << client_name
+                                               << "): an existing session is already live");
+                    this->client_handler->clientDisconnected(this);
+                    return;
+                }
                 this->cached_asset_id.store(asset_id);
                 this->setPendingCommand(this->dbc->getCommand(asset_id));
                 {

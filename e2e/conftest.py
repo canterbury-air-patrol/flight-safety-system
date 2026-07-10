@@ -418,9 +418,17 @@ def fake_client(
     def _launch(
         name: str = "test1",
         ca_override: Path | None = None,
+        client_id: str | None = None,
     ) -> dict[str, object]:
-        config_path = tmp_path / f"client-{name}.json"
-        log_path = tmp_path / f"client-{name}.log"
+        # client_id labels this launch's config/log file paths; defaults to
+        # `name` (existing behaviour for every caller with one client per
+        # name). Pass a distinct client_id when launching a second process
+        # under the *same* asset name/cert (e.g. duplicate-identity tests) --
+        # otherwise both launches would open the same log path in "wb" and
+        # the second truncates the first's file out from under it.
+        label = client_id if client_id is not None else name
+        config_path = tmp_path / f"client-{label}.json"
+        log_path = tmp_path / f"client-{label}.log"
         _render_template(
             E2E_ROOT / "fixtures" / "client.json.tmpl",
             config_path,
