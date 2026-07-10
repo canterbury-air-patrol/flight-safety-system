@@ -16,6 +16,7 @@
 #include <limits>
 #include <memory>
 #include <string>
+#include <string_view>
 
 #include "fss-server.hpp"
 
@@ -27,7 +28,8 @@ TEST_CASE("db_connection: invalid host reports not connected")
 {
     /* Use a host that is guaranteed to refuse the connection so the test
      * does not depend on a running PostgreSQL instance. */
-    flight_safety_system::server::db_connection dbc("db.invalid", 5432, "user", "pass", "db");
+    flight_safety_system::server::db_connection dbc(
+        "db.invalid", 5432, "user", flight_safety_system::secure_string(std::string_view{"pass"}), "db");
     REQUIRE_FALSE(dbc.isConnected());
 }
 
@@ -48,7 +50,8 @@ auto make_live_db() -> std::unique_ptr<flight_safety_system::server::db_connecti
     const char *pass = std::getenv("TEST_DB_PASS");
     const char *dbname = std::getenv("TEST_DB_NAME");
     auto dbc = std::make_unique<flight_safety_system::server::db_connection>(
-        host, port, user != nullptr ? user : "postgres", pass != nullptr ? pass : "password",
+        host, port, user != nullptr ? user : "postgres",
+        flight_safety_system::secure_string(std::string_view{pass != nullptr ? pass : "password"}),
         dbname != nullptr ? dbname : "postgres");
     REQUIRE(dbc->isConnected());
     return dbc;

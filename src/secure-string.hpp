@@ -2,11 +2,28 @@
 
 #include <cstring>
 #include <strings.h>
+#include <string>
 #include <string_view>
 #include <vector>
 
 namespace flight_safety_system {
 
+/* Scope decision (todo/43, 2026-07-10): secure_string's goal is limiting
+ * *long-lived resident copies* of credentials — cache/member fields such as
+ * smm_settings' username/password and db_connection::pass_ — not eliminating
+ * every transient copy a credential passes through on its way there. Wire
+ * I/O buffers and the parsed Json::Value config are explicitly out of scope:
+ * they are freed promptly and scrubbing them would require invasive changes
+ * (a wiping allocator for std::string / jsoncpp) for a defence-in-depth gain
+ * against an adversary who can already read process memory. Two cheap
+ * exceptions are closed directly instead of left inconsistent: the recv-side
+ * frame for message_type_smm_settings is wiped right after decode
+ * (buf_len::wipeSecure(), called from fss_connection::recvMsg), and the
+ * packed buf_len for an outgoing smm_settings message is wiped right after
+ * the send attempt (fss_connection::sendMsg). Full coverage of every
+ * transient std::string/Json::Value the credential passes through is not the
+ * goal.
+ */
 class secure_string {
     std::vector<char> data_;
 public:
@@ -48,6 +65,15 @@ public:
     }
     [[nodiscard]] auto data() const -> const char * { return data_.data(); }
     [[nodiscard]] auto size() const -> std::size_t { return data_.size(); }
+    /* A fresh NUL-terminated copy for C APIs that need a c_str()-style
+     * pointer (data()/size() stay exact, un-padded, for wire packing).
+     * Returns by value rather than caching a scratch buffer on this object:
+     * db_connection holds one secure_string pass_ shared by its read and
+     * write ECPG connections, each reconnected from its own thread under its
+     * own mutex (see fss-server.hpp), so a cached mutable member here would
+     * be a data race between them. The returned std::string is a transient
+     * copy, out of scope for wiping per the policy above. */
+    [[nodiscard]] auto toNulTerminated() const -> std::string { return {data_.begin(), data_.end()}; }
     [[nodiscard]] auto empty() const -> bool { return data_.empty(); }
     auto operator==(const secure_string &o) const -> bool { return data_ == o.data_; }
     auto operator!=(const secure_string &o) const -> bool { return data_ != o.data_; }

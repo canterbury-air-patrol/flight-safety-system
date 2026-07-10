@@ -411,6 +411,15 @@ void flight_safety_system::transport::buf_len::invalidate()
     this->data.clear();
 }
 
+void flight_safety_system::transport::buf_len::wipeSecure()
+{
+    if (!this->data.empty())
+    {
+        explicit_bzero(this->data.data(), this->data.size());
+        this->data.clear();
+    }
+}
+
 flight_safety_system::transport::fss_message_cb::fss_message_cb(std::shared_ptr<fss_connection> t_conn)
     : conn(std::move(t_conn))
 {

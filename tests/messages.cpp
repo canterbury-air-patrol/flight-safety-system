@@ -645,6 +645,30 @@ TEST_CASE("SMM Settings Message Check")
     REQUIRE(decoded_generic_smm->getPassword() == "password1");
 }
 
+// buf_len::wipeSecure() (todo/43): scrubs the packed credential bytes for an
+// smm_settings message. Unlike the memory-scrub itself, isValid()/getLength()
+// going to the empty state afterward is directly assertable.
+TEST_CASE("messages: buf_len wipeSecure clears content and invalidates the buffer")
+{
+    using flight_safety_system::transport::buf_len;
+    buf_len bl("secret-password", 15);
+    REQUIRE(bl.isValid());
+    REQUIRE(bl.getLength() == 15);
+    bl.wipeSecure();
+    REQUIRE_FALSE(bl.isValid());
+    REQUIRE(bl.getLength() == 0);
+}
+
+TEST_CASE("messages: buf_len wipeSecure on an already-empty buffer is a no-op")
+{
+    using flight_safety_system::transport::buf_len;
+    buf_len bl;
+    REQUIRE_FALSE(bl.isValid());
+    bl.wipeSecure();
+    REQUIRE_FALSE(bl.isValid());
+    REQUIRE(bl.getLength() == 0);
+}
+
 TEST_CASE("Server List Message Check", "[TC-FSS-003]")
 {
     auto msg_id = static_cast<uint64_t>(random());

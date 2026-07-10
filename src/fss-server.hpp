@@ -132,7 +132,9 @@ private:
     std::string host_;
     int port_{5432};
     std::string user_;
-    std::string pass_;
+    /* todo/43: held wiped (secure_string) rather than as a plain std::string
+     * resident for the life of the connection. */
+    secure_string pass_;
     std::string db_;
     auto connectOne(const char *conn_name) -> bool;
     void reconnectOne(const char *conn_name, std::atomic<bool> &connected_flag);
@@ -141,7 +143,7 @@ public:
      * connection (e.g. force one closed) without duplicating the literals. */
     static constexpr const char *read_conn_name = "fss_read";
     static constexpr const char *write_conn_name = "fss_write";
-    db_connection(std::string host, int port, std::string user, std::string pass, std::string db);
+    db_connection(std::string host, int port, std::string user, secure_string pass, std::string db);
     db_connection(db_connection &) = delete;
     db_connection(db_connection &&) = delete;
     auto operator=(db_connection &) -> db_connection & = delete;
