@@ -66,6 +66,11 @@ auto main(int argc, char *argv[]) -> int
         return -1;
     }
     signal(SIGINT, sigIntHandler);
+    /* Writing to a peer that has reset the connection (e.g. after a CRL
+     * revocation disconnect) raises SIGPIPE; the default action kills the
+     * process instead of letting the blocking send just fail, same reason
+     * server.cpp ignores it. */
+    signal(SIGPIPE, SIG_IGN);
 
     auto client = std::make_shared<logging_client>(argv[1]);
 
