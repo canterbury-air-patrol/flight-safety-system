@@ -38,6 +38,9 @@ static auto commandName(fss::transport::fss_asset_command cmd) -> std::string
 class logging_client : public fss::client_ssl::fss_client {
 public:
     using fss::client_ssl::fss_client::fss_client;
+    /* Exposes the protected setter for --clock-offset-ms (todo/33): a CLI
+     * flag is "less magic" than faketime and works on any runner. */
+    void applyClockOffsetMs(int64_t offset_ms) { this->setClockOffsetMs(offset_ms); }
     /* Logged in the same grep-able style as RCVD_CMD/SENT_ACK below, so e2e
      * tests can assert a client actually received a relayed position report
      * (todo/28) by scanning its stdout log rather than the DB. */
@@ -81,6 +84,7 @@ struct cli_options {
     uint32_t icao_address{0};
     std::string callsign{"example"};
     int position_interval_ms{5000};
+    int64_t clock_offset_ms{0};
 };
 
 /* Parses `text` as a base-10 integer via strtoul/strtol, requiring the
@@ -132,6 +136,7 @@ auto parse_args(int argc, char *argv[]) -> std::optional<cli_options>
     constexpr std::string_view icao_prefix = "--icao=";
     constexpr std::string_view callsign_prefix = "--callsign=";
     constexpr std::string_view interval_prefix = "--position-interval-ms=";
+    constexpr std::string_view clock_offset_prefix = "--clock-offset-ms=";
     for (int i = 2; i < argc; i++)
     {
         std::string_view arg = argv[i];
@@ -152,6 +157,11 @@ auto parse_args(int argc, char *argv[]) -> std::optional<cli_options>
             {
                 return std::nullopt;
             }
+        }
+        else if (arg.substr(0, clock_offset_prefix.size()) == clock_offset_prefix)
+        {
+            opts.clock_offset_ms =
+                std::strtoll(std::string(arg.substr(clock_offset_prefix.size())).c_str(), nullptr, 10);
         }
         else
         {
@@ -184,6 +194,10 @@ auto main(int argc, char *argv[]) -> int
         return -1;
     }
     auto opts = *parsed_opts;
+    if (opts.clock_offset_ms != 0)
+    {
+        client->applyClockOffsetMs(opts.clock_offset_ms);
+    }
 
     /* Connect to each server */
     /* Send reports:
@@ -259,9 +273,13 @@ auto main(int argc, char *argv[]) -> int
             constexpr int flags = 1 | 2 | 4 | 8 | 16 | 32;
             constexpr int alt_type = 1;
             constexpr int emitter_type = 14;
+            /* getSkewedTimestamp() (todo/33) rather than fss_current_timestamp()
+             * directly: a genuinely clock-skewed client stamps everything with
+             * its wrong clock, not just RTT responses -- defaults to the real
+             * clock when --clock-offset-ms was never given. */
             auto msg_pos = std::make_shared<fss::transport::fss_message_position_report>(
                 lat, lng, alt, heading_cdeg, hor_vel, vert_vel, opts.icao_address, opts.callsign, squawk_code,
-                time_since_last_contact, flags, alt_type, emitter_type, fss::fss_current_timestamp());
+                time_since_last_contact, flags, alt_type, emitter_type, client->getSkewedTimestamp());
             client->sendMsgAll(msg_pos);
             next_position_ms += opts.position_interval_ms;
         }

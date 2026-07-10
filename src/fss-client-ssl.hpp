@@ -29,6 +29,11 @@ private:
      * asset name from the peer cert's CN in that path, not from a message
      * field, so there is no non-aircraft counterpart to asset_name. */
     bool non_aircraft{false};
+    /* Added to the wall-clock timestamp reported in an RTT response, when
+     * the server negotiated the clock-offset capability (todo/33). Lets an
+     * e2e test drive a client with a deliberately skewed clock without
+     * needing root/faketime. Positive = client clock ahead of real time. */
+    int64_t clock_offset_ms{0};
     std::string ca_file{""};
     std::string private_key_file{""};
     std::string public_key_file{""};
@@ -50,6 +55,7 @@ private:
 protected:
     void setAssetName(std::string t_asset_name);
     void setNonAircraft(bool t_non_aircraft);
+    void setClockOffsetMs(int64_t t_offset_ms);
     void addServer(const std::shared_ptr<fss_server> &server);
 public:
     explicit fss_client(const std::string &config_file);
@@ -66,6 +72,15 @@ public:
     virtual void sendMsgAll(const std::shared_ptr<flight_safety_system::transport::fss_message> &msg);
     virtual auto getAssetName() -> std::string;
     virtual auto isNonAircraft() const -> bool { return this->non_aircraft; }
+    virtual auto getClockOffsetMs() const -> int64_t { return this->clock_offset_ms; }
+    /* fss_current_timestamp() + clock_offset_ms (todo/33): the single
+     * source of truth for "what time does this client think it is", used
+     * both for the RTT response's reported client clock and for any
+     * message timestamp a skewed-clock test wants to be consistent with
+     * it (e.g. a position report) -- a client whose clock is genuinely
+     * wrong stamps everything with that wrong clock, not just RTT
+     * responses. */
+    virtual auto getSkewedTimestamp() const -> uint64_t;
     virtual auto isConfigured() const -> bool;
     virtual void serverRequiresReconnect(fss_server *server);
     virtual void updateServers(const std::shared_ptr<flight_safety_system::transport::fss_message_server_list> &msg);
