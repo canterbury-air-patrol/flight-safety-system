@@ -14,7 +14,7 @@ extern "C" {
 #include <vector>
 
 flight_safety_system::server::db_connection::db_connection(
-    std::string host, int port, std::string user, std::string pass,
+    std::string host, int port, std::string user, secure_string pass,
     std::string db) // NOLINT(bugprone-easily-swappable-parameters)
     : read_lock(), write_lock(), host_(std::move(host)), port_(port), user_(std::move(user)), pass_(std::move(pass)),
       db_(std::move(db))
@@ -25,7 +25,13 @@ flight_safety_system::server::db_connection::db_connection(
 
 auto flight_safety_system::server::db_connection::connectOne(const char *conn_name) -> bool
 {
-    return db_connect(conn_name, host_.c_str(), port_, user_.c_str(), pass_.c_str(), db_.c_str()) == 1;
+    /* pass_ is shared by both the read and write connections, each
+     * reconnected from its own thread under its own mutex (see
+     * fss-server.hpp), so a local toNulTerminated() copy is used here
+     * instead of a cached pointer on pass_ itself — see secure_string's
+     * comment. */
+    std::string pass_nt = pass_.toNulTerminated();
+    return db_connect(conn_name, host_.c_str(), port_, user_.c_str(), pass_nt.c_str(), db_.c_str()) == 1;
 }
 
 auto flight_safety_system::server::db_connection::isConnected() const -> bool

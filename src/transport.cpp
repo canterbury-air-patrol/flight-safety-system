@@ -327,6 +327,13 @@ auto flight_safety_system::transport::fss_connection::sendMsg(const std::shared_
         return false;
     }
     bool ret = this->sendMsg(bl);
+    if (msg->getType() == flight_safety_system::transport::message_type_smm_settings)
+    {
+        /* todo/43: scrub the packed credential bytes once the send attempt
+         * is done (success or failure) rather than leaving them resident
+         * until bl's refcount drops. */
+        bl->wipeSecure();
+    }
     return ret;
 }
 
@@ -517,6 +524,15 @@ auto flight_safety_system::transport::fss_connection::recvMsg()
         print_bl(bl);
 #endif
         msg = flight_safety_system::transport::fss_message::decode(bl);
+        if (msg != nullptr && msg->getType() == flight_safety_system::transport::message_type_smm_settings)
+        {
+            /* todo/43: unpackData() has already copied the credentials into
+             * secure_string members; scrub both transient copies of the
+             * plaintext frame — this vector and bl's internal buffer —
+             * rather than leaving them resident until deallocation. */
+            explicit_bzero(data.data(), data.size());
+            bl->wipeSecure();
+        }
     }
     else
     {

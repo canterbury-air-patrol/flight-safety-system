@@ -200,6 +200,13 @@ public:
      * point, and this is the ABI-neutral way to fail it (no new data member,
      * so no layout change to this installed-header class). */
     void invalidate();
+    /* Scrubs the packed bytes with explicit_bzero before releasing them
+     * (todo/43): used for messages carrying credentials, where leaving the
+     * plaintext resident until the buffer's plain deallocation is an
+     * avoidable gap. Distinct from invalidate() (todo/38), which exists to
+     * fail a future send, not to scrub memory — though the end state
+     * (isValid() == false) is the same. */
+    void wipeSecure();
 };
 
 class fss_message_cb {

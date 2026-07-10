@@ -114,7 +114,9 @@ auto main(int argc, char *argv[]) -> int
     int pg_port = default_pg_port;
     std::string pg_host;
     std::string pg_user;
-    std::string pg_pass;
+    /* todo/43: held wiped (secure_string) rather than resident as a plain
+     * std::string for the process's whole lifetime. */
+    flight_safety_system::secure_string pg_pass;
     std::string pg_db;
     std::size_t db_queue_depth = default_db_queue_depth;
     uint64_t client_timeout_sec = default_client_timeout_sec;
@@ -177,7 +179,7 @@ auto main(int argc, char *argv[]) -> int
         }
         pg_host = config["postgres"]["host"].asString();
         pg_user = config["postgres"]["user"].asString();
-        pg_pass = config["postgres"]["pass"].asString();
+        pg_pass = flight_safety_system::secure_string(config["postgres"]["pass"].asString());
         pg_db = config["postgres"]["db"].asString();
         if (config.isMember("db_queue_depth"))
         {
@@ -241,7 +243,8 @@ auto main(int argc, char *argv[]) -> int
         return 1;
     }
 
-    auto dbc = std::make_shared<flight_safety_system::server::db_connection>(pg_host, pg_port, pg_user, pg_pass, pg_db);
+    auto dbc = std::make_shared<flight_safety_system::server::db_connection>(pg_host, pg_port, pg_user,
+                                                                             std::move(pg_pass), pg_db);
 
     if (!dbc->isConnected())
     {

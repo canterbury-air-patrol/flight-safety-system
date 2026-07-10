@@ -115,3 +115,25 @@ TEST_CASE("secure_string: data() returns pointer to content")
     REQUIRE(s.data() != nullptr);
     REQUIRE(std::string_view(s.data(), s.size()) == "test");
 }
+
+TEST_CASE("secure_string: toNulTerminated() matches content and is NUL-terminated")
+{
+    fss::secure_string s(std::string_view{"p4ssw0rd"});
+    std::string nt = s.toNulTerminated();
+    REQUIRE(nt == "p4ssw0rd");
+    REQUIRE(nt.c_str()[nt.size()] == '\0');
+}
+
+TEST_CASE("secure_string: toNulTerminated() on empty string is empty")
+{
+    fss::secure_string s;
+    REQUIRE(s.toNulTerminated().empty());
+}
+
+TEST_CASE("secure_string: toNulTerminated() does not disturb data()/size()")
+{
+    fss::secure_string s(std::string_view{"unchanged"});
+    (void)s.toNulTerminated();
+    REQUIRE(s.size() == 9);
+    REQUIRE(std::string_view(s.data(), s.size()) == "unchanged");
+}
