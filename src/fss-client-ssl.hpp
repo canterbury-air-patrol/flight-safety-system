@@ -24,6 +24,11 @@ enum connection_status {
 class fss_client {
 private:
     std::string asset_name{""};
+    /* When true, sendIdentify() sends message_type_identity_non_aircraft
+     * instead of the aircraft identity (todo/28). The server derives the
+     * asset name from the peer cert's CN in that path, not from a message
+     * field, so there is no non-aircraft counterpart to asset_name. */
+    bool non_aircraft{false};
     std::string ca_file{""};
     std::string private_key_file{""};
     std::string public_key_file{""};
@@ -44,6 +49,7 @@ private:
     virtual void connectionStatusChange(flight_safety_system::client_ssl::connection_status status);
 protected:
     void setAssetName(std::string t_asset_name);
+    void setNonAircraft(bool t_non_aircraft);
     void addServer(const std::shared_ptr<fss_server> &server);
 public:
     explicit fss_client(const std::string &config_file);
@@ -59,6 +65,7 @@ public:
     virtual void disconnect();
     virtual void sendMsgAll(const std::shared_ptr<flight_safety_system::transport::fss_message> &msg);
     virtual auto getAssetName() -> std::string;
+    virtual auto isNonAircraft() const -> bool { return this->non_aircraft; }
     virtual auto isConfigured() const -> bool;
     virtual void serverRequiresReconnect(fss_server *server);
     virtual void updateServers(const std::shared_ptr<flight_safety_system::transport::fss_message_server_list> &msg);

@@ -419,6 +419,8 @@ def fake_client(
         name: str = "test1",
         ca_override: Path | None = None,
         client_id: str | None = None,
+        non_aircraft: bool = False,
+        extra_args: list[str] | None = None,
     ) -> dict[str, object]:
         # client_id labels this launch's config/log file paths; defaults to
         # `name` (existing behaviour for every caller with one client per
@@ -429,8 +431,9 @@ def fake_client(
         label = client_id if client_id is not None else name
         config_path = tmp_path / f"client-{label}.json"
         log_path = tmp_path / f"client-{label}.log"
+        template = "client-non-aircraft.json.tmpl" if non_aircraft else "client.json.tmpl"
         _render_template(
-            E2E_ROOT / "fixtures" / "client.json.tmpl",
+            E2E_ROOT / "fixtures" / template,
             config_path,
             CLIENT_NAME=name,
             CERTS_DIR=str(ca_override if ca_override else certs_dir),
@@ -441,7 +444,7 @@ def fake_client(
         log_fp = log_path.open("wb")
         # sourcery skip: dangerous-subprocess-use-audit
         proc = subprocess.Popen(
-            [str(FAKE_CLIENT_BIN), str(config_path)],
+            [str(FAKE_CLIENT_BIN), str(config_path), *(extra_args or [])],
             cwd=str(REPO_ROOT),
             env=env,
             stdout=log_fp,
