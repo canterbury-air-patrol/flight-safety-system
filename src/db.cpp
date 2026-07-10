@@ -103,27 +103,39 @@ auto flight_safety_system::server::db_connection::getAssetId(const std::string &
 void flight_safety_system::server::db_connection::recordRtt(uint64_t asset_id, uint64_t rtt_ms)
 {
     std::scoped_lock guard(this->write_lock);
-    db_rtt_create_entry(write_conn_name, asset_id, rtt_ms);
+    if (db_rtt_create_entry(write_conn_name, asset_id, rtt_ms) == 0)
+    {
+        throw database_error("rtt write failed for asset " + std::to_string(asset_id));
+    }
 }
 
 void flight_safety_system::server::db_connection::recordStatus(uint64_t asset_id, uint8_t bat_percent,
                                                                uint32_t bat_mah_used, double bat_voltage)
 {
     std::scoped_lock guard(this->write_lock);
-    db_status_create_entry(write_conn_name, asset_id, bat_percent, bat_mah_used, bat_voltage);
+    if (db_status_create_entry(write_conn_name, asset_id, bat_percent, bat_mah_used, bat_voltage) == 0)
+    {
+        throw database_error("status write failed for asset " + std::to_string(asset_id));
+    }
 }
 
 void flight_safety_system::server::db_connection::recordSearchStatus(uint64_t asset_id, uint64_t search_id,
                                                                      uint64_t completed, uint64_t total)
 {
     std::scoped_lock guard(this->write_lock);
-    db_search_status_create_entry(write_conn_name, asset_id, search_id, completed, total);
+    if (db_search_status_create_entry(write_conn_name, asset_id, search_id, completed, total) == 0)
+    {
+        throw database_error("search status write failed for asset " + std::to_string(asset_id));
+    }
 }
 
 void flight_safety_system::server::db_connection::recordCommandDispatch(uint64_t command_dbid, uint64_t dispatch_id)
 {
     std::scoped_lock guard(this->write_lock);
-    db_command_set_dispatch_id(write_conn_name, command_dbid, dispatch_id);
+    if (db_command_set_dispatch_id(write_conn_name, command_dbid, dispatch_id) == 0)
+    {
+        throw database_error("command dispatch-id write failed for command " + std::to_string(command_dbid));
+    }
 }
 
 void flight_safety_system::server::db_connection::recordCommandAck(uint64_t asset_id, uint64_t dispatch_id,
@@ -131,8 +143,11 @@ void flight_safety_system::server::db_connection::recordCommandAck(uint64_t asse
                                                                    uint8_t ack_reason)
 {
     std::scoped_lock guard(this->write_lock);
-    db_command_record_ack(write_conn_name, asset_id, dispatch_id, static_cast<int>(ack_state), ack_timestamp,
-                          static_cast<int>(ack_reason));
+    if (db_command_record_ack(write_conn_name, asset_id, dispatch_id, static_cast<int>(ack_state), ack_timestamp,
+                              static_cast<int>(ack_reason)) == 0)
+    {
+        throw database_error("command ack write failed for asset " + std::to_string(asset_id));
+    }
 }
 
 void flight_safety_system::server::db_connection::recordPosition(uint64_t asset_id, double latitude, double longitude,
@@ -145,7 +160,10 @@ void flight_safety_system::server::db_connection::recordPosition(uint64_t asset_
                                         << asset_id);
         return;
     }
-    db_position_create_entry(write_conn_name, asset_id, latitude, longitude, static_cast<int>(altitude));
+    if (db_position_create_entry(write_conn_name, asset_id, latitude, longitude, static_cast<int>(altitude)) == 0)
+    {
+        throw database_error("position write failed for asset " + std::to_string(asset_id));
+    }
 }
 
 auto flight_safety_system::server::db_connection::getCommand(uint64_t asset_id) -> std::shared_ptr<asset_command>

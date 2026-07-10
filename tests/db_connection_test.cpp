@@ -135,6 +135,40 @@ TEST_CASE("db_connection: recordPosition with overflow altitude is discarded")
     dbc->recordPosition(asset_id, -43.5, 172.6, huge_alt);
 }
 
+TEST_CASE("db_connection: write methods throw database_error when the write connection is down (todo/34)")
+{
+    /* Before todo/34's fix, db_position_create_entry et al. (server-db.pgc)
+     * checked nothing after EXEC SQL -- a failed INSERT/UPDATE just printed
+     * via sqlprint() and the C++ wrapper returned normally, so db_write_queue
+     * never saw an exception and write_failure_count() never moved. Force
+     * the write connection down (no reconnect) so the write is guaranteed to
+     * fail, and require every write method surfaces it as database_error. */
+    LIVE_DB_OR_SKIP(dbc);
+    auto asset_id = dbc->getAssetId("test-asset");
+    REQUIRE(asset_id != 0);
+    db_disconnect(flight_safety_system::server::db_connection::write_conn_name);
+
+    auto threw_database_error = [](auto &&write_call) -> bool {
+        try
+        {
+            write_call();
+        }
+        catch (const flight_safety_system::server::database_error &)
+        {
+            return true;
+        }
+        return false;
+    };
+
+    REQUIRE(threw_database_error([&] { dbc->recordPosition(asset_id, -43.5, 172.6, uint32_t{100}); }));
+    REQUIRE(threw_database_error([&] { dbc->recordRtt(asset_id, uint64_t{42}); }));
+    REQUIRE(threw_database_error([&] { dbc->recordStatus(asset_id, uint8_t{80}, uint32_t{1000}, 12.4); }));
+    REQUIRE(threw_database_error([&] { dbc->recordSearchStatus(asset_id, uint64_t{1}, uint64_t{50}, uint64_t{100}); }));
+    REQUIRE(threw_database_error([&] { dbc->recordCommandDispatch(uint64_t{1}, uint64_t{1}); }));
+    REQUIRE(threw_database_error(
+        [&] { dbc->recordCommandAck(asset_id, uint64_t{1}, uint8_t{1}, uint64_t{1}, uint8_t{0}); }));
+}
+
 TEST_CASE("db_connection: getSmmSettings returns non-null for configured asset")
 {
     LIVE_DB_OR_SKIP(dbc);

@@ -108,6 +108,12 @@ auto main(int argc, char *argv[]) -> int
     constexpr uint64_t default_rate_capacity = 100;
     constexpr uint64_t default_rate_refill_per_s = 20;
     constexpr auto default_duplicate_identity_policy = flight_safety_system::server::duplicate_identity_reject_newcomer;
+    /* todo/34: default 5 consecutive per-second ticks (~5s) of a growing DB
+     * write-failure count before severing every connected client. A single
+     * transient failure never trips this (the streak resets whenever a tick
+     * passes with no new failures); only sustained failure -- what disk-full
+     * looks like -- does. */
+    constexpr uint64_t default_db_write_failure_disconnect_ticks = 5;
     constexpr unsigned int default_tls_handshake_timeout_ms =
         flight_safety_system::transport_ssl::default_handshake_timeout_ms;
     constexpr std::size_t default_max_concurrent_handshakes = 64;
@@ -126,6 +132,7 @@ auto main(int argc, char *argv[]) -> int
     uint64_t rate_capacity = default_rate_capacity;
     uint64_t rate_refill = default_rate_refill_per_s;
     auto duplicate_identity_policy = default_duplicate_identity_policy;
+    uint64_t db_write_failure_disconnect_ticks = default_db_write_failure_disconnect_ticks;
     unsigned int tls_handshake_timeout_ms = default_tls_handshake_timeout_ms;
     std::size_t max_concurrent_handshakes = default_max_concurrent_handshakes;
     std::string ca_public_key;
@@ -223,6 +230,10 @@ auto main(int argc, char *argv[]) -> int
                 FSS_LOG_ERROR("server", "Invalid duplicate_identity_policy '" << policy_str
                                                                               << "'; using default (reject_newcomer)");
             }
+        }
+        if (config.isMember("db_write_failure_disconnect_ticks"))
+        {
+            db_write_failure_disconnect_ticks = config["db_write_failure_disconnect_ticks"].asUInt64();
         }
         if (config.isMember("tls_handshake_timeout_ms"))
         {
@@ -398,11 +409,48 @@ auto main(int argc, char *argv[]) -> int
                 clients->checkTimeouts();
                 clients->sendRTTRequest();
                 static uint64_t last_failure_count = 0;
+                /* todo/34: tracks a *wall-clock* failure incident, not a
+                 * per-tick consecutive-growth counter -- real write traffic
+                 * (position/status/search) only lands every position_
+                 * interval (5s by default), so failures arrive in bursts
+                 * with quiet once-per-second checks in between. A counter
+                 * that reset on any quiet tick could never reach its
+                 * threshold under normal telemetry cadence. Elapsed_secs
+                 * below is this per-second block's own execution count
+                 * (not tick_counter, which advances every command_poll_ms),
+                 * so it is directly in seconds. */
+                static uint64_t elapsed_secs = 0;
+                static uint64_t incident_start_secs = 0; // 0 = no active incident
+                static uint64_t last_new_failure_secs = 0;
+                elapsed_secs++;
                 uint64_t current_failures = writer->write_failure_count();
                 if (current_failures != last_failure_count)
                 {
                     FSS_LOG_ERROR("server", "DB write failures since start: " << current_failures);
                     last_failure_count = current_failures;
+                    if (incident_start_secs == 0)
+                    {
+                        incident_start_secs = elapsed_secs;
+                    }
+                    last_new_failure_secs = elapsed_secs;
+                }
+                /* Recovery: no new failure for a grace window comfortably
+                 * longer than any realistic telemetry cadence -- the
+                 * incident is over, so a future failure starts a fresh one
+                 * rather than inheriting this one's age. */
+                constexpr uint64_t recovery_grace_secs = 15;
+                if (incident_start_secs != 0 && (elapsed_secs - last_new_failure_secs) > recovery_grace_secs)
+                {
+                    incident_start_secs = 0;
+                }
+                if (incident_start_secs != 0 &&
+                    (elapsed_secs - incident_start_secs) >= db_write_failure_disconnect_ticks)
+                {
+                    auto severed = clients->disconnectAll();
+                    FSS_LOG_ERROR("server", "DB writes have been failing for "
+                                                << (elapsed_secs - incident_start_secs) << "s; severing " << severed
+                                                << " connection(s) rather than silently discarding telemetry");
+                    incident_start_secs = 0;
                 }
                 static uint64_t last_command_dropped = 0;
                 uint64_t current_command_dropped = writer->command_dropped_count();

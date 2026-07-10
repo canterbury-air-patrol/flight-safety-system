@@ -8,19 +8,24 @@ void db_disconnect(const char *conn);
 int db_ping(const char *conn);
 
 unsigned long long db_get_asset_id(const char *conn, const char *asset_name);
-void db_rtt_create_entry(const char *conn, unsigned long long asset_id, unsigned long long delta);
-void db_status_create_entry(const char *conn, unsigned long long asset_id, unsigned short bat_percent,
-                            unsigned int bat_mah_used, double bat_voltage);
-void db_search_status_create_entry(const char *conn, unsigned long long asset_id, unsigned long long search_id,
-                                   unsigned long long search_completed, unsigned long long search_total);
-void db_position_create_entry(const char *conn, unsigned long long asset_id, double latitude, double longitude,
-                              int altitude);
+
+/* todo/34: these six writers return 1 on success, 0 if sqlca.sqlcode < 0
+ * (e.g. disk-full) -- the caller (db.cpp) throws database_error on 0 so a
+ * silent per-INSERT failure isn't indistinguishable from a successful
+ * write to db_write_queue's caller. */
+int db_rtt_create_entry(const char *conn, unsigned long long asset_id, unsigned long long delta);
+int db_status_create_entry(const char *conn, unsigned long long asset_id, unsigned short bat_percent,
+                           unsigned int bat_mah_used, double bat_voltage);
+int db_search_status_create_entry(const char *conn, unsigned long long asset_id, unsigned long long search_id,
+                                  unsigned long long search_completed, unsigned long long search_total);
+int db_position_create_entry(const char *conn, unsigned long long asset_id, double latitude, double longitude,
+                             int altitude);
 
 /* Records the per-connection message id the server stamped onto the dispatched
  * command, on the assets_assetcommand row identified by its primary key
  * (command_dbid). Lets a later command-ack be matched back to this specific
  * command via dispatch_id == acked_command_id. */
-void db_command_set_dispatch_id(const char *conn, unsigned long long command_dbid, unsigned long long dispatch_id);
+int db_command_set_dispatch_id(const char *conn, unsigned long long command_dbid, unsigned long long dispatch_id);
 
 /* Updates the ack fields on the assets_assetcommand row whose (asset_id,
  * dispatch_id) matches the acking asset and the acked id. dispatch_id is only
@@ -29,8 +34,8 @@ void db_command_set_dispatch_id(const char *conn, unsigned long long command_dbi
  * ack_superseded_by the fss_command_ack_reason int, ack_timestamp the FMU
  * wall-clock ms. The update never lowers an already-terminal ack_state back to a
  * non-terminal one (a late "received" cannot clobber a settled outcome). */
-void db_command_record_ack(const char *conn, unsigned long long asset_id, unsigned long long dispatch_id, int ack_state,
-                           unsigned long long ack_timestamp, int ack_superseded_by);
+int db_command_record_ack(const char *conn, unsigned long long asset_id, unsigned long long dispatch_id, int ack_state,
+                          unsigned long long ack_timestamp, int ack_superseded_by);
 
 struct asset_command_s {
     char *command;
