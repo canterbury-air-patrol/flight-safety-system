@@ -1,4 +1,7 @@
-"""Client should reconnect after the server bounces."""
+"""Client should reconnect after the server bounces, and its state should
+survive the bounce (todo/32): the active command is redelivered with its
+original timestamp, prior telemetry/search/command rows are intact, and
+ack bookkeeping settles rather than getting stuck."""
 from __future__ import annotations
 
 import os
@@ -21,6 +24,28 @@ from conftest import (
     wait_for_row,
 )
 
+# Mirror flight_safety_system::transport::fss_command_ack_outcome (see
+# test_command_ack.py).
+ACK_STATE_ACTIONED = 1
+
+
+def _poll(conn, query: str, params: tuple, want, timeout: float, poll: float = 0.2):
+    """Poll `query` until `want(row)` holds for the fetched row, or time out.
+    Returns the last row fetched (so a timeout still reports what was
+    stored), or None if the query never returned a row."""
+    deadline = time.monotonic() + timeout
+    last = None
+    while time.monotonic() < deadline:
+        with conn.cursor() as cur:
+            cur.execute(query, params)
+            row = cur.fetchone()
+        if row is not None:
+            last = row
+            if want(row):
+                return row
+        time.sleep(poll)
+    return last
+
 
 @pytest.mark.requires_docker
 @pytest.mark.slow
@@ -29,7 +54,10 @@ def test_client_reconnects_after_server_bounce(
 ):
     """Start server on a fixed port; connect fake-client; SIGTERM server;
     spawn a new server on the *same* port; the fake-client should reconnect
-    and resume persisting position rows."""
+    and resume persisting position rows. Also covers todo/32: the active
+    command survives the bounce, is redelivered with its original
+    timestamp (not a freshly minted one), prior rows are intact, and the
+    post-bounce re-ack settles rather than leaving a stuck state."""
 
     with psycopg2.connect(
         host=migrated_db["host"], port=migrated_db["port"],
@@ -134,6 +162,47 @@ def test_client_reconnects_after_server_bounce(
             )
         first_id = first[0]
 
+        # todo/32: dispatch a command and let it settle (dispatched + acked
+        # actioned) *before* the bounce, so we can check afterward that the
+        # bounce neither loses it nor mints a new one.
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO assets_assetcommand (asset_id, command, position, altitude) "
+                "VALUES (%s, 'RTL', ST_SetSRID(ST_MakePoint(0, 0), 4326)::geography, 0) "
+                "RETURNING id, timestamp",
+                (asset_id,),
+            )
+            command_dbid, original_timestamp = cur.fetchone()
+
+        pre_bounce_ack = _poll(
+            conn,
+            "SELECT ack_state, ack_timestamp FROM assets_assetcommand WHERE id = %s",
+            (command_dbid,),
+            lambda r: r[0] == ACK_STATE_ACTIONED,
+            timeout=15.0,
+        )
+        assert pre_bounce_ack is not None, (
+            f"command dbid={command_dbid} never got an ack stored before the bounce\n"
+            + client_log.read_text(errors="replace")
+        )
+        assert pre_bounce_ack[0] == ACK_STATE_ACTIONED, (
+            f"command dbid={command_dbid} was not acked actioned before the bounce: "
+            f"{pre_bounce_ack}\n" + client_log.read_text(errors="replace")
+        )
+        pre_bounce_ack_timestamp = pre_bounce_ack[1]
+
+        # Row survival baseline: counts of every telemetry table this asset
+        # writes to, taken just before the bounce.
+        pre_bounce_counts = {}
+        for table in (
+            "assets_assetposition", "assets_assetstatus",
+            "assets_assetsearchprogress", "assets_assetcommand",
+        ):
+            with conn.cursor() as cur:
+                # sourcery skip: sqlalchemy-execute-raw-query
+                cur.execute(f"SELECT COUNT(*) FROM {table} WHERE asset_id = %s", (asset_id,))  # noqa: S608
+                pre_bounce_counts[table] = cur.fetchone()[0]
+
         # Bounce the server.
         server1.send_signal(signal.SIGINT)
         try:
@@ -156,6 +225,59 @@ def test_client_reconnects_after_server_bounce(
         assert second is not None, (
             "client did not reconnect / resend position within 30s\n"
             + client_log.read_text(errors="replace")
+        )
+
+        # todo/32: row survival -- the bounce must never shrink a table
+        # (no truncation), only grow it (new telemetry after reconnect).
+        for table, pre_count in pre_bounce_counts.items():
+            with conn.cursor() as cur:
+                # sourcery skip: sqlalchemy-execute-raw-query
+                cur.execute(f"SELECT COUNT(*) FROM {table} WHERE asset_id = %s", (asset_id,))  # noqa: S608
+                post_count = cur.fetchone()[0]
+            assert post_count >= pre_count, (
+                f"{table} lost rows across the bounce: had {pre_count}, now {post_count}"
+            )
+
+        # todo/32: command redelivery -- identify on the new connection
+        # re-reads the latest command row and resends it. The fake client
+        # logs RCVD_CMD on every delivery, so a second occurrence proves
+        # redelivery happened; the row's stored timestamp must be
+        # unchanged (redelivery must not mint a fresh one).
+        redelivered = _wait_for(
+            lambda: client_log.read_text(errors="replace").count("RCVD_CMD: RTL") >= 2,
+            timeout=15.0,
+        )
+        assert redelivered, (
+            "command was not redelivered after reconnect\n"
+            + client_log.read_text(errors="replace")
+        )
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT timestamp FROM assets_assetcommand WHERE id = %s", (command_dbid,),
+            )
+            post_bounce_timestamp = cur.fetchone()[0]
+        assert post_bounce_timestamp == original_timestamp, (
+            f"redelivery changed the command's stored timestamp: "
+            f"was {original_timestamp}, now {post_bounce_timestamp}"
+        )
+
+        # todo/32: ack correlation -- the redelivered command is acked again
+        # on the new connection; the row must settle back to actioned with a
+        # fresh ack_timestamp, not get stuck at some intermediate state.
+        post_bounce_ack = _poll(
+            conn,
+            "SELECT ack_state, ack_timestamp FROM assets_assetcommand WHERE id = %s",
+            (command_dbid,),
+            lambda r: r[0] == ACK_STATE_ACTIONED and r[1] != pre_bounce_ack_timestamp,
+            timeout=15.0,
+        )
+        assert post_bounce_ack is not None, (
+            f"command dbid={command_dbid} never got a post-bounce ack stored\n"
+            + client_log.read_text(errors="replace")
+        )
+        assert post_bounce_ack[0] == ACK_STATE_ACTIONED, (
+            f"command dbid={command_dbid} did not settle back to acked actioned "
+            f"after the bounce: {post_bounce_ack}\n" + client_log.read_text(errors="replace")
         )
     finally:
         if client.poll() is None:
