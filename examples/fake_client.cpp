@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include <csignal>
 #include <iostream>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -82,7 +83,50 @@ struct cli_options {
     int position_interval_ms{5000};
 };
 
-auto parse_args(int argc, char *argv[]) -> cli_options
+/* Parses `text` as a base-10 integer via strtoul/strtol, requiring the
+ * *entire* string to be consumed (no trailing junk, no empty string) so a
+ * malformed --flag=value fails loudly instead of silently becoming 0 --
+ * a bad e2e test invocation should error out, not run with nonsense
+ * defaults. */
+auto parse_uint_arg(std::string_view flag, std::string_view text, uint32_t &out) -> bool
+{
+    if (text.empty())
+    {
+        std::cout << "Invalid value for " << flag << ": empty" << std::endl;
+        return false;
+    }
+    std::string text_owned(text);
+    char *end = nullptr;
+    unsigned long value = std::strtoul(text_owned.c_str(), &end, 0);
+    if (end != text_owned.c_str() + text_owned.size())
+    {
+        std::cout << "Invalid value for " << flag << ": '" << text << "'" << std::endl;
+        return false;
+    }
+    out = static_cast<uint32_t>(value);
+    return true;
+}
+
+auto parse_int_arg(std::string_view flag, std::string_view text, int &out) -> bool
+{
+    if (text.empty())
+    {
+        std::cout << "Invalid value for " << flag << ": empty" << std::endl;
+        return false;
+    }
+    std::string text_owned(text);
+    char *end = nullptr;
+    long value = std::strtol(text_owned.c_str(), &end, 10);
+    if (end != text_owned.c_str() + text_owned.size())
+    {
+        std::cout << "Invalid value for " << flag << ": '" << text << "'" << std::endl;
+        return false;
+    }
+    out = static_cast<int>(value);
+    return true;
+}
+
+auto parse_args(int argc, char *argv[]) -> std::optional<cli_options>
 {
     cli_options opts;
     constexpr std::string_view icao_prefix = "--icao=";
@@ -93,8 +137,10 @@ auto parse_args(int argc, char *argv[]) -> cli_options
         std::string_view arg = argv[i];
         if (arg.substr(0, icao_prefix.size()) == icao_prefix)
         {
-            opts.icao_address =
-                static_cast<uint32_t>(std::strtoul(std::string(arg.substr(icao_prefix.size())).c_str(), nullptr, 0));
+            if (!parse_uint_arg(icao_prefix, arg.substr(icao_prefix.size()), opts.icao_address))
+            {
+                return std::nullopt;
+            }
         }
         else if (arg.substr(0, callsign_prefix.size()) == callsign_prefix)
         {
@@ -102,7 +148,10 @@ auto parse_args(int argc, char *argv[]) -> cli_options
         }
         else if (arg.substr(0, interval_prefix.size()) == interval_prefix)
         {
-            opts.position_interval_ms = std::atoi(std::string(arg.substr(interval_prefix.size())).c_str());
+            if (!parse_int_arg(interval_prefix, arg.substr(interval_prefix.size()), opts.position_interval_ms))
+            {
+                return std::nullopt;
+            }
         }
         else
         {
@@ -129,7 +178,12 @@ auto main(int argc, char *argv[]) -> int
     signal(SIGPIPE, SIG_IGN);
 
     auto client = std::make_shared<logging_client>(argv[1]);
-    auto opts = parse_args(argc, argv);
+    auto parsed_opts = parse_args(argc, argv);
+    if (!parsed_opts.has_value())
+    {
+        return -1;
+    }
+    auto opts = *parsed_opts;
 
     /* Connect to each server */
     /* Send reports:
@@ -151,20 +205,32 @@ auto main(int argc, char *argv[]) -> int
      * rate-limit testing (todo/28 wants well over 20/s to exceed the
      * default token-bucket capacity within a short test), while
      * status/search keep their original fixed 5s cadence regardless of the
-     * position interval. */
+     * position interval.
+     *
+     * Deadline-based (next_*_ms), not modulo-on-elapsed_ms: elapsed_ms only
+     * ever takes multiples of tick_ms, so `elapsed_ms % interval_ms == 0`
+     * only fires on schedule when interval_ms happens to be a multiple of
+     * tick_ms -- any other value (e.g. --position-interval-ms=1234) fires
+     * at LCM(tick_ms, interval_ms) instead, silently far slower than
+     * requested. Each next_*_ms is incremented by its own interval after
+     * firing, so drift never accumulates and any positive interval works. */
     constexpr int tick_ms = 10;
     constexpr int reconnect_check_ms = 1000;
     constexpr int status_search_interval_ms = 5000;
     int elapsed_ms = 0;
+    int next_reconnect_ms = reconnect_check_ms;
+    int next_status_search_ms = status_search_interval_ms;
+    int next_position_ms = opts.position_interval_ms;
     while (running == 1)
     {
         usleep(tick_ms * 1000);
         elapsed_ms += tick_ms;
-        if ((elapsed_ms % reconnect_check_ms) == 0)
+        if (elapsed_ms >= next_reconnect_ms)
         {
             client->attemptReconnect();
+            next_reconnect_ms += reconnect_check_ms;
         }
-        if ((elapsed_ms % status_search_interval_ms) == 0)
+        if (elapsed_ms >= next_status_search_ms)
         {
             constexpr int bat_remaining = 75;
             constexpr int bat_mah_used = 1000;
@@ -178,8 +244,9 @@ auto main(int argc, char *argv[]) -> int
                 search_number, search_current_point, search_total_points);
             client->sendMsgAll(msg_status);
             client->sendMsgAll(msg_search);
+            next_status_search_ms += status_search_interval_ms;
         }
-        if (opts.position_interval_ms > 0 && (elapsed_ms % opts.position_interval_ms) == 0)
+        if (opts.position_interval_ms > 0 && elapsed_ms >= next_position_ms)
         {
             constexpr double lat = -43.5;
             constexpr double lng = 172.5;
@@ -196,6 +263,7 @@ auto main(int argc, char *argv[]) -> int
                 lat, lng, alt, heading_cdeg, hor_vel, vert_vel, opts.icao_address, opts.callsign, squawk_code,
                 time_since_last_contact, flags, alt_type, emitter_type, fss::fss_current_timestamp());
             client->sendMsgAll(msg_pos);
+            next_position_ms += opts.position_interval_ms;
         }
     }
     client->disconnect();
