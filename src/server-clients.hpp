@@ -340,7 +340,15 @@ public:
      * the main loop's sustained-DB-write-failure guard — every currently
      * live session gets severed (Tier-3 Path M m05 expects this to trigger
      * aircraft comms-loss RTL) rather than the server silently continuing
-     * to accept telemetry it cannot store. */
+     * to accept telemetry it cannot store.
+     *
+     * Same disconnect()+clientDisconnected() pattern as
+     * disconnectRevokedClients() above, so it is safe by the same reasoning:
+     * both calls are idempotent (fss_client::disconnect() documents a second
+     * call as a safe no-op; clientDisconnected() only acts if the client is
+     * still in `clients`, erasing it on the first call), so a client racing
+     * its own concurrent teardown mid-snapshot is handled harmlessly rather
+     * than double-freed or double-erased. */
     auto disconnectAll() -> std::size_t
     {
         std::size_t disconnected_count = 0;
