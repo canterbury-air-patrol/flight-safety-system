@@ -267,7 +267,7 @@ public:
         }
     };
     /* todo/31: called from the identify path once asset_id is resolved, before
-     * `newcomer` is marked identified. Finds any other live session already
+     * `newcomer` is marked identified. Finds any other live session(s) already
      * identified for this asset_id and applies the configured policy.
      *
      * Narrow race: two brand-new connections identifying for the same asset_id
@@ -276,16 +276,28 @@ public:
      * race snapshotClients() already documents elsewhere (a client connected
      * mid-iteration is covered by the caller's next pass). Not worth a second
      * lock ordered with client_lock to close, given how rare simultaneous
-     * identify is in practice. */
+     * identify is in practice. Because that race can leave more than one
+     * pre-existing session behind for the same asset_id, evict_oldest below
+     * evicts every match found here, not just one — otherwise a later
+     * newcomer would clear only the first (by connection order, i.e. the
+     * actual oldest) and leave the rest alive.
+     *
+     * disconnect()+clientDisconnected() runs outside `lock`, same as
+     * disconnectRevokedClients()/checkTimeouts() elsewhere in this class:
+     * clientDisconnected() takes `lock` itself and the snapshot's shared_ptr
+     * keeps `existing` alive across the call, so this is safe by the same
+     * reasoning documented on snapshotClients() above — disconnect() blocks
+     * on socket I/O and joins the recv thread, which must never happen while
+     * holding `lock`. */
     auto resolveDuplicateIdentity(flight_safety_system::server::fss_client *newcomer, uint64_t asset_id)
         -> bool override
     {
         auto snapshot = this->snapshotClients();
-        auto it = std::find_if(snapshot.begin(), snapshot.end(), [newcomer, asset_id](const auto &client) -> bool {
-            return client.get() != newcomer && client->getCachedAssetId() == asset_id;
-        });
-        std::shared_ptr<flight_safety_system::server::fss_client> existing = (it != snapshot.end()) ? *it : nullptr;
-        if (existing == nullptr)
+        bool has_existing =
+            std::any_of(snapshot.begin(), snapshot.end(), [newcomer, asset_id](const auto &client) -> bool {
+                return client.get() != newcomer && client->getCachedAssetId() == asset_id;
+            });
+        if (!has_existing)
         {
             return true;
         }
@@ -293,10 +305,19 @@ public:
         {
             return false;
         }
+        std::size_t evicted = 0;
+        for (const auto &client : snapshot)
+        {
+            if (client.get() != newcomer && client->getCachedAssetId() == asset_id)
+            {
+                client->disconnect();
+                this->clientDisconnected(client.get());
+                evicted++;
+            }
+        }
         FSS_LOG_WARN("server", "Duplicate identity for asset_id "
-                                   << asset_id << ": evicting the existing session (duplicate_identity_evict_oldest)");
-        existing->disconnect();
-        this->clientDisconnected(existing.get());
+                                   << asset_id << ": evicted " << evicted
+                                   << " existing session(s) (duplicate_identity_evict_oldest)");
         return true;
     }
     auto disconnectRevokedClients(const std::string &crl_file) -> std::size_t
