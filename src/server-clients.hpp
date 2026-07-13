@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <atomic>
 #include <list>
+#include <map>
 #include <mutex>
 #include <queue>
 #include <utility>
@@ -25,6 +26,14 @@ private:
     uint64_t rate_refill_per_s{20};
     flight_safety_system::server::duplicate_identity_policy duplicate_identity_policy_{
         flight_safety_system::server::duplicate_identity_reject_newcomer};
+    /* Which live client currently holds each asset_id (todo/44). Guarded by
+     * lock. A claim is recorded in resolveDuplicateIdentity() atomically with
+     * the duplicate check — i.e. before the winning client has published the
+     * id into its cached_asset_id — and released in clientDisconnected(), so
+     * two connections identifying the same asset_id at the same instant
+     * serialise on the claim and at most one live session can ever hold a
+     * given asset_id. */
+    std::map<uint64_t, flight_safety_system::server::fss_client *> asset_owners{};
     /* Guarded by lock. Built by the command poller thread (the only place
      * allowed to read the DB for it); broadcast by the main loop, which must
      * never perform a synchronous DB read. */
@@ -145,6 +154,15 @@ public:
         std::scoped_lock guard(this->lock);
         if (this->shutting_down)
             return;
+        /* Release any asset-id claim this client holds (todo/44). Scan by
+         * owner rather than looking up client->getCachedAssetId(): a claim
+         * whose publication never completed (the client timed out or was
+         * evicted while its identify was still in flight) must still be
+         * released, or the asset_id would stay unclaimable until restart. */
+        for (auto owner_it = this->asset_owners.begin(); owner_it != this->asset_owners.end();)
+        {
+            owner_it = (owner_it->second == client) ? this->asset_owners.erase(owner_it) : std::next(owner_it);
+        }
         auto it = std::find_if(this->clients.begin(), this->clients.end(),
                                [client](const auto &c) -> auto { return c.get() == client; });
         if (it != this->clients.end())
@@ -266,58 +284,60 @@ public:
             client->queueCommandSend();
         }
     };
-    /* todo/31: called from the identify path once asset_id is resolved, before
-     * `newcomer` is marked identified. Finds any other live session(s) already
-     * identified for this asset_id and applies the configured policy.
+    /* todo/31, reworked for todo/44: called from the identify path once
+     * asset_id is resolved, before `newcomer` is marked identified. The
+     * duplicate check and the claim are one critical section over
+     * asset_owners: the first claimant records itself under `lock`, so a
+     * second connection identifying the same asset_id serialises here and
+     * sees the claim even though the winner has not yet published the id
+     * into its cached_asset_id. (The previous implementation checked a
+     * snapshot of *published* ids and left publication to the caller; two
+     * concurrent identifies could each miss the other's unpublished claim
+     * and both proceed — the todo/44 race.) Because claims are unique per
+     * asset_id, evict_oldest has exactly one owner to dethrone.
      *
-     * Narrow race: two brand-new connections identifying for the same asset_id
-     * at almost the same instant can each see the other as not-yet-identified
-     * (cached_asset_id still 0) and both proceed — the same class of benign
-     * race snapshotClients() already documents elsewhere (a client connected
-     * mid-iteration is covered by the caller's next pass). Not worth a second
-     * lock ordered with client_lock to close, given how rare simultaneous
-     * identify is in practice. Because that race can leave more than one
-     * pre-existing session behind for the same asset_id, evict_oldest below
-     * evicts every match found here, not just one — otherwise a later
-     * newcomer would clear only the first (by connection order, i.e. the
-     * actual oldest) and leave the rest alive.
-     *
-     * disconnect()+clientDisconnected() runs outside `lock`, same as
-     * disconnectRevokedClients()/checkTimeouts() elsewhere in this class:
-     * clientDisconnected() takes `lock` itself and the snapshot's shared_ptr
-     * keeps `existing` alive across the call, so this is safe by the same
-     * reasoning documented on snapshotClients() above — disconnect() blocks
-     * on socket I/O and joins the recv thread, which must never happen while
-     * holding `lock`. */
+     * The evictee's disconnect()+clientDisconnected() runs outside `lock`,
+     * same as disconnectRevokedClients()/checkTimeouts() elsewhere in this
+     * class: clientDisconnected() takes `lock` itself and the shared_ptr
+     * grabbed under the lock keeps the evictee alive across the call —
+     * disconnect() blocks on socket I/O and joins the recv thread, which
+     * must never happen while holding `lock`. */
     auto resolveDuplicateIdentity(flight_safety_system::server::fss_client *newcomer, uint64_t asset_id)
         -> bool override
     {
-        auto snapshot = this->snapshotClients();
-        bool has_existing =
-            std::any_of(snapshot.begin(), snapshot.end(), [newcomer, asset_id](const auto &client) -> bool {
-                return client.get() != newcomer && client->getCachedAssetId() == asset_id;
-            });
-        if (!has_existing)
+        std::shared_ptr<flight_safety_system::server::fss_client> evictee{};
         {
-            return true;
-        }
-        if (this->duplicate_identity_policy_ == flight_safety_system::server::duplicate_identity_reject_newcomer)
-        {
-            return false;
-        }
-        std::size_t evicted = 0;
-        for (const auto &client : snapshot)
-        {
-            if (client.get() != newcomer && client->getCachedAssetId() == asset_id)
+            std::scoped_lock guard(this->lock);
+            auto owner = this->asset_owners.find(asset_id);
+            if (owner != this->asset_owners.end() && owner->second != newcomer)
             {
-                client->disconnect();
-                this->clientDisconnected(client.get());
-                evicted++;
+                if (this->duplicate_identity_policy_ ==
+                    flight_safety_system::server::duplicate_identity_reject_newcomer)
+                {
+                    return false;
+                }
+                /* evict_oldest: dethrone the recorded owner. It may already
+                 * have left `clients` (concurrent teardown won the race to
+                 * clientDisconnected, which erases the claim under this same
+                 * lock — so this window is tiny); then there is nobody left
+                 * to disconnect and the claim simply transfers. */
+                auto it = std::find_if(this->clients.begin(), this->clients.end(),
+                                       [&owner](const auto &c) -> bool { return c.get() == owner->second; });
+                if (it != this->clients.end())
+                {
+                    evictee = *it;
+                }
             }
+            this->asset_owners[asset_id] = newcomer;
         }
-        FSS_LOG_WARN("server", "Duplicate identity for asset_id "
-                                   << asset_id << ": evicted " << evicted
-                                   << " existing session(s) (duplicate_identity_evict_oldest)");
+        if (evictee != nullptr)
+        {
+            evictee->disconnect();
+            this->clientDisconnected(evictee.get());
+            FSS_LOG_WARN("server", "Duplicate identity for asset_id "
+                                       << asset_id
+                                       << ": evicted the existing session (duplicate_identity_evict_oldest)");
+        }
         return true;
     }
     auto disconnectRevokedClients(const std::string &crl_file) -> std::size_t

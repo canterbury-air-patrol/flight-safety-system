@@ -926,7 +926,10 @@ void fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss
                 /* todo/31: apply the configured duplicate-identity policy
                  * before this session is marked identified, so a rejected
                  * newcomer never gets far enough to receive commands or
-                 * have its telemetry stored against the shared asset_id. */
+                 * have its telemetry stored against the shared asset_id.
+                 * The handler reserves asset_id for this client atomically
+                 * with the check (todo/44); the store below publishes the
+                 * id for the poller and telemetry paths. */
                 if (!this->client_handler->resolveDuplicateIdentity(this, asset_id))
                 {
                     FSS_LOG_WARN("server", "Rejecting duplicate identity for asset_id "
