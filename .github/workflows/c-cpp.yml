@@ -245,13 +245,13 @@ jobs:
     - uses: actions/checkout@v7
 
     - name: Download Catch2 traceability artifact
-      uses: actions/download-artifact@v7
+      uses: actions/download-artifact@v8
       with:
         name: catch2-traceability
         path: tests
 
     - name: Download e2e traceability artifact
-      uses: actions/download-artifact@v7
+      uses: actions/download-artifact@v8
       with:
         name: e2e-traceability
         path: e2e
