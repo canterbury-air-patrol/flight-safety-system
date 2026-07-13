@@ -207,8 +207,13 @@ public:
      * rejected outright (duplicate_identity_reject_newcomer hit an existing
      * live session for this asset_id); true otherwise — no conflict, or the
      * existing session was evicted (duplicate_identity_evict_oldest) and
-     * `newcomer` may proceed. Default no-op always returns true (no dedup),
-     * so existing fss_client_handler test mocks need not implement this. */
+     * `newcomer` may proceed. The caller publishes into cached_asset_id only
+     * after a true return, so an implementation must make the duplicate
+     * check atomic with an internal reservation of asset_id for `newcomer`
+     * (todo/44) — a check against published ids alone races a concurrent
+     * identify for the same asset — and release the reservation when the
+     * client disconnects. Default no-op always returns true (no dedup), so
+     * existing fss_client_handler test mocks need not implement this. */
     virtual auto resolveDuplicateIdentity(fss_client * /*newcomer*/, uint64_t /*asset_id*/) -> bool { return true; }
 };
 

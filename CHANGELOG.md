@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Duplicate-identity resolution is now atomic: `server_clients` records an
+  asset-id claim under its lock at identify time (released on disconnect),
+  where it previously checked a snapshot of already-published ids and let
+  the caller publish later — two connections identifying the same asset at
+  the same instant could each miss the other's unpublished claim and both go
+  live, violating both `duplicate_identity_policy` contracts (commands
+  delivered to two sessions presenting the same aircraft identity, telemetry
+  from two sources stored under one asset). (todo/44)
+
 ## [1.1.1] - 2026-07-06
 
 ### Fixed
