@@ -8,6 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- A dropped command dispatch/ack DB write now trips the fail-safe (severing
+  every client) instead of only logging a counter change while the server
+  kept flying aircraft on an audit trail it knew was broken. (todo/45)
+- The DB fail-safe now latches: a trip raises an admission gate before the
+  severance, and new sessions are refused until the write queue has drained
+  and stayed quiet for `db_write_failure_recovery_grace_secs`. Previously a
+  write-only DB failure (reads fine, writes failing — e.g. a wedged write
+  connection or an insert-only fault) flapped every aircraft in and out of
+  comms-loss RTL on a ~7 s period: severed, re-identified via the working
+  read path, severed again. Both fail-safe triggers (sustained write
+  failure, todo/34; command drop, todo/45) share the one degraded-state
+  machine (`src/server-failsafe.hpp`) and recovery gate. (todo/47)
+- A single transient DB write failure no longer severs the fleet: the
+  fail-safe trip now requires failures genuinely spanning
+  `db_write_failure_disconnect_ticks`. The todo/34 tracker documented this
+  intent but tripped anyway whenever the recovery grace exceeded the
+  disconnect threshold — the default configuration.
 - Duplicate-identity resolution is now atomic: `server_clients` records an
   asset-id claim under its lock at identify time (released on disconnect),
   where it previously checked a snapshot of already-published ids and let
