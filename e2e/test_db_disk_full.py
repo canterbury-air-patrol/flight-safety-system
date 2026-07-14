@@ -263,9 +263,11 @@ def test_disk_full_fails_visibly_and_a_fresh_instance_recovers(certs_dir, tmp_pa
         # stay a silently-kept-alive one -- give the streak/incident guard
         # its own window (db_write_failure_disconnect_ticks, default 5s,
         # plus margin) *after* the first failure was already observed
-        # above, rather than checking instantly.
+        # above, rather than checking instantly. (todo/45+47 unified the
+        # severance into the "DB fail-safe tripped ... severed N
+        # connection(s)" message.)
         def severed() -> bool:
-            return "severing" in server["log"].read_text(errors="replace")
+            return "DB fail-safe tripped" in server["log"].read_text(errors="replace")
 
         assert _wait_for(severed, timeout=30.0), (
             "server logged write failures but never severed the session\n"

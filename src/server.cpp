@@ -4,6 +4,7 @@
 #include "fss.hpp"
 #include "fss-server.hpp"
 #include "server-clients.hpp"
+#include "server-failsafe.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -50,58 +51,6 @@ auto read_tcp_port(const Json::Value &node, const char *path, int &out) -> bool
     out = port;
     return true;
 }
-
-/* todo/34 (PR #327 review): tracks a *wall-clock* DB-write-failure incident
- * for the main loop's sustained-failure guard, not a per-tick consecutive-
- * growth counter -- real write traffic (position/status/search) only lands
- * every position_interval (5s default), so failures arrive in bursts with
- * quiet once-per-second checks in between; a counter reset by any quiet
- * tick could never reach its threshold under normal telemetry cadence.
- * tick() is called once per second (elapsed_secs is this tracker's own
- * count, so it is directly in seconds, unlike tick_counter which advances
- * every command_poll_ms). */
-class db_write_failure_incident_tracker {
-private:
-    uint64_t elapsed_secs{0};
-    uint64_t incident_start_secs{0}; // 0 = no active incident
-    uint64_t last_new_failure_secs{0};
-    uint64_t recovery_grace_secs;
-public:
-    explicit db_write_failure_incident_tracker(uint64_t t_recovery_grace_secs)
-        : recovery_grace_secs(t_recovery_grace_secs)
-    {
-    }
-    /* Advances one second. If new_failure is set, registers it as (still)
-     * part of the current incident, starting one if none is active.
-     * Otherwise, a quiet tick clears a stale incident once it has gone
-     * recovery_grace_secs without a new failure -- comfortably longer than
-     * any realistic telemetry cadence, so a future failure starts a fresh
-     * incident rather than inheriting this one's age. Returns the active
-     * incident's age in seconds, or 0 if none is active. */
-    auto tick(bool new_failure) -> uint64_t
-    {
-        elapsed_secs++;
-        if (new_failure)
-        {
-            if (incident_start_secs == 0)
-            {
-                incident_start_secs = elapsed_secs;
-            }
-            last_new_failure_secs = elapsed_secs;
-        }
-        else if (incident_start_secs != 0 && (elapsed_secs - last_new_failure_secs) > recovery_grace_secs)
-        {
-            incident_start_secs = 0;
-        }
-        return incident_start_secs == 0 ? 0 : elapsed_secs - incident_start_secs;
-    }
-    /* Distinct from "age() == 0": age() also reads 0 while an incident is
-     * merely one tick old, so a disconnect-ticks threshold of 0 must not be
-     * indistinguishable from "no incident at all" -- callers gate on this
-     * first. */
-    [[nodiscard]] auto active() const -> bool { return incident_start_secs != 0; }
-    void reset() { incident_start_secs = 0; }
-};
 
 } // namespace
 
@@ -161,17 +110,19 @@ auto main(int argc, char *argv[]) -> int
     constexpr uint64_t default_rate_refill_per_s = 20;
     constexpr auto default_duplicate_identity_policy = flight_safety_system::server::duplicate_identity_reject_newcomer;
     /* todo/34: default 5s age for a sustained DB-write-failure incident
-     * (see db_write_failure_incident_tracker above) before severing every
-     * connected client. A single transient failure never trips this -- the
-     * incident only persists while failures keep recurring within
-     * default_db_write_failure_recovery_grace_secs of each other; only
-     * sustained failure -- what disk-full looks like -- reaches the age
-     * threshold. */
+     * (see server-failsafe.hpp) before the fail-safe trips: every connected
+     * client is severed and new sessions are refused (todo/45+47). A single
+     * transient failure never trips this -- the trip requires a new failure
+     * arriving once the incident spans the threshold, so only sustained
+     * failure -- what disk-full looks like -- can fire it. Command
+     * dispatch/ack drops trip unconditionally, with no threshold (todo/45). */
     constexpr uint64_t default_db_write_failure_disconnect_ticks = 5;
-    /* How long a DB-write-failure incident stays "active" with no new
-     * failure before being considered recovered (PR #327 review: this was
-     * hardcoded; now configurable like the threshold above, for
-     * deployments whose telemetry cadence differs from the 5s default). */
+    /* Two roles (same meaning: how long with no new failure before the
+     * incident is considered over). Outside a trip: how long failures may
+     * pause and still chain into one incident (PR #327 review: configurable
+     * for deployments whose telemetry cadence differs from the 5s default).
+     * While degraded: the quiet window that, once the write queue has also
+     * drained, ends the degraded state and readmits sessions (todo/47). */
     constexpr uint64_t default_db_write_failure_recovery_grace_secs = 15;
     constexpr unsigned int default_tls_handshake_timeout_ms =
         flight_safety_system::transport_ssl::default_handshake_timeout_ms;
@@ -472,30 +423,55 @@ auto main(int argc, char *argv[]) -> int
                 clients->cleanupRemovableClients();
                 clients->checkTimeouts();
                 clients->sendRTTRequest();
+                using flight_safety_system::server::db_failsafe;
                 static uint64_t last_failure_count = 0;
-                static db_write_failure_incident_tracker db_incident(db_write_failure_recovery_grace_secs);
+                static uint64_t last_command_dropped = 0;
+                static db_failsafe failsafe(db_write_failure_disconnect_ticks, db_write_failure_recovery_grace_secs);
                 uint64_t current_failures = writer->write_failure_count();
-                bool new_failure = current_failures != last_failure_count;
-                if (new_failure)
+                if (current_failures != last_failure_count)
                 {
-                    FSS_LOG_ERROR("server", "DB write failures since start: " << current_failures);
+                    FSS_LOG_ERROR("server", "DB write failures since start: " << current_failures << " (was "
+                                                                              << last_failure_count << ")");
                     last_failure_count = current_failures;
                 }
-                uint64_t incident_age_secs = db_incident.tick(new_failure);
-                if (db_incident.active() && incident_age_secs >= db_write_failure_disconnect_ticks)
-                {
-                    auto severed = clients->disconnectAll();
-                    FSS_LOG_ERROR("server", "DB writes have been failing for "
-                                                << incident_age_secs << "s; severing " << severed
-                                                << " connection(s) rather than silently discarding telemetry");
-                    db_incident.reset();
-                }
-                static uint64_t last_command_dropped = 0;
                 uint64_t current_command_dropped = writer->command_dropped_count();
                 if (current_command_dropped != last_command_dropped)
                 {
-                    FSS_LOG_ERROR("server", "command DB writes dropped since start: " << current_command_dropped);
+                    FSS_LOG_ERROR("server", "command DB writes dropped since start: "
+                                                << current_command_dropped << " (was " << last_command_dropped << ")");
                     last_command_dropped = current_command_dropped;
+                }
+                /* todo/45+47: one fail-safe for both triggers. On a trip the
+                 * gate goes up *before* the severance so no connection can
+                 * slip between the snapshot and the gate (see
+                 * server_clients::degraded_); it stays up until the write
+                 * queue has drained and been quiet for the recovery grace,
+                 * so aircraft get one latched comms-loss event instead of a
+                 * disconnect/reconnect flap into the same unhealthy server.
+                 * Recovery logs at ERROR like the trip: supervision watching
+                 * for the fail-safe must see both edges at one level. */
+                switch (failsafe.tick(current_failures, current_command_dropped, writer->pending_count()))
+                {
+                    case db_failsafe::event::tripped: {
+                        clients->setDegraded(true);
+                        auto severed = clients->disconnectAll();
+                        FSS_LOG_ERROR("server", "DB fail-safe tripped ("
+                                                    << (failsafe.reason() == db_failsafe::trip_reason::command_drop
+                                                            ? "a command dispatch/ack DB write was dropped — audit "
+                                                              "state destroyed"
+                                                            : "sustained DB write failures")
+                                                    << "); severed " << severed
+                                                    << " connection(s) and refusing new sessions until the write "
+                                                       "queue drains and stays quiet");
+                        break;
+                    }
+                    case db_failsafe::event::recovered:
+                        clients->setDegraded(false);
+                        FSS_LOG_ERROR("server", "DB fail-safe recovered: write queue drained and quiet for "
+                                                    << db_write_failure_recovery_grace_secs
+                                                    << "s; accepting sessions again");
+                        break;
+                    case db_failsafe::event::none: break;
                 }
                 dbc->tryReconnectIfNeeded();
             }
