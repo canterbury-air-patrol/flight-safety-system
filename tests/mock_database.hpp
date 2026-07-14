@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -181,8 +182,11 @@ public:
     }
 
     /* Number of getSmmSettings calls — lets tests assert that send paths
-     * use the cache rather than re-reading the database. */
-    int smm_reads{0};
+     * use the cache rather than re-reading the database. Atomic because
+     * concurrent-identify tests (todo/44) drive refreshSmmSettings() from
+     * two threads at once; the smm map itself stays unguarded like the other
+     * read-side maps (set up before any threads run, const find() after). */
+    std::atomic<int> smm_reads{0};
 
     auto isConnected() const -> bool override { return true; }
     void tryReconnectIfNeeded() override {}

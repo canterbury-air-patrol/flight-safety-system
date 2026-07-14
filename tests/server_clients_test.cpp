@@ -850,6 +850,65 @@ TEST_CASE("server_clients: a claim that never published is still released on dis
     REQUIRE(sc.resolveDuplicateIdentity(second.get(), 42));
 }
 
+TEST_CASE("server_clients: a stale claim owner is reported loudly under evict_oldest (todo/44, PR #328 review)")
+{
+    /* Claim-map invariant: a recorded owner is always still in `clients`
+     * (clientDisconnected releases claims in the same critical section that
+     * removes the client). Violate it deliberately — claim via a client never
+     * registered through clientConnected() — and require the breach to
+     * surface as an ERROR while behaviour stays unchanged: evict_oldest still
+     * admits the newcomer, with nobody to evict, and transfers the claim. */
+    server_clients sc;
+    sc.setDuplicateIdentityPolicy(fss::server::duplicate_identity_evict_oldest);
+    fss_test::MockDatabase mock;
+
+    auto conn1 = std::make_shared<FakeConnection>();
+    auto writer1 = make_null_writer();
+    /* Deliberately NOT clientConnected: the claim's owner is unknown to the
+     * client list, modelling a removal path that forgot to release it. */
+    auto stale = std::make_shared<fss::server::fss_client>(conn1, &mock, writer1, &sc);
+    REQUIRE(sc.resolveDuplicateIdentity(stale.get(), 42));
+
+    auto conn2 = std::make_shared<FakeConnection>();
+    auto writer2 = make_null_writer();
+    auto newcomer = std::make_shared<fss::server::fss_client>(conn2, &mock, writer2, &sc);
+    sc.clientConnected(newcomer);
+
+    fss_test::capture_cerr capture;
+    REQUIRE(sc.resolveDuplicateIdentity(newcomer.get(), 42));
+    REQUIRE(capture.str().find("invariant breach") != std::string::npos);
+
+    /* Nobody was evicted — the registered newcomer is the only live session,
+     * and it now owns the claim (a third resolve for the same id must see a
+     * conflict again). */
+    sc.cleanupRemovableClients();
+    REQUIRE(sc.getTotalClients() == 1);
+}
+
+TEST_CASE("server_clients: a stale claim owner is reported loudly under reject_newcomer (todo/44, PR #328 review)")
+{
+    /* Same deliberate breach under the default policy: the newcomer is still
+     * refused (the conservative outcome — a stale claim must not silently
+     * hand the identity over), but the breach is visible as an ERROR rather
+     * than looking like an ordinary duplicate rejection. */
+    server_clients sc;
+    fss_test::MockDatabase mock;
+
+    auto conn1 = std::make_shared<FakeConnection>();
+    auto writer1 = make_null_writer();
+    auto stale = std::make_shared<fss::server::fss_client>(conn1, &mock, writer1, &sc);
+    REQUIRE(sc.resolveDuplicateIdentity(stale.get(), 42));
+
+    auto conn2 = std::make_shared<FakeConnection>();
+    auto writer2 = make_null_writer();
+    auto newcomer = std::make_shared<fss::server::fss_client>(conn2, &mock, writer2, &sc);
+    sc.clientConnected(newcomer);
+
+    fss_test::capture_cerr capture;
+    REQUIRE_FALSE(sc.resolveDuplicateIdentity(newcomer.get(), 42));
+    REQUIRE(capture.str().find("invariant breach") != std::string::npos);
+}
+
 TEST_CASE("server_clients: disconnectAll severs every live session (todo/34)")
 {
     /* Unconditional counterpart of disconnectRevokedClients, used by the
