@@ -26,6 +26,16 @@ private:
     uint64_t rate_refill_per_s{20};
     flight_safety_system::server::duplicate_identity_policy duplicate_identity_policy_{
         flight_safety_system::server::duplicate_identity_reject_newcomer};
+    /* todo/45+47: while the DB fail-safe is degraded, new sessions are
+     * refused at clientConnected() so aircraft get one latched comms-loss
+     * event instead of reconnecting straight back into a server that cannot
+     * durably record telemetry or command state. Guarded by lock — the gate
+     * check shares the critical section that admits into `clients`, so with
+     * the main loop setting the gate *before* disconnectAll(), a concurrent
+     * connection either lands in the list before the gate is up (and is
+     * severed by the snapshot) or is refused; there is no interleaving that
+     * slips a live session past the fail-safe. */
+    bool degraded_{false};
     /* Which live client currently holds each asset_id (todo/44). Guarded by
      * lock. A claim is recorded in resolveDuplicateIdentity() atomically with
      * the duplicate check — i.e. before the winning client has published the
@@ -134,6 +144,15 @@ public:
     {
         this->duplicate_identity_policy_ = policy;
     }
+    /* todo/45+47: raise/lower the fail-safe admission gate (see degraded_
+     * above). The main loop sets true immediately before disconnectAll() on a
+     * fail-safe trip, and false once the db_failsafe monitor reports
+     * recovery. */
+    void setDegraded(bool degraded)
+    {
+        std::scoped_lock guard(this->lock);
+        this->degraded_ = degraded;
+    }
     void clientConnected(std::shared_ptr<flight_safety_system::server::fss_client> client)
     {
         /* Apply config before wiring the connection's message handler: the
@@ -145,10 +164,26 @@ public:
         client->setStalenessMs(this->position_staleness_ms);
         client->setRateLimits(this->rate_capacity, this->rate_refill_per_s);
         auto *raw = client.get();
+        bool refused = false;
         {
             std::scoped_lock guard(this->lock);
-            this->total_clients++;
-            this->clients.push_back(std::move(client));
+            refused = this->degraded_;
+            if (!refused)
+            {
+                this->total_clients++;
+                this->clients.push_back(std::move(client));
+            }
+        }
+        if (refused)
+        {
+            /* Sever outside the lock (disconnect() joins the recv thread —
+             * see cleanupRemovableClients). The client was never admitted or
+             * activated, so nothing else references it and it dies with
+             * `client` when this frame returns. */
+            FSS_LOG_WARN("server", "Refusing new client: DB fail-safe is degraded; "
+                                   "admission resumes once the recovery condition clears");
+            raw->disconnect();
+            return;
         }
         /* Register only after the client is in the list, so a queued message
          * flushed by activate() that triggers clientDisconnected can find it. */
