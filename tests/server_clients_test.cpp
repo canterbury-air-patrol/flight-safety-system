@@ -68,9 +68,14 @@ public:
     }
     void disconnect() override
     {
+        this->disconnect_calls++;
         this->setBlocked(false);
         fss::transport::fss_connection::disconnect();
     }
+    /* How many times disconnect() has run. fss_client teardown calls it
+     * again, so tests assert `> 0` at the moment of interest rather than an
+     * exact count. Atomic: disconnect can run on another thread. */
+    std::atomic<int> disconnect_calls{0};
 protected:
     auto sendMsg(const std::shared_ptr<fss::transport::buf_len> &bl) -> bool override
     {
@@ -935,4 +940,82 @@ TEST_CASE("server_clients: disconnectAll severs every live session (todo/34)")
 
     sc.cleanupRemovableClients();
     REQUIRE(sc.getTotalClients() == 0);
+}
+
+TEST_CASE("server_clients: degraded gate refuses new sessions (todo/47)")
+{
+    server_clients sc;
+    fss_test::MockDatabase mock;
+    fss_test::scoped_log_level log_guard("error");
+
+    sc.setDegraded(true);
+
+    auto conn = std::make_shared<FakeConnection>();
+    auto writer = make_null_writer();
+    auto client = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &sc);
+    sc.clientConnected(client);
+
+    /* Never admitted: no session slot, and the connection was severed. */
+    REQUIRE(sc.getTotalClients() == 0);
+    REQUIRE(conn->disconnect_calls > 0);
+}
+
+TEST_CASE("server_clients: clearing the degraded gate readmits sessions (todo/47)")
+{
+    server_clients sc;
+    fss_test::MockDatabase mock;
+    fss_test::scoped_log_level log_guard("error");
+
+    sc.setDegraded(true);
+    {
+        auto conn = std::make_shared<FakeConnection>();
+        auto writer = make_null_writer();
+        auto refused = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &sc);
+        sc.clientConnected(refused);
+        REQUIRE(sc.getTotalClients() == 0);
+    }
+
+    sc.setDegraded(false);
+    /* A full identify must succeed post-recovery, not just raw admission. */
+    auto client = make_aircraft_client("craft-recovered", mock, sc);
+    sc.clientConnected(client);
+    REQUIRE(sc.getTotalClients() == 1);
+    REQUIRE(client->isAircraft());
+}
+
+TEST_CASE("server_clients: gate-then-sever leaves no session live or admissible (todo/45+47)")
+{
+    /* The main loop's trip sequence: setDegraded(true) *then* disconnectAll().
+     * Afterwards no pre-trip session survives and no new session can enter,
+     * which is the property that turns the fail-safe from a reconnect flap
+     * into one latched comms-loss event. */
+    server_clients sc;
+    fss_test::MockDatabase mock;
+    fss_test::scoped_log_level log_guard("error");
+
+    auto craft1 = make_aircraft_client("craft1", mock, sc);
+    auto craft2 = make_aircraft_client("craft2", mock, sc);
+    sc.clientConnected(craft1);
+    sc.clientConnected(craft2);
+    REQUIRE(sc.getTotalClients() == 2);
+
+    sc.setDegraded(true);
+    REQUIRE(sc.disconnectAll() == 2);
+    sc.cleanupRemovableClients();
+    REQUIRE(sc.getTotalClients() == 0);
+
+    /* The severed aircraft's immediate reconnect attempt is refused. */
+    auto reconnect_conn = std::make_shared<FakeConnection>();
+    reconnect_conn->cert_names.push_back("craft1");
+    auto reconnect_writer = make_null_writer();
+    auto reconnecting = std::make_shared<fss::server::fss_client>(reconnect_conn, &mock, reconnect_writer, &sc);
+    sc.clientConnected(reconnecting);
+    REQUIRE(sc.getTotalClients() == 0);
+    REQUIRE(reconnect_conn->disconnect_calls > 0);
+
+    /* Recovery lifts the gate and the same asset can come back. */
+    sc.setDegraded(false);
+    auto returned = make_aircraft_client("craft1", mock, sc);
+    sc.clientConnected(returned);
+    REQUIRE(sc.getTotalClients() == 1);
 }
