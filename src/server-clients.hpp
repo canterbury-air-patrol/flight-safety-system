@@ -65,6 +65,11 @@ public:
         std::list<std::shared_ptr<flight_safety_system::server::fss_client>> doomed;
         {
             std::scoped_lock guard(this->lock);
+            /* Claims die with the client list, so a straggling identify on a
+             * recv thread not yet joined below sees a consistently empty map
+             * rather than owners that are no longer in `clients` (which
+             * resolveDuplicateIdentity would report as an invariant breach). */
+            this->asset_owners.clear();
             doomed.splice(doomed.end(), this->clients);
             while (!this->disconnected.empty())
             {
@@ -306,29 +311,57 @@ public:
         -> bool override
     {
         std::shared_ptr<flight_safety_system::server::fss_client> evictee{};
+        bool reject = false;
+        bool stale_owner = false;
         {
             std::scoped_lock guard(this->lock);
             auto owner = this->asset_owners.find(asset_id);
             if (owner != this->asset_owners.end() && owner->second != newcomer)
             {
+                /* Invariant: a recorded owner is always still in `clients`.
+                 * clientDisconnected() erases the claim in the same critical
+                 * section that removes the client, and ~server_clients clears
+                 * the map alongside the list, so a miss here means some
+                 * removal path failed to release its claim. That breach must
+                 * not stay silent: under reject_newcomer the asset would be
+                 * refused forever; under evict_oldest the "eviction" severs
+                 * nobody while resolve still reports success. Behaviour is
+                 * unchanged either way (reject still rejects; evict_oldest
+                 * transfers the claim with nobody to disconnect) — the ERROR
+                 * below (logged outside the lock, like every other nontrivial
+                 * action in this class) is what makes the breach visible. */
+                auto it = std::find_if(this->clients.begin(), this->clients.end(),
+                                       [&owner](const auto &c) -> bool { return c.get() == owner->second; });
+                stale_owner = it == this->clients.end();
                 if (this->duplicate_identity_policy_ ==
                     flight_safety_system::server::duplicate_identity_reject_newcomer)
                 {
-                    return false;
+                    reject = true;
                 }
-                /* evict_oldest: dethrone the recorded owner. It may already
-                 * have left `clients` (concurrent teardown won the race to
-                 * clientDisconnected, which erases the claim under this same
-                 * lock — so this window is tiny); then there is nobody left
-                 * to disconnect and the claim simply transfers. */
-                auto it = std::find_if(this->clients.begin(), this->clients.end(),
-                                       [&owner](const auto &c) -> bool { return c.get() == owner->second; });
-                if (it != this->clients.end())
+                else
                 {
-                    evictee = *it;
+                    if (!stale_owner)
+                    {
+                        evictee = *it;
+                    }
+                    this->asset_owners[asset_id] = newcomer;
                 }
             }
-            this->asset_owners[asset_id] = newcomer;
+            else
+            {
+                this->asset_owners[asset_id] = newcomer;
+            }
+        }
+        if (stale_owner)
+        {
+            FSS_LOG_ERROR("server", "Duplicate identity for asset_id "
+                                        << asset_id
+                                        << ": recorded claim owner is not in the live client list — a client-removal "
+                                           "path failed to release its claim (invariant breach)");
+        }
+        if (reject)
+        {
+            return false;
         }
         if (evictee != nullptr)
         {
