@@ -51,6 +51,14 @@ public:
         std::cout << "RCVD_POS: icao=" << icao_hex.str() << " callsign=" << msg->getCallSign()
                   << " lat=" << msg->getLatitude() << " lng=" << msg->getLongitude() << std::endl;
     }
+    /* The server sends RTT requests from its per-second liveness tick, so
+     * this line is an externally observable "the main loop still runs"
+     * signal — e2e's DB black-hole test counts these while the DB is wedged
+     * (todo/46). */
+    void handleRTTRequest(const std::shared_ptr<fss::transport::fss_message_rtt_request> &msg) override
+    {
+        std::cout << "RCVD_RTT_REQ: id=" << msg->getId() << std::endl;
+    }
     void handleCommandFrom(const std::shared_ptr<fss::transport::fss_message_asset_command> &msg,
                            fss::client_ssl::fss_server *origin) override
     {

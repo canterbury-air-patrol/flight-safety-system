@@ -415,6 +415,11 @@ void flight_safety_system::client_ssl::fss_client::handleSMMSettings(
 {
 }
 
+void flight_safety_system::client_ssl::fss_client::handleRTTRequest(
+    const std::shared_ptr<flight_safety_system::transport::fss_message_rtt_request> &msg __attribute__((unused)))
+{
+}
+
 flight_safety_system::client_ssl::fss_server::fss_server(flight_safety_system::client_ssl::fss_client *t_client,
                                                          std::string t_address, uint16_t t_port, std::string t_ca,
                                                          std::string t_private_key, std::string t_public_key)
@@ -627,6 +632,14 @@ void flight_safety_system::client_ssl::fss_server::processMessage(
                                                                                                       skewed_timestamp)
                         : std::make_shared<flight_safety_system::transport::fss_message_rtt_response>(msg->getId());
                 this->sendMsg(reply_msg);
+                /* Notify after replying: the reply is the time-critical
+                 * half, the hook only observes (see fss-client-ssl.hpp). */
+                auto rtt_req_msg =
+                    std::dynamic_pointer_cast<flight_safety_system::transport::fss_message_rtt_request>(msg);
+                if (rtt_req_msg != nullptr)
+                {
+                    this->getClient()->handleRTTRequest(rtt_req_msg);
+                }
             }
             break;
             case flight_safety_system::transport::message_type_rtt_response:

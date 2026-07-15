@@ -102,6 +102,13 @@ public:
                          __attribute__((unused)));
     virtual void handleSMMSettings(const std::shared_ptr<flight_safety_system::transport::fss_message_smm_settings> &msg
                                    __attribute__((unused)));
+    /* Notification that an RTT liveness request arrived; the reply has
+     * already been sent by the transport handler, so an override observes
+     * rather than answers. Exists so a test client can surface the server's
+     * liveness tick externally — e2e's DB black-hole test asserts these keep
+     * arriving while both DB connections are wedged (todo/46). */
+    virtual void handleRTTRequest(const std::shared_ptr<flight_safety_system::transport::fss_message_rtt_request> &msg
+                                  __attribute__((unused)));
 };
 
 class fss_server : public flight_safety_system::transport::fss_message_cb {
