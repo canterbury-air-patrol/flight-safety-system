@@ -751,6 +751,32 @@ TEST_CASE("server_clients: concurrent identifies under evict_oldest leave exactl
     REQUIRE(sc.getTotalClients() == 1);
 }
 
+TEST_CASE("server_clients: a message processed after teardown is a no-op, not a crash")
+{
+    /* Distilled from a TSan CI crash (PR #332): under evict_oldest, the
+     * evictor's disconnect() clears the victim's connection while the
+     * victim's identify is still in flight, and the identify tail called
+     * getConnection()->sendMsg() with no null guard. In production the
+     * recv-thread join inside disconnect() serialises the two, but the
+     * contract is subtle enough to pin: processMessage on a torn-down
+     * client must complete harmlessly. */
+    server_clients sc;
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft1"] = 1;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft1");
+    auto writer = make_null_writer();
+    auto client = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &sc);
+    sc.clientConnected(client);
+
+    client->disconnect(); // clears the connection out from under later calls
+
+    client->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft1"));
+    REQUIRE(!client->isAircraft());
+    REQUIRE(client->getCachedAssetId() == 0);
+}
+
 TEST_CASE("server_clients: distinct asset ids still identify concurrently (todo/44)")
 {
     /* Closing the duplicate race must not serialise or reject unrelated

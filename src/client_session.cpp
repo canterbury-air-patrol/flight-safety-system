@@ -526,7 +526,11 @@ void fss::server::fss_client::sendCommand()
         this->last_command_dbid = dbid;
     } // client_lock released before the blocking send
 
-    if (!this->getConnection()->sendMsg(msg))
+    /* Null-safe base-class sendMsg: sendCommand() is called from the identify
+     * path, which can lose its connection to a concurrent evict_oldest
+     * teardown (see the pinned-connection note in processMessage); a cleared
+     * connection reads as a failed send, taking the retry branch below. */
+    if (!this->sendMsg(msg))
     {
         /* The socket write failed, so the command never reached the aircraft.
          * Undo the claim above so the command is retried on the next send tick
@@ -757,7 +761,9 @@ void fss::server::fss_client::sendSMMSettings()
     {
         auto settings_msg = std::make_shared<fss::transport::fss_message_smm_settings>(
             smm->getAddress(), smm->getUsername(), smm->getPassword());
-        this->getConnection()->sendMsg(settings_msg);
+        /* Null-safe base-class sendMsg: also reached from the identify path,
+         * same concurrent-teardown hazard as sendCommand(). */
+        this->sendMsg(settings_msg);
     }
 }
 
@@ -790,6 +796,19 @@ void fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss
                                        << " client disconnected: " << this->getName());
         }
         this->client_handler->clientDisconnected(this);
+        return;
+    }
+    /* Pin the connection for the remainder of this message (PR #332 TSan
+     * crash): a concurrent teardown — e.g. duplicate_identity_evict_oldest
+     * severing this client while its identify is still in flight — clears
+     * the base class's pointer, and the only production protection is the
+     * recv-thread join inside disconnect(), which callers off the recv
+     * thread do not get. The local shared_ptr keeps the connection alive
+     * and non-null for the whole call; after teardown its fd is closed, so
+     * sends simply fail, exactly like any mid-message disconnect. */
+    auto active_conn = this->getConnection();
+    if (active_conn == nullptr)
+    {
         return;
     }
     if (msg->getType() == fss::transport::message_type_version)
@@ -835,8 +854,8 @@ void fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss
                 return;
             }
             uint16_t negotiated = std::min(peer_version, fss::transport::FSS_PROTOCOL_VERSION);
-            this->getConnection()->setNegotiatedVersion(negotiated);
-            this->getConnection()->setNegotiatedFeatureFlags(
+            active_conn->setNegotiatedVersion(negotiated);
+            active_conn->setNegotiatedFeatureFlags(
                 fss::transport::negotiateFeatureFlags(version_msg->getFeatureFlags()));
             this->version_received = true;
             if (negotiated >= 2)
@@ -844,7 +863,7 @@ void fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss
                 this->expected_seq.store(msg->getId() + 1);
             }
             auto resp = std::make_shared<fss::transport::fss_message_version>();
-            this->getConnection()->sendMsg(resp);
+            active_conn->sendMsg(resp);
         }
         return;
     }
@@ -855,7 +874,7 @@ void fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss
      * replay defence. Under its security assumptions TLS already provides
      * replay and reorder protection at the record layer, so this check is not
      * relied upon to stop an attacker. */
-    if (this->getConnection()->getNegotiatedVersion() >= 2)
+    if (active_conn->getNegotiatedVersion() >= 2)
     {
         uint64_t wanted = this->expected_seq.load();
         if (wanted != 0)
@@ -901,7 +920,7 @@ void fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss
             if (identity_msg != nullptr)
             {
                 auto client_name = identity_msg->getName();
-                auto possible_names = this->getConnection()->getClientNames();
+                auto possible_names = active_conn->getClientNames();
                 bool name_valid = false;
                 if (possible_names.empty())
                 {
@@ -955,12 +974,12 @@ void fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss
                  * now rather than after the poller's next refresh. */
                 this->refreshSmmSettings();
                 this->sendSMMSettings();
-                this->getConnection()->sendMsg(getServersListMsg(this->dbc));
+                active_conn->sendMsg(getServersListMsg(this->dbc));
             }
         }
         else if (msg->getType() == fss::transport::message_type_identity_non_aircraft)
         {
-            auto possible_names = this->getConnection()->getClientNames();
+            auto possible_names = active_conn->getClientNames();
             if (possible_names.empty())
             {
                 FSS_LOG_ERROR("server", "Rejecting non-aircraft client: no CN found in certificate");
@@ -1074,7 +1093,7 @@ void fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss
             case fss::transport::message_type_version: break;
             case fss::transport::message_type_rtt_request: {
                 auto reply_msg = std::make_shared<fss::transport::fss_message_rtt_response>(msg->getId());
-                this->getConnection()->sendMsg(reply_msg);
+                active_conn->sendMsg(reply_msg);
             }
             break;
             case fss::transport::message_type_rtt_response: {
@@ -1131,8 +1150,7 @@ void fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss
                     /* RTT clock-offset (todo/17 item 3): only when the peer
                      * negotiated the capability — otherwise any trailing
                      * timestamp is not part of the agreed dialect and is ignored. */
-                    if ((this->getConnection()->getNegotiatedFeatureFlags() & fss::transport::FSS_FEATURE_RTT_OFFSET) !=
-                        0)
+                    if ((active_conn->getNegotiatedFeatureFlags() & fss::transport::FSS_FEATURE_RTT_OFFSET) != 0)
                     {
                         this->updateClockOffset(rtt_resp_msg->getClientTimestamp(), rtt_ms, recv_wall);
                     }
@@ -1233,7 +1251,7 @@ void fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss
                  * Only honour it when the peer negotiated the capability — a
                  * conforming client never sends one otherwise, so an ack without
                  * the flag is from a misbehaving/forged peer and is dropped. */
-                if ((this->getConnection()->getNegotiatedFeatureFlags() & fss::transport::FSS_FEATURE_COMMAND_ACK) == 0)
+                if ((active_conn->getNegotiatedFeatureFlags() & fss::transport::FSS_FEATURE_COMMAND_ACK) == 0)
                 {
                     break;
                 }
