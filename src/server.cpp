@@ -350,13 +350,17 @@ auto main(int argc, char *argv[]) -> int
         tls_handshake_timeout_ms, max_concurrent_handshakes);
 
     /* Main-loop DB contract: the loop below must make NO synchronous DB
-     * reads. Reads are handled exclusively by the command_poller thread
-     * below, which caches results: pending commands and SMM settings on
-     * each fss_client, and the active-server-list message on
-     * server_clients. The loop only calls sendCommand()/sendSMMSettings()/
-     * broadcastMsg() (all read caches), write-queue enqueues (async), and
-     * in-memory bookkeeping. A DB stall therefore cannot block heartbeats,
-     * timeout monitoring, or command dispatch.
+     * round-trips. Reads are handled exclusively by the command_poller
+     * thread below, which caches results: pending commands and SMM settings
+     * on each fss_client, and the active-server-list message on
+     * server_clients. The poller also owns the reconnect health checks
+     * (todo/46): db_ping is a live SELECT 1, and on a black-holed connection
+     * it blocks for the full in-flight TCP timeout, which must stall the
+     * poller (caches go stale), never command dispatch. The loop only calls
+     * sendCommand()/sendSMMSettings()/broadcastMsg() (all read caches),
+     * write-queue enqueues (async), and in-memory bookkeeping. A DB stall
+     * therefore cannot block heartbeats, timeout monitoring, or command
+     * dispatch.
      *
      * Split tick: sendCommand runs every command_poll_ms so safety-critical
      * commands (TERM, DISARM) reach aircraft in <=100ms instead of <=1s.
@@ -376,6 +380,15 @@ auto main(int argc, char *argv[]) -> int
         while (poll_running.load())
         {
             poll_guard.run([&]() -> void {
+                /* Reconnect health checks live here, not on the main loop
+                 * (todo/46): db_ping is a synchronous SELECT 1, and its
+                 * black-holed worst case must degrade to stale caches, not
+                 * stalled command dispatch. Reconnect-before-read so a
+                 * recovered connection serves this same tick. */
+                if ((poll_counter % ticks_per_sec) == 0)
+                {
+                    dbc->tryReconnectIfNeeded();
+                }
                 clients->pollCommands(dbc.get());
                 /* Config reads share the poller so the main loop never
                  * touches the DB. First refresh happens immediately
@@ -473,7 +486,6 @@ auto main(int argc, char *argv[]) -> int
                         break;
                     case db_failsafe::event::none: break;
                 }
-                dbc->tryReconnectIfNeeded();
             }
             if ((tick_counter % send_config_period_ticks) == 0)
             {
