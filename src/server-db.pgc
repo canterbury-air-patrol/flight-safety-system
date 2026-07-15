@@ -19,14 +19,23 @@
 
 int db_connect(const char *conn_arg, const char *host, int port, const char *user, const char *pass, const char *db)
 {
-    /* Set connect_timeout and TCP keepalives via environment variables.
-     * setenv is not thread-safe, and reconnects call db_connect with other
-     * threads live, so guard it to run only on the first call - which
-     * happens in the db_connection constructor before any threads exist.
-     * overwrite=0 preserves operator overrides from the real environment.
-     * keepalives_idle=10 / interval=5 / count=3 means the kernel declares
-     * the connection dead after 10 + 5*3 = 25 s of silence, replacing the
-     * OS default retransmit timeout of ~127 s. */
+    /* Set connect_timeout, TCP keepalives and the in-flight TCP timeout via
+     * environment variables. setenv is not thread-safe, and reconnects call
+     * db_connect with other threads live, so guard it to run only on the
+     * first call - which happens in the db_connection constructor before any
+     * threads exist. overwrite=0 preserves operator overrides from the real
+     * environment.
+     * keepalives_idle=10 / interval=5 / count=3 means the kernel declares an
+     * *idle* connection dead after 10 + 5*3 = 25 s of silence, replacing the
+     * OS default retransmit timeout of ~127 s. Keepalives do not govern a
+     * connection with data in flight: a query already sent to a black-holed
+     * peer sits in TCP retransmission for the kernel's ~15 min default.
+     * PGTCPUSERTIMEOUT (libpq tcp_user_timeout, in ms; PG 12+, Linux-only)
+     * bounds that case to the same 25 s clock (todo/46). statement_timeout
+     * is deliberately NOT set: it is enforced by the backend, so it bounds
+     * neither a frozen host nor a partition, and it would turn legitimate
+     * lock waits (e.g. a long EXCLUSIVE table lock the async writer is
+     * expected to ride out) into write failures feeding the DB fail-safe. */
     static int env_configured = 0;
     if (!env_configured)
     {
@@ -36,6 +45,7 @@ int db_connect(const char *conn_arg, const char *host, int port, const char *use
         setenv("PGKEEPALIVESIDLE",   "10", 0);
         setenv("PGKEEPALIVEINTERVAL","5",  0);
         setenv("PGKEEPALIVESCOUNT",  "3",  0);
+        setenv("PGTCPUSERTIMEOUT",   "25000", 0);
     }
 
     /* ECPG connection target: dbname@host:port */

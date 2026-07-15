@@ -33,6 +33,19 @@ TEST_CASE("db_connection: invalid host reports not connected")
     REQUIRE_FALSE(dbc.isConnected());
 }
 
+TEST_CASE("db_connection: construction bounds in-flight TCP stalls via PGTCPUSERTIMEOUT")
+{
+    /* db_connect()'s run-once env block must set PGTCPUSERTIMEOUT so a
+     * black-holed connection with a query in flight fails on the keepalive
+     * clock instead of the kernel's retransmission timeout (todo/46). Any
+     * construction latches the env block, connected or not. Only presence is
+     * asserted: overwrite=0 means an operator override must win, so the
+     * value may legitimately differ from the built-in default. */
+    flight_safety_system::server::db_connection dbc(
+        "db.invalid", 5432, "user", flight_safety_system::secure_string(std::string_view{"pass"}), "db");
+    REQUIRE(std::getenv("PGTCPUSERTIMEOUT") != nullptr);
+}
+
 namespace {
 
 /* Build a db_connection from the TEST_DB_* env vars and REQUIRE it has
