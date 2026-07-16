@@ -98,13 +98,18 @@ public:
     virtual void recordSearchStatus(uint64_t asset_id, uint64_t search_id, uint64_t completed, uint64_t total) = 0;
     /* Records the dispatch id (the per-connection message id the server stamped
      * on the command) against the command row, so a later ack can be matched to
-     * this specific command. */
+     * this specific command. Also reopens the row's ack cycle (clears the ack
+     * columns): the stored ack always describes the latest dispatch, and a
+     * terminal outcome is final only within its dispatch — see recordCommandAck. */
     virtual void recordCommandDispatch(uint64_t command_dbid, uint64_t dispatch_id) = 0;
-    /* Stores a command ack against the row whose (asset_id, dispatch_id) matches;
-     * never regresses an already-terminal outcome. dispatch_id is only
-     * per-connection unique, so asset_id scopes the match to the acking asset.
-     * ack_state/ack_reason are the fss_command_ack_outcome/fss_command_ack_reason
-     * ints. */
+    /* Stores a command ack against the row whose (asset_id, dispatch_id) matches.
+     * Terminal-transition policy (todo/48): a terminal outcome (actioned/
+     * superseded/rejected/noop) is final for its dispatch — the write is refused
+     * unless the stored state is empty or received, so neither a late "received"
+     * nor a second terminal can rewrite a settled outcome; a redispatch reopens
+     * the cycle. dispatch_id is only per-connection unique, so asset_id scopes
+     * the match to the acking asset. ack_state/ack_reason are the
+     * fss_command_ack_outcome/fss_command_ack_reason ints. */
     virtual void recordCommandAck(uint64_t asset_id, uint64_t dispatch_id, uint8_t ack_state, uint64_t ack_timestamp,
                                   uint8_t ack_reason) = 0;
     virtual auto getCommand(uint64_t asset_id) -> std::shared_ptr<asset_command> = 0;

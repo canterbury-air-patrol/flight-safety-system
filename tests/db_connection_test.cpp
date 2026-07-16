@@ -469,3 +469,92 @@ TEST_CASE("db_connection: recordCommandAck does not regress an already-terminal 
     REQUIRE(get_command_column(command_id, "ack_state") == "1");
     REQUIRE(get_command_column(command_id, "ack_timestamp") == "100");
 }
+
+TEST_CASE("db_connection: recordCommandAck refuses a second terminal outcome")
+{
+    /* todo/48: a terminal outcome is final for its dispatch. A later terminal
+     * ack (superseded/rejected/noop) from a buggy, misordered or forged peer
+     * must not rewrite a settled "actioned" in the audit record -- the
+     * query-enforced writable set is stored-state NULL or received only. */
+    LIVE_DB_OR_SKIP(dbc);
+    auto asset_id = dbc->getAssetId("test-asset");
+    REQUIRE(asset_id != 0);
+
+    const std::array<uint8_t, 3> later_terminals = {
+        static_cast<uint8_t>(flight_safety_system::transport::command_ack_superseded),
+        static_cast<uint8_t>(flight_safety_system::transport::command_ack_rejected),
+        static_cast<uint8_t>(flight_safety_system::transport::command_ack_noop),
+    };
+    uint64_t dispatch_id = 7770;
+    for (const auto later_state : later_terminals)
+    {
+        auto command_id = insert_test_command(asset_id);
+        dbc->recordCommandDispatch(command_id, dispatch_id);
+
+        dbc->recordCommandAck(asset_id, dispatch_id,
+                              static_cast<uint8_t>(flight_safety_system::transport::command_ack_actioned),
+                              uint64_t{100}, static_cast<uint8_t>(flight_safety_system::transport::supersede_none));
+        dbc->recordCommandAck(asset_id, dispatch_id, later_state, uint64_t{200},
+                              static_cast<uint8_t>(flight_safety_system::transport::supersede_low_battery));
+
+        REQUIRE(get_command_column(command_id, "ack_state") == "1");
+        REQUIRE(get_command_column(command_id, "ack_timestamp") == "100");
+        REQUIRE(get_command_column(command_id, "ack_superseded_by") == "0");
+        dispatch_id++;
+    }
+}
+
+TEST_CASE("db_connection: recordCommandAck admits the conforming received-then-terminal flow")
+{
+    /* The two-phase ack a conforming FMU sends (received, then exactly one
+     * terminal outcome) must be unaffected by the todo/48 finality guard. */
+    LIVE_DB_OR_SKIP(dbc);
+    auto asset_id = dbc->getAssetId("test-asset");
+    REQUIRE(asset_id != 0);
+    auto command_id = insert_test_command(asset_id);
+    dbc->recordCommandDispatch(command_id, uint64_t{7780});
+
+    dbc->recordCommandAck(asset_id, uint64_t{7780},
+                          static_cast<uint8_t>(flight_safety_system::transport::command_ack_received), uint64_t{100},
+                          static_cast<uint8_t>(flight_safety_system::transport::supersede_none));
+    REQUIRE(get_command_column(command_id, "ack_state") == "0");
+
+    dbc->recordCommandAck(asset_id, uint64_t{7780},
+                          static_cast<uint8_t>(flight_safety_system::transport::command_ack_actioned), uint64_t{200},
+                          static_cast<uint8_t>(flight_safety_system::transport::supersede_none));
+    REQUIRE(get_command_column(command_id, "ack_state") == "1");
+    REQUIRE(get_command_column(command_id, "ack_timestamp") == "200");
+}
+
+TEST_CASE("db_connection: recordCommandDispatch reopens the ack cycle")
+{
+    /* todo/48's finality is scoped to the latest dispatch: redelivery (identify
+     * resends the newest command on every reconnect) records a new dispatch,
+     * which clears the ack columns so the redelivered command's re-ack is
+     * admitted rather than refused as a duplicate terminal. Pinned end-to-end
+     * by test_server_restart.py's post-bounce re-ack check; this covers the
+     * same contract at the query level. */
+    LIVE_DB_OR_SKIP(dbc);
+    auto asset_id = dbc->getAssetId("test-asset");
+    REQUIRE(asset_id != 0);
+    auto command_id = insert_test_command(asset_id);
+    dbc->recordCommandDispatch(command_id, uint64_t{7790});
+    dbc->recordCommandAck(asset_id, uint64_t{7790},
+                          static_cast<uint8_t>(flight_safety_system::transport::command_ack_actioned), uint64_t{100},
+                          static_cast<uint8_t>(flight_safety_system::transport::supersede_none));
+    REQUIRE(get_command_column(command_id, "ack_state") == "1");
+
+    /* Redispatch (e.g. after a reconnect, with the new connection's id). */
+    dbc->recordCommandDispatch(command_id, uint64_t{7791});
+    REQUIRE(get_command_column(command_id, "ack_state").empty());
+    REQUIRE(get_command_column(command_id, "ack_timestamp").empty());
+    REQUIRE(get_command_column(command_id, "ack_superseded_by").empty());
+
+    /* The re-ack for the new delivery lands, terminal over the reopened row. */
+    dbc->recordCommandAck(asset_id, uint64_t{7791},
+                          static_cast<uint8_t>(flight_safety_system::transport::command_ack_superseded), uint64_t{200},
+                          static_cast<uint8_t>(flight_safety_system::transport::supersede_comms_loss));
+    REQUIRE(get_command_column(command_id, "ack_state") == "2");
+    REQUIRE(get_command_column(command_id, "ack_timestamp") == "200");
+    REQUIRE(get_command_column(command_id, "ack_superseded_by") == "2");
+}

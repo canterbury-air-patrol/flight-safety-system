@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- A terminal command-ack outcome (actioned/superseded/rejected/noop) is now
+  final for its dispatch: a later terminal ack — from a buggy, misordered or
+  forged peer — can no longer silently rewrite a settled outcome in the
+  command audit trail. The guard previously only stopped a late "received"
+  from regressing a terminal state. Redelivery still re-acks normally:
+  recording a dispatch reopens the row's ack cycle by clearing the ack
+  columns, so the stored ack always describes the latest dispatch. (todo/48)
 - A dropped command dispatch/ack DB write now trips the fail-safe (severing
   every client) instead of only logging a counter change while the server
   kept flying aircraft on an audit trail it knew was broken. (todo/45)
