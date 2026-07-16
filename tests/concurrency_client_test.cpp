@@ -16,6 +16,7 @@
 #include <list>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <queue>
 #include <string>
 #include <thread>
@@ -108,7 +109,11 @@ public:
     {
         return nullptr;
     }
-    auto getActiveServers() -> std::vector<flight_safety_system::server::fss_server_details> override { return {}; }
+    auto getActiveServers() -> std::optional<std::vector<flight_safety_system::server::fss_server_details>> override
+    {
+        /* An engaged empty vector: no servers configured, not a failed read. */
+        return std::vector<flight_safety_system::server::fss_server_details>{};
+    }
     auto getSmmSettings(uint64_t) -> std::shared_ptr<flight_safety_system::server::smm_settings> override
     {
         return nullptr;

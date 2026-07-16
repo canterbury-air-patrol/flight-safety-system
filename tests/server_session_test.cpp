@@ -30,6 +30,13 @@
 
 namespace fss = flight_safety_system;
 
+namespace flight_safety_system::server {
+/* Defined in client_session.cpp; not in the public header. Declared here the
+ * same way server.cpp declares it, so the poller's failed-read signal
+ * (nullptr, todo/24) can be pinned at unit level. */
+auto build_server_list_msg(IDatabase *dbc) -> std::shared_ptr<transport::fss_message_server_list>;
+} // namespace flight_safety_system::server
+
 namespace {
 
 /* Stand-in for the real fss_connection used by fss_client. The default
@@ -437,16 +444,19 @@ TEST_CASE("session: server list sent on identify contains seeded servers")
     CHECK(servers[1].second == 9090);
 }
 
-TEST_CASE("session: identify surfaces a mid-cursor server-list failure instead of a partial list")
+TEST_CASE("session: identify skips the server-list send on a mid-cursor failure instead of shipping a partial list")
 {
-    /* getActiveServers throws when the cursor is cut short by a mid-iteration
-     * error. The throw must propagate out of processMessage (where production
-     * wraps it in an exception_guard) rather than a truncated server list
-     * reaching the wire. */
+    /* getActiveServers reports a cut-short cursor as nullopt (todo/24 replaced
+     * the old database_error throw). Identify must complete normally — the
+     * client still gets its command — with only the server-list send skipped;
+     * the periodic broadcast delivers the list once a read succeeds. */
     fss_test::MockDatabase mock;
-    mock.asset_ids["craft"] = 1;
+    constexpr uint64_t asset_id = 1;
+    mock.asset_ids["craft"] = asset_id;
     mock.active_servers.emplace_back("10.0.0.1", uint16_t{8080});
     mock.active_servers_fail = true;
+    mock.pushCommand(asset_id, std::make_shared<fss::server::asset_command>(
+                                   /*dbid*/ 1, /*ts*/ 100, "RTL", 0.0, 0.0, 0));
 
     auto conn = std::make_shared<FakeConnection>();
     conn->cert_names.push_back("craft");
@@ -454,22 +464,43 @@ TEST_CASE("session: identify surfaces a mid-cursor server-list failure instead o
 
     auto writer = make_mock_writer(mock);
     auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
-    /* Assert the throw manually rather than via REQUIRE_THROWS_AS: older Catch2
-     * expands that macro to a by-value catch clause, which trips
-     * -Werror=catch-value on the polymorphic database_error type. */
-    bool threw_database_error = false;
-    try
-    {
-        session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
-    }
-    catch (const fss::server::database_error &)
-    {
-        threw_database_error = true;
-    }
-    REQUIRE(threw_database_error);
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
 
     /* No server list was sent: the partial result was discarded, not shipped. */
     REQUIRE(find_sent<fss::transport::fss_message_server_list>(conn->sent) == nullptr);
+    /* But identify itself completed: the pending command still went out. */
+    REQUIRE(find_sent<fss::transport::fss_message_asset_command>(conn->sent) != nullptr);
+}
+
+TEST_CASE("session: build_server_list_msg signals a failed read as nullptr, distinct from an empty list")
+{
+    /* The poller keys its cache update on this signal (todo/24): nullptr means
+     * "read failed, keep the previous cached list"; a genuinely empty active-
+     * server set is a non-null message with zero servers, which legitimately
+     * replaces the cache. */
+    fss_test::MockDatabase mock;
+
+    SECTION("failed read -> nullptr")
+    {
+        mock.active_servers.emplace_back("10.0.0.1", uint16_t{8080});
+        mock.active_servers_fail = true;
+        REQUIRE(fss::server::build_server_list_msg(&mock) == nullptr);
+    }
+
+    SECTION("empty set -> non-null message with no servers")
+    {
+        auto msg = fss::server::build_server_list_msg(&mock);
+        REQUIRE(msg != nullptr);
+        REQUIRE(msg->getServers().empty());
+    }
+
+    SECTION("populated set -> non-null message with the seeded servers")
+    {
+        mock.active_servers.emplace_back("10.0.0.1", uint16_t{8080});
+        auto msg = fss::server::build_server_list_msg(&mock);
+        REQUIRE(msg != nullptr);
+        REQUIRE(msg->getServers().size() == 1);
+    }
 }
 
 TEST_CASE("session: rapid sendCommand does not duplicate a single pending command")

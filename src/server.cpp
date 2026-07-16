@@ -395,8 +395,15 @@ auto main(int argc, char *argv[]) -> int
                  * (counter 0) so the caches are primed at startup. */
                 if ((poll_counter % send_config_period_ticks) == 0)
                 {
-                    clients->setCachedServerList(flight_safety_system::server::build_server_list_msg(dbc.get()));
-                    clients->refreshSmmSettings();
+                    /* nullptr = the read failed (partial/truncated): keep the
+                     * previous good cache and skip this refresh round entirely
+                     * — the same both-skipped outcome the old database_error
+                     * unwind gave, but as an explicit status (todo/24). */
+                    if (auto server_list = flight_safety_system::server::build_server_list_msg(dbc.get()))
+                    {
+                        clients->setCachedServerList(std::move(server_list));
+                        clients->refreshSmmSettings();
+                    }
                 }
             });
             poll_counter++;

@@ -9,6 +9,7 @@
 #include <condition_variable>
 #include <deque>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <list>
@@ -71,10 +72,12 @@ public:
     auto isAltitudeValid() -> bool;
 };
 
-/* Thrown by a database read that could only return a partial, misleading
- * result. getActiveServers raises it when the cursor is cut short by a
- * mid-iteration error so the caller discards the truncated list rather than
- * mistaking it for the complete set of active servers. */
+/* Thrown by db_connection's write wrappers when the underlying SQL fails, so
+ * db_write_queue's worker (the only production write path) can count the
+ * failure toward the todo/34/45/47 fail-safe. Reads do not throw: a read that
+ * could only produce a partial, misleading result reports it in its return
+ * value instead (see getActiveServers), so no read caller needs a try block
+ * to stay terminate-safe (todo/24). */
 class database_error : public std::runtime_error {
 public:
     explicit database_error(const std::string &what) : std::runtime_error(what) {}
@@ -113,7 +116,13 @@ public:
     virtual void recordCommandAck(uint64_t asset_id, uint64_t dispatch_id, uint8_t ack_state, uint64_t ack_timestamp,
                                   uint8_t ack_reason) = 0;
     virtual auto getCommand(uint64_t asset_id) -> std::shared_ptr<asset_command> = 0;
-    virtual auto getActiveServers() -> std::vector<fss_server_details> = 0;
+    /* The complete set of active servers, or nullopt when the read was cut
+     * short (mid-cursor error, truncated row) and could only produce a
+     * partial, misleading list. nullopt is NOT an empty list: the caller must
+     * keep whatever list it already has rather than shipping the failure to
+     * aircraft as "no servers". An explicit status, not an exception, so the
+     * contract is visible at every call site (todo/24). */
+    virtual auto getActiveServers() -> std::optional<std::vector<fss_server_details>> = 0;
     virtual auto getSmmSettings(uint64_t asset_id) -> std::shared_ptr<smm_settings> = 0;
     virtual auto isConnected() const -> bool = 0;
     virtual void tryReconnectIfNeeded() = 0;
@@ -163,7 +172,7 @@ public:
     void recordCommandAck(uint64_t asset_id, uint64_t dispatch_id, uint8_t ack_state, uint64_t ack_timestamp,
                           uint8_t ack_reason) override;
     auto getCommand(uint64_t asset_id) -> std::shared_ptr<asset_command> override;
-    auto getActiveServers() -> std::vector<fss_server_details> override;
+    auto getActiveServers() -> std::optional<std::vector<fss_server_details>> override;
     auto getSmmSettings(uint64_t asset_id) -> std::shared_ptr<smm_settings> override;
     auto isConnected() const -> bool override;
     void tryReconnectIfNeeded() override;

@@ -768,10 +768,18 @@ void fss::server::fss_client::sendSMMSettings()
 }
 
 namespace {
+/* nullptr when the DB read failed (partial/truncated result): the caller must
+ * skip the send or keep its cached list rather than shipping a wrong one. A
+ * genuinely empty active-server set is a non-null message with no servers. */
 auto getServersListMsg(fss::server::IDatabase *dbc) -> std::shared_ptr<fss::transport::fss_message_server_list>
 {
+    auto servers = dbc->getActiveServers();
+    if (!servers.has_value())
+    {
+        return nullptr;
+    }
     auto server_list = std::make_shared<fss::transport::fss_message_server_list>();
-    for (auto &server_details : dbc->getActiveServers())
+    for (auto &server_details : *servers)
     {
         server_list->addServer(server_details.getAddress(), server_details.getPort());
     }
@@ -974,7 +982,17 @@ void fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss
                  * now rather than after the poller's next refresh. */
                 this->refreshSmmSettings();
                 this->sendSMMSettings();
-                active_conn->sendMsg(getServersListMsg(this->dbc));
+                /* A failed read (nullptr) skips the send; the client gets
+                 * the list from the poller's 15 s broadcast instead. */
+                if (auto server_list_msg = getServersListMsg(this->dbc))
+                {
+                    active_conn->sendMsg(server_list_msg);
+                }
+                else
+                {
+                    FSS_LOG_WARN("server", "Server-list read failed during identify of "
+                                               << this->getName() << "; relying on the periodic broadcast");
+                }
             }
         }
         else if (msg->getType() == fss::transport::message_type_identity_non_aircraft)
@@ -1288,7 +1306,9 @@ void fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss
 
 namespace flight_safety_system::server {
 /* Exposed so server.cpp can broadcast the server list without duplicating
- * the helper. Not in the public header — only the server binary uses it. */
+ * the helper. Not in the public header — only the server binary uses it.
+ * nullptr when the DB read failed: the poller must keep the previous cached
+ * list rather than replacing it (todo/24). */
 auto build_server_list_msg(IDatabase *dbc) -> std::shared_ptr<transport::fss_message_server_list>
 {
     return getServersListMsg(dbc);
