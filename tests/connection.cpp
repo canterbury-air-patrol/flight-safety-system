@@ -283,6 +283,12 @@ TEST_CASE("fss_connection: connectTo applies the connection's requested TCP_USER
         REQUIRE(conn->connectTo("127.0.0.1", listen_port));
         REQUIRE(::getsockopt(conn->testGetFd(), IPPROTO_TCP, TCP_USER_TIMEOUT, &val, &len) == 0);
         REQUIRE(val == flight_safety_system::transport::default_tcp_user_timeout_ms);
+        /* Join the recv thread connectTo() started before this derived test
+         * object is destroyed: destroying it mid-recv rewrites the vptr under
+         * the recv thread's virtual dispatch (TSan: race on vptr). Production
+         * code destroys connections only through the base class or after
+         * disconnect, so this is a test-shape hazard, not a library one. */
+        conn->disconnect();
     }
 
     SECTION("a tighter per-connection bound is honoured")
@@ -292,6 +298,7 @@ TEST_CASE("fss_connection: connectTo applies the connection's requested TCP_USER
         REQUIRE(conn->connectTo("127.0.0.1", listen_port));
         REQUIRE(::getsockopt(conn->testGetFd(), IPPROTO_TCP, TCP_USER_TIMEOUT, &val, &len) == 0);
         REQUIRE(val == 5000);
+        conn->disconnect(); /* same vptr-race avoidance as above */
     }
 
     client_handoff.reset();
