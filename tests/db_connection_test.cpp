@@ -204,9 +204,10 @@ TEST_CASE("db_connection: getActiveServers returns pre-configured server")
 {
     LIVE_DB_OR_SKIP(dbc);
     auto servers = dbc->getActiveServers();
-    REQUIRE_FALSE(servers.empty());
+    REQUIRE(servers.has_value());
+    REQUIRE_FALSE(servers->empty());
     bool found = false;
-    for (auto &s : servers)
+    for (auto &s : *servers)
     {
         if (s.getAddress() == "fss.example.com" && s.getPort() == 20202)
         {
@@ -263,31 +264,19 @@ public:
 };
 } // namespace
 
-TEST_CASE("db_connection: getActiveServers throws when a server address is truncated (todo/41)")
+TEST_CASE("db_connection: getActiveServers fails the read when a server address is truncated (todo/41)")
 {
     /* A FETCH that truncates server_address ends the cursor loop with a
      * warning (sqlcode >= 0), not an error. Before todo/41's fix, getActive
      * Servers() would see fetch_error == 0 and return whatever was
      * accumulated before the bad row as the complete set -- silently
-     * dropping every server sorted after it. It must now throw
-     * database_error instead, exactly like a mid-cursor read error, so the
-     * poller's exception_guard keeps the previous good cache rather than
-     * shipping a partial list to aircraft. */
+     * dropping every server sorted after it. It must fail the read instead
+     * (nullopt, exactly like a mid-cursor read error; todo/24 turned the old
+     * database_error throw into this status return) so the poller keeps the
+     * previous good cache rather than shipping a partial list to aircraft. */
     LIVE_DB_OR_SKIP(dbc);
     scoped_truncated_server_active guard;
-    /* Assert the throw manually rather than via REQUIRE_THROWS_AS: older Catch2
-     * expands that macro to a by-value catch clause, which trips
-     * -Werror=catch-value on the polymorphic database_error type. */
-    bool threw_database_error = false;
-    try
-    {
-        dbc->getActiveServers();
-    }
-    catch (const flight_safety_system::server::database_error &)
-    {
-        threw_database_error = true;
-    }
-    REQUIRE(threw_database_error);
+    REQUIRE_FALSE(dbc->getActiveServers().has_value());
 }
 
 TEST_CASE("db_connection: tryReconnectIfNeeded returns when connection is healthy")

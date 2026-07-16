@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- `IDatabase::getActiveServers()` now reports a cut-short read (mid-cursor
+  error, truncated row) as an explicit `std::nullopt` status instead of
+  throwing `database_error` across the poller thread — the codebase's last
+  use of an exception as routine cross-thread control flow. Safety no longer
+  depends on every caller remembering a catch block: an unguarded future
+  caller previously meant `std::terminate` on a safety-critical service.
+  Behaviour on a failed read is unchanged (poller keeps the previous cached
+  list; identify skips the server-list send). (todo/24)
+
 ### Fixed
 - A terminal command-ack outcome (actioned/superseded/rejected/noop) is now
   final for its dispatch: a later terminal ack — from a buggy, misordered or

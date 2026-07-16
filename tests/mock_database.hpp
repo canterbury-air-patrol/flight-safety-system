@@ -5,6 +5,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -25,9 +26,8 @@ public:
     std::map<uint64_t, std::shared_ptr<flight_safety_system::server::smm_settings>> smm{};
     std::map<uint64_t, std::vector<std::shared_ptr<flight_safety_system::server::asset_command>>> commands{};
     std::vector<flight_safety_system::server::fss_server_details> active_servers{};
-    /* When set, getActiveServers throws database_error, simulating a
-     * mid-cursor read failure so tests can exercise the partial-result
-     * discard path. */
+    /* When set, getActiveServers returns nullopt, simulating a mid-cursor
+     * read failure so tests can exercise the partial-result discard path. */
     bool active_servers_fail{false};
 
     struct recorded_rtt {
@@ -165,11 +165,11 @@ public:
         return newest;
     }
 
-    auto getActiveServers() -> std::vector<flight_safety_system::server::fss_server_details> override
+    auto getActiveServers() -> std::optional<std::vector<flight_safety_system::server::fss_server_details>> override
     {
         if (active_servers_fail)
         {
-            throw flight_safety_system::server::database_error("mock mid-cursor failure");
+            return std::nullopt;
         }
         return active_servers;
     }

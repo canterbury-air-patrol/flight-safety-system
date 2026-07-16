@@ -230,7 +230,7 @@ auto flight_safety_system::server::db_connection::getSmmSettings(uint64_t asset_
     return res;
 }
 
-auto flight_safety_system::server::db_connection::getActiveServers() -> std::vector<fss_server_details>
+auto flight_safety_system::server::db_connection::getActiveServers() -> std::optional<std::vector<fss_server_details>>
 {
     std::vector<fss_server_details> res;
     struct fss_server_s **servers = nullptr;
@@ -251,11 +251,12 @@ auto flight_safety_system::server::db_connection::getActiveServers() -> std::vec
     }
     /* A mid-cursor failure leaves res holding only the rows read before the
      * error. Discard it: shipping a truncated list to aircraft would drop
-     * servers that are actually active. The caller's exception_guard retains
-     * the previous good cache. */
+     * servers that are actually active. nullopt tells the caller to keep its
+     * previous good list (todo/24). */
     if (fetch_error != 0)
     {
-        throw database_error("active FSS server list read failed mid-cursor; partial result discarded");
+        FSS_LOG_ERROR("db", "active FSS server list read failed mid-cursor; partial result discarded");
+        return std::nullopt;
     }
     return res;
 }
