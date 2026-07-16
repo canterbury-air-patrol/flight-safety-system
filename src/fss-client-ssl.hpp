@@ -34,6 +34,13 @@ private:
      * e2e test drive a client with a deliberately skewed clock without
      * needing root/faketime. Positive = client clock ahead of real time. */
     int64_t clock_offset_ms{0};
+    /* TCP_USER_TIMEOUT requested for every server connection this client
+     * makes (todo/26): the bound on how long a blocking send() can stall
+     * into a half-dead server before the kernel errors the connection out.
+     * A flight-safety client (e.g. cap-fmu) can set this well below the
+     * 30 s default so a wedged send worker recovers on its own clock.
+     * Config field "tcp_user_timeout_ms"; consulted at (re)connect time. */
+    unsigned int tcp_user_timeout_ms{flight_safety_system::transport::default_tcp_user_timeout_ms};
     std::string ca_file{""};
     std::string private_key_file{""};
     std::string public_key_file{""};
@@ -56,6 +63,9 @@ protected:
     void setAssetName(std::string t_asset_name);
     void setNonAircraft(bool t_non_aircraft);
     void setClockOffsetMs(int64_t t_offset_ms);
+    /* Call before connecting (configuration state, like the setters above);
+     * an already-established connection keeps the bound it connected with. */
+    void setTcpUserTimeoutMs(unsigned int t_timeout_ms);
     void addServer(const std::shared_ptr<fss_server> &server);
 public:
     explicit fss_client(const std::string &config_file);
@@ -73,6 +83,7 @@ public:
     virtual auto getAssetName() -> std::string;
     virtual auto isNonAircraft() const -> bool { return this->non_aircraft; }
     virtual auto getClockOffsetMs() const -> int64_t { return this->clock_offset_ms; }
+    virtual auto getTcpUserTimeoutMs() const -> unsigned int { return this->tcp_user_timeout_ms; }
     /* fss_current_timestamp() + clock_offset_ms (todo/33): the single
      * source of truth for "what time does this client think it is", used
      * both for the RTT response's reported client clock and for any

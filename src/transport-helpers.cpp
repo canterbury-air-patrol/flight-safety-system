@@ -67,7 +67,7 @@ auto convert_str_to_sa(const std::string &addr, uint16_t port, struct sockaddr_s
     return family != AF_UNSPEC;
 }
 
-void set_tcp_keepalive(int fd)
+void set_tcp_keepalive(int fd, unsigned int tcp_user_timeout_ms) // NOLINT(bugprone-easily-swappable-parameters)
 {
     int val = 1;
     if (setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &val, sizeof(val)) < 0)
@@ -95,12 +95,13 @@ void set_tcp_keepalive(int fd)
      * (~15 minutes), so a blocking send() into a black-holed peer can stall
      * a sender thread for that long. TCP_USER_TIMEOUT bounds how long
      * transmitted data may stay unacknowledged before the kernel errors the
-     * connection out, matching the 30 s liveness timeout the server already
-     * applies at the application layer (default client_timeout). */
+     * connection out. The default (default_tcp_user_timeout_ms, 30 s) matches
+     * the liveness timeout the server applies at the application layer
+     * (default client_timeout); a flight-safety client can pass a tighter
+     * per-connection bound (todo/26). */
     /* tcp(7): TCP_USER_TIMEOUT takes an unsigned int (milliseconds). The
-     * regression test pins this value with a literal on purpose - changing
+     * regression test pins the default with a literal on purpose - changing
      * it must consciously break the test. */
-    constexpr unsigned int tcp_user_timeout_ms = 30000;
     unsigned int user_timeout_ms = tcp_user_timeout_ms;
     if (setsockopt(fd, IPPROTO_TCP, TCP_USER_TIMEOUT, &user_timeout_ms, sizeof(user_timeout_ms)) < 0)
     {

@@ -298,7 +298,7 @@ auto flight_safety_system::transport::fss_connection::connectTo(const std::strin
         return false;
     }
 
-    set_tcp_keepalive(current_fd);
+    set_tcp_keepalive(current_fd, this->getTcpUserTimeoutMs());
 
     this->startRecvThread(std::thread([this]() -> void { this->processMessages(); }));
 
@@ -606,7 +606,9 @@ void flight_safety_system::transport::fss_listen::processMessages()
         inet_ntop_stor(&sa, addr_str, INET6_ADDRSTRLEN, &client_port);
         std::cout << "New client from " << addr_str << ":" << client_port << " as " << newfd << std::endl;
 #endif
-        set_tcp_keepalive(newfd);
+        /* Server-accepted sockets always get the default bound; only a
+         * client's outbound connection can request a tighter one (todo/26). */
+        set_tcp_keepalive(newfd, flight_safety_system::transport::default_tcp_user_timeout_ms);
         if (this->cb == nullptr)
         {
             /* Thanks for your call, unfortunately we don't know how to deal with it */

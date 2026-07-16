@@ -80,8 +80,13 @@ public:
     auto operator=(fss_connection_client&&) -> fss_connection& = delete;
     ~fss_connection_client() override;
     auto connectTo(const std::string& address, uint16_t port) -> bool override;
-    static auto create(std::string t_ca, std::string t_private_key, std::string t_public_key,
-                       const std::string& address, uint16_t port) -> std::shared_ptr<fss_connection_client>;
+    /* t_tcp_user_timeout_ms: per-connection TCP_USER_TIMEOUT applied at
+     * connect (todo/26); the default keeps the established 30 s bound. */
+    static auto
+    create(std::string t_ca, std::string t_private_key, std::string t_public_key, const std::string& address,
+           uint16_t port,
+           unsigned int t_tcp_user_timeout_ms = flight_safety_system::transport::default_tcp_user_timeout_ms)
+        -> std::shared_ptr<fss_connection_client>;
 };
 
 

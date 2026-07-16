@@ -233,11 +233,68 @@ TEST_CASE("set_tcp_keepalive bounds unacked data with TCP_USER_TIMEOUT")
     int sock = ::socket(AF_INET6, SOCK_STREAM, IPPROTO_TCP);
     REQUIRE(sock >= 0);
     fss_test::scoped_fd guard(sock);
-    set_tcp_keepalive(sock);
     unsigned int val = 0;
     socklen_t len = sizeof(val);
-    REQUIRE(::getsockopt(sock, IPPROTO_TCP, TCP_USER_TIMEOUT, &val, &len) == 0);
-    REQUIRE(val == 30000);
+
+    SECTION("the default bound is 30s (pinned by literal on purpose)")
+    {
+        set_tcp_keepalive(sock, flight_safety_system::transport::default_tcp_user_timeout_ms);
+        REQUIRE(::getsockopt(sock, IPPROTO_TCP, TCP_USER_TIMEOUT, &val, &len) == 0);
+        REQUIRE(val == 30000);
+    }
+
+    SECTION("a caller-supplied bound is applied verbatim (todo/26)")
+    {
+        set_tcp_keepalive(sock, 5000);
+        REQUIRE(::getsockopt(sock, IPPROTO_TCP, TCP_USER_TIMEOUT, &val, &len) == 0);
+        REQUIRE(val == 5000);
+    }
+#endif
+}
+
+namespace {
+/* Exposes the protected fd so a test can pin the socket option a connect
+ * applied (todo/26); same pattern as fd_visible_listen below. */
+class fd_visible_connection : public flight_safety_system::transport::fss_connection {
+public:
+    auto testGetFd() -> int { return this->getFd(); }
+};
+} // namespace
+
+TEST_CASE("fss_connection: connectTo applies the connection's requested TCP_USER_TIMEOUT (todo/26)")
+{
+#ifdef TCP_USER_TIMEOUT
+    /* A flight-safety client must be able to pick a send bound tighter than
+     * the 30 s default (a wedged send worker recovers on its own clock, not
+     * the server's liveness clock). Pin that setTcpUserTimeoutMs() before
+     * connectTo() lands on the socket, and that a connection which never
+     * asked keeps the default. */
+    client_handoff.reset();
+    const uint16_t listen_port = fss_test::pick_port();
+    REQUIRE(listen_port != 0);
+    auto listen = std::make_shared<flight_safety_system::transport::fss_listen>(listen_port, client_handoff.callback());
+
+    unsigned int val = 0;
+    socklen_t len = sizeof(val);
+
+    SECTION("default: never asked, gets 30s")
+    {
+        auto conn = std::make_shared<fd_visible_connection>();
+        REQUIRE(conn->connectTo("127.0.0.1", listen_port));
+        REQUIRE(::getsockopt(conn->testGetFd(), IPPROTO_TCP, TCP_USER_TIMEOUT, &val, &len) == 0);
+        REQUIRE(val == flight_safety_system::transport::default_tcp_user_timeout_ms);
+    }
+
+    SECTION("a tighter per-connection bound is honoured")
+    {
+        auto conn = std::make_shared<fd_visible_connection>();
+        conn->setTcpUserTimeoutMs(5000);
+        REQUIRE(conn->connectTo("127.0.0.1", listen_port));
+        REQUIRE(::getsockopt(conn->testGetFd(), IPPROTO_TCP, TCP_USER_TIMEOUT, &val, &len) == 0);
+        REQUIRE(val == 5000);
+    }
+
+    client_handoff.reset();
 #endif
 }
 

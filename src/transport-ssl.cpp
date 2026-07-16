@@ -171,7 +171,7 @@ auto flight_safety_system::transport_ssl::fss_connection_client::connectTo(const
         return false;
     }
 
-    set_tcp_keepalive(this->getFd());
+    set_tcp_keepalive(this->getFd(), this->getTcpUserTimeoutMs());
 
     this->usable.store(this->setupSSL());
 
@@ -181,12 +181,15 @@ auto flight_safety_system::transport_ssl::fss_connection_client::connectTo(const
 // NOLINTBEGIN(bugprone-easily-swappable-parameters)
 auto flight_safety_system::transport_ssl::fss_connection_client::create(std::string t_ca, std::string t_private_key,
                                                                         std::string t_public_key,
-                                                                        const std::string &address, uint16_t port)
+                                                                        const std::string &address, uint16_t port,
+                                                                        unsigned int t_tcp_user_timeout_ms)
     -> std::shared_ptr<fss_connection_client>
 // NOLINTEND(bugprone-easily-swappable-parameters)
 {
     auto conn =
         std::make_shared<fss_connection_client>(std::move(t_ca), std::move(t_private_key), std::move(t_public_key));
+    /* Before connectTo: the option is applied to the socket at connect time. */
+    conn->setTcpUserTimeoutMs(t_tcp_user_timeout_ms);
     if (!conn->connectTo(address, port))
     {
         return nullptr;
