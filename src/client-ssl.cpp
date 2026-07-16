@@ -63,6 +63,10 @@ flight_safety_system::client_ssl::fss_client::fss_client(const std::string &t_fi
         {
             this->setClockOffsetMs(config["clock_offset_ms"].asInt64());
         }
+        if (config.isMember("tcp_user_timeout_ms"))
+        {
+            this->setTcpUserTimeoutMs(config["tcp_user_timeout_ms"].asUInt());
+        }
 
         this->ca_file = config["ssl"]["ca_public_key"].asString();
         this->private_key_file = config["ssl"]["client_private_key"].asString();
@@ -163,6 +167,15 @@ void flight_safety_system::client_ssl::fss_client::setClockOffsetMs(int64_t t_of
     /* Set once during configuration, before concurrent use (same as
      * setAssetName above) -- no lock needed. */
     this->clock_offset_ms = t_offset_ms;
+}
+
+void flight_safety_system::client_ssl::fss_client::setTcpUserTimeoutMs(unsigned int t_timeout_ms)
+{
+    /* Set once during configuration, before concurrent use (same as
+     * setAssetName above) -- no lock needed. fss_server::reconnect_to()
+     * reads it at every (re)connect, so it also applies to servers learned
+     * later from a server-list update, not just config-file entries. */
+    this->tcp_user_timeout_ms = t_timeout_ms;
 }
 
 auto flight_safety_system::client_ssl::fss_client::getSkewedTimestamp() const -> uint64_t
@@ -470,8 +483,14 @@ void flight_safety_system::client_ssl::fss_server::sendVersion()
 
 auto flight_safety_system::client_ssl::fss_server::reconnect_to() -> bool
 {
+    /* Read the client's requested send bound at every (re)connect rather
+     * than capturing it at construction, so it uniformly covers config-file
+     * servers, programmatic connectTo, and servers learned from a
+     * server-list update (todo/26). Null client (some tests): default. */
+    auto timeout_ms = this->client != nullptr ? this->client->getTcpUserTimeoutMs()
+                                              : flight_safety_system::transport::default_tcp_user_timeout_ms;
     auto new_conn = flight_safety_system::transport_ssl::fss_connection_client::create(
-        this->ca_file, this->private_key_file, this->public_key_file, this->getAddress(), this->getPort());
+        this->ca_file, this->private_key_file, this->public_key_file, this->getAddress(), this->getPort(), timeout_ms);
     if (new_conn == nullptr)
     {
         return false;

@@ -13,6 +13,9 @@
 #error No catch header
 #endif
 
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <sys/socket.h>
 #include <unistd.h>
 
 #include "fss-transport-ssl.hpp"
@@ -88,6 +91,46 @@ TEST_CASE("SSL - Listen Socket")
     REQUIRE(msg == nullptr);
 
     client_handoff.reset();
+}
+
+namespace {
+/* Exposes the protected fd so the todo/26 test can pin the socket option the
+ * TLS connect path applied (the plain-TCP twin lives in connection.cpp). */
+class fd_visible_connection_client : public flight_safety_system::transport_ssl::fss_connection_client {
+public:
+    fd_visible_connection_client(std::string t_ca, std::string t_private_key, std::string t_public_key)
+        : fss_connection_client(std::move(t_ca), std::move(t_private_key), std::move(t_public_key))
+    {
+    }
+    auto testGetFd() -> int { return this->getFd(); }
+};
+} // namespace
+
+TEST_CASE("SSL - client connectTo applies the requested TCP_USER_TIMEOUT (todo/26)")
+{
+#ifdef TCP_USER_TIMEOUT
+    /* The TLS client connect path is the one a flight-safety client
+     * (cap-fmu) actually uses; pin that its socket gets the per-connection
+     * bound requested before connectTo(), through a full handshake. */
+    client_handoff.reset();
+    const uint16_t listen_port = fss_test::pick_port();
+    REQUIRE(listen_port != 0);
+    auto listen = std::make_shared<flight_safety_system::transport_ssl::fss_listen>(
+        listen_port, client_handoff.callback(), CA_PUBLIC_FILE, SERVER_PRIVATE_FILE, SERVER_PUBLIC_FILE);
+    REQUIRE(listen != nullptr);
+
+    auto conn = std::make_shared<fd_visible_connection_client>(CA_PUBLIC_FILE, CLIENT_PRIVATE_FILE, CLIENT_PUBLIC_FILE);
+    conn->setTcpUserTimeoutMs(7000);
+    REQUIRE(conn->connectTo("localhost", listen_port));
+
+    unsigned int val = 0;
+    socklen_t len = sizeof(val);
+    REQUIRE(::getsockopt(conn->testGetFd(), IPPROTO_TCP, TCP_USER_TIMEOUT, &val, &len) == 0);
+    REQUIRE(val == 7000);
+
+    REQUIRE(client_handoff.wait() != nullptr);
+    client_handoff.reset();
+#endif
 }
 
 TEST_CASE("SSL - Listen - Callback")

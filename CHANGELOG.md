@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Per-connection configurable `TCP_USER_TIMEOUT`: a flight-safety client
+  (e.g. cap-fmu) can now bound how long a blocking send into a half-dead
+  server can stall — `tcp_user_timeout_ms` in the client JSON config, a
+  protected `fss_client::setTcpUserTimeoutMs()` for programmatic use, and
+  `fss_connection::setTcpUserTimeoutMs()` /
+  `fss_connection_client::create(..., t_tcp_user_timeout_ms)` at the
+  transport layer. The default stays the established 30 s everywhere, and
+  server-accepted sockets are unaffected. (todo/26)
+
 ### Changed
 - `IDatabase::getActiveServers()` now reports a cut-short read (mid-cursor
   error, truncated row) as an explicit `std::nullopt` status instead of

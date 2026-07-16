@@ -64,6 +64,15 @@ inline auto negotiateFeatureFlags(uint32_t peer_flags) -> uint32_t
  * largest legitimate message (server_list with many entries) with headroom. */
 static constexpr uint16_t FSS_MAX_MESSAGE_BYTES = 8192;
 
+/* Default TCP_USER_TIMEOUT (ms) applied to every connection: how long
+ * transmitted data may stay unacknowledged before the kernel errors the
+ * connection out, which is what bounds a blocking send() into a half-dead
+ * peer. 30 s matches the server's application-layer liveness timeout
+ * (default client_timeout) and is the right bound for the server; a
+ * flight-safety *client* (e.g. cap-fmu's FSS send worker) can request a
+ * tighter bound per connection via setTcpUserTimeoutMs (todo/26). */
+static constexpr unsigned int default_tcp_user_timeout_ms = 30000;
+
 class fss_connection;
 class fss_listen;
 class fss_message;
@@ -260,6 +269,11 @@ class fss_connection {
      * advertised feature_flags, masked by FSS_SUPPORTED_FEATURES). 0 until the
      * version handshake negotiates it; a legacy peer leaves it 0. */
     std::atomic<uint32_t> negotiated_feature_flags{0};
+    /* TCP_USER_TIMEOUT this connection requests at connect time (todo/26).
+     * Only consulted by the connectTo() paths (plain and TLS); a
+     * server-accepted socket already had the default applied at accept and
+     * is not affected by this member. */
+    unsigned int tcp_user_timeout_ms{default_tcp_user_timeout_ms};
 protected:
     auto recvMsg() -> std::shared_ptr<fss_message>;
     auto getMessageId() -> uint64_t;
@@ -284,6 +298,15 @@ public:
     auto operator=(fss_connection &&) -> fss_connection & = delete;
     virtual ~fss_connection();
     void setHandler(fss_message_cb *cb);
+    /* Request a tighter (or looser) TCP_USER_TIMEOUT than the 30 s default
+     * for this connection (todo/26): the bound on how long a blocking send()
+     * can stall into a half-dead peer before the kernel errors the connection
+     * out. Must be called BEFORE connectTo() — it is applied to the socket at
+     * connect time and has no effect afterwards, nor on a server-accepted
+     * connection. 0 means the kernel default (no user timeout); per tcp(7)
+     * values are milliseconds. */
+    void setTcpUserTimeoutMs(unsigned int ms) { this->tcp_user_timeout_ms = ms; }
+    auto getTcpUserTimeoutMs() const -> unsigned int { return this->tcp_user_timeout_ms; }
     virtual auto connectTo(const std::string &address, uint16_t port) -> bool;
     auto getNegotiatedVersion() -> uint16_t { return this->negotiated_version.load(); }
     void setNegotiatedVersion(uint16_t v) { this->negotiated_version.store(v); }

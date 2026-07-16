@@ -351,6 +351,40 @@ TEST_CASE("client: JSON config with server entry parses name and creates reconne
     std::remove(tmppath);
 }
 
+TEST_CASE("client: JSON config tcp_user_timeout_ms sets the per-connection send bound (todo/26)")
+{
+    /* A flight-safety client (cap-fmu) requests a tighter TCP_USER_TIMEOUT
+     * than the 30 s default via its config; every server (re)connect reads
+     * it through getTcpUserTimeoutMs(). Absent, the default must hold. */
+    const char *tmppath = "/tmp/fss_test_client_send_timeout.json";
+
+    SECTION("configured value is exposed")
+    {
+        {
+            std::ofstream f(tmppath);
+            f << R"({"name":"test-asset","tcp_user_timeout_ms":5000,)"
+              << R"("ssl":{"ca_public_key":"ca.pem","client_private_key":"key.pem","client_public_key":"cert.pem"},)"
+              << R"("servers":[{"address":"127.0.0.1","port":9999}]})";
+        }
+        fss::client_ssl::fss_client client(tmppath);
+        REQUIRE(client.getTcpUserTimeoutMs() == 5000);
+    }
+
+    SECTION("absent field keeps the 30s default")
+    {
+        {
+            std::ofstream f(tmppath);
+            f << R"({"name":"test-asset",)"
+              << R"("ssl":{"ca_public_key":"ca.pem","client_private_key":"key.pem","client_public_key":"cert.pem"},)"
+              << R"("servers":[{"address":"127.0.0.1","port":9999}]})";
+        }
+        fss::client_ssl::fss_client client(tmppath);
+        REQUIRE(client.getTcpUserTimeoutMs() == fss::transport::default_tcp_user_timeout_ms);
+    }
+
+    std::remove(tmppath);
+}
+
 TEST_CASE("client: disconnect closes all active server connections")
 {
     /* connectTo with connect=true adds a server to the connected list.
