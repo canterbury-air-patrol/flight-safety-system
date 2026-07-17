@@ -62,7 +62,11 @@ public:
     void handleCommandFrom(const std::shared_ptr<fss::transport::fss_message_asset_command> &msg,
                            fss::client_ssl::fss_server *origin) override
     {
-        std::cout << "RCVD_CMD: " << commandName(msg->getCommand()) << std::endl;
+        /* cmd_id is this server's DB row id for the operator action (todo/49);
+         * 0 = unreported (capability not negotiated). e2e asserts it matches
+         * the inserted row and that an identical-payload retry gets a new id. */
+        std::cout << "RCVD_CMD: " << commandName(msg->getCommand()) << " cmd_id=" << msg->getServerCommandId()
+                  << std::endl;
         /* When the server negotiated command-ack, reply on the originating
          * connection with the two-phase ack (received, then actioned) so the
          * server's routing+storage path is exercised end to end. A real FMU
