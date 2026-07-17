@@ -512,6 +512,17 @@ void fss::server::fss_client::sendCommand()
                 msg = std::make_shared<fss::transport::fss_message_asset_command>(command, ac->getTimeStamp());
                 break;
         }
+        /* Stamp this server's identity for the operator action — the command
+         * DB row id (todo/49) — only when the peer negotiated the capability;
+         * otherwise the trailing field is not part of the agreed dialect and
+         * the message keeps its legacy wire form. getConnection() only takes
+         * its own leaf conn_lock, so holding client_lock here is safe. */
+        auto command_conn = this->getConnection();
+        if (command_conn != nullptr &&
+            (command_conn->getNegotiatedFeatureFlags() & fss::transport::FSS_FEATURE_SERVER_COMMAND_ID) != 0)
+        {
+            msg->setServerCommandId(dbid);
+        }
         /* Claim the resend window now, atomically with the check above, not
          * after the send returns: the recv thread can also call sendCommand()
          * directly (identify handling) while this outbound-worker call is
