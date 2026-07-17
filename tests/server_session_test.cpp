@@ -612,6 +612,49 @@ TEST_CASE("session: a successful command send records exactly one dispatch and s
     REQUIRE(mock.getDispatches().front().command_dbid == 88);
 }
 
+TEST_CASE("session: dispatched command carries the server command id only when negotiated (todo/49)")
+{
+    /* The dispatched wire message identifies the operator action by this
+     * server's command DB row id — but only as part of the negotiated dialect
+     * (FSS_FEATURE_SERVER_COMMAND_ID); a legacy peer gets the unchanged wire
+     * form with the id unreported (0). */
+    fss_test::MockDatabase mock;
+    constexpr uint64_t asset_id = 13;
+    mock.asset_ids["craft"] = asset_id;
+    constexpr uint64_t command_dbid = 91;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+    auto clock = std::make_shared<FakeClock>();
+
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    session->setClock(clock);
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+
+    SECTION("negotiated: the id rides the message")
+    {
+        conn->setNegotiatedFeatureFlags(fss::transport::FSS_FEATURE_SERVER_COMMAND_ID);
+        session->setPendingCommand(
+            std::make_shared<fss::server::asset_command>(command_dbid, /*ts*/ 500, "RTL", 0.0, 0.0, 0));
+        session->sendCommand();
+        auto cmd = find_sent<fss::transport::fss_message_asset_command>(conn->sent);
+        REQUIRE(cmd != nullptr);
+        REQUIRE(cmd->getServerCommandId() == command_dbid);
+    }
+
+    SECTION("not negotiated: the id stays unreported")
+    {
+        session->setPendingCommand(
+            std::make_shared<fss::server::asset_command>(command_dbid, /*ts*/ 500, "RTL", 0.0, 0.0, 0));
+        session->sendCommand();
+        auto cmd = find_sent<fss::transport::fss_message_asset_command>(conn->sent);
+        REQUIRE(cmd != nullptr);
+        REQUIRE(cmd->getServerCommandId() == 0);
+    }
+}
+
 TEST_CASE("session: queueCommandSend dispatches a command on the outbound worker thread")
 {
     /* todo/21: the server main loop schedules a command via queueCommandSend()
