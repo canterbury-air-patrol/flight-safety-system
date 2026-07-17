@@ -1032,6 +1032,14 @@ void flight_safety_system::transport::fss_message_asset_command::packData(std::s
     bl->addData(&lng, sizeof(int32_t));
     bl->addData(&alt, sizeof(uint32_t));
     bl->addData(&cmd, sizeof(uint8_t));
+    /* The server command id is an optional trailing field: omitting it when 0
+     * keeps the wire bytes identical to a legacy command, so a peer that never
+     * negotiated FSS_FEATURE_SERVER_COMMAND_ID is unaffected. */
+    if (this->server_command_id != 0)
+    {
+        uint64_t scid = fss_htobe64(this->server_command_id);
+        bl->addData(&scid, sizeof(uint64_t));
+    }
 }
 
 void flight_safety_system::transport::fss_message_asset_command::unpackData(const std::shared_ptr<buf_len> &bl)
@@ -1050,7 +1058,16 @@ void flight_safety_system::transport::fss_message_asset_command::unpackData(cons
     {
         this->command = decode_asset_command(cmd);
     }
+    /* Coordinates are assigned before the optional trailing read below: a
+     * failed optional read latches the reader not-ok, and assign_coordinates
+     * must judge "was the frame truncated" on the mandatory fields only —
+     * otherwise every legacy (id-less) GOTO would decode to NaN coordinates. */
     assign_coordinates(reader, lat, lng, this->latitude, this->longitude);
+    /* Optional trailing field; left at 0 when absent (legacy command). */
+    if (!reader.readUint64(this->server_command_id))
+    {
+        this->server_command_id = 0;
+    }
 }
 
 auto flight_safety_system::transport::fss_message_asset_command::getCommand() -> fss_asset_command
@@ -1072,6 +1089,10 @@ auto flight_safety_system::transport::fss_message_asset_command::getAltitude() -
 auto flight_safety_system::transport::fss_message_asset_command::getTimeStamp() -> uint64_t
 {
     return this->timestamp;
+}
+auto flight_safety_system::transport::fss_message_asset_command::getServerCommandId() -> uint64_t
+{
+    return this->server_command_id;
 }
 
 // NOLINTBEGIN(bugprone-easily-swappable-parameters)

@@ -44,10 +44,12 @@ static constexpr uint16_t FSS_PROTOCOL_MIN_VERSION = 1;
  * cannot force on a capability we do not implement: the AND with
  * FSS_SUPPORTED_FEATURES masks any bit we have not enabled. Each bit is added
  * to FSS_SUPPORTED_FEATURES only once this build actually implements it. */
-static constexpr uint32_t FSS_FEATURE_RTT_OFFSET = 0x1U;    /* todo/17 item 3 */
-static constexpr uint32_t FSS_FEATURE_COMMAND_ACK = 0x2U;   /* todo/17 item 1 */
-static constexpr uint32_t FSS_FEATURE_SYSTEM_HEALTH = 0x4U; /* todo/17 item 2 */
-static constexpr uint32_t FSS_SUPPORTED_FEATURES = FSS_FEATURE_RTT_OFFSET | FSS_FEATURE_COMMAND_ACK;
+static constexpr uint32_t FSS_FEATURE_RTT_OFFSET = 0x1U;        /* todo/17 item 3 */
+static constexpr uint32_t FSS_FEATURE_COMMAND_ACK = 0x2U;       /* todo/17 item 1 */
+static constexpr uint32_t FSS_FEATURE_SYSTEM_HEALTH = 0x4U;     /* todo/17 item 2 */
+static constexpr uint32_t FSS_FEATURE_SERVER_COMMAND_ID = 0x8U; /* todo/49 */
+static constexpr uint32_t FSS_SUPPORTED_FEATURES =
+    FSS_FEATURE_RTT_OFFSET | FSS_FEATURE_COMMAND_ACK | FSS_FEATURE_SERVER_COMMAND_ID;
 
 /* The capability set to adopt for a peer that advertised peer_flags: the
  * intersection with what this build implements, so a peer can never enable a
@@ -556,6 +558,28 @@ private:
     double longitude;
     uint32_t altitude;
     uint64_t timestamp;
+    /* The dispatching server's identifier for the operator action this command
+     * carries — its command DB row id (todo/49). Contract the receiver may
+     * rely on:
+     *   - Within one connection, this id identifies the operator action: the
+     *     same id means the same action (a redelivery — resend window,
+     *     reconnect identify, server bounce), a new id means a new operator
+     *     action, even when command/payload/timestamp are unchanged. This is
+     *     what lets a client on redundant servers tell a deliberate operator
+     *     retry (fresh id on every server) from another server's delivery of
+     *     the action it already has.
+     *   - Ids are unique PER SERVER only: each server assigns from its own DB
+     *     sequence, so one operator action arrives with a DIFFERENT id on each
+     *     connection, and ids must never be compared across connections.
+     *   - 0 means "not reported" — a legacy peer, or the
+     *     FSS_FEATURE_SERVER_COMMAND_ID capability was not negotiated. Carried
+     *     as an optional trailing wire field, omitted when 0, like
+     *     rtt_response's client_timestamp (todo/17 item 3).
+     * This is NOT the per-connection header id used for command-ack
+     * correlation (dispatch_id): that one is scoped to a single delivery and
+     * stable across resends of it; this one is scoped to the operator action
+     * and survives reconnects. */
+    uint64_t server_command_id{0};
 protected:
     void unpackData(const std::shared_ptr<buf_len> &bl);
     void packData(std::shared_ptr<buf_len> bl) override;
@@ -569,6 +593,11 @@ public:
     auto getLongitude() -> double override;
     auto getAltitude() -> uint32_t override;
     auto getTimeStamp() -> uint64_t override;
+    /* Stamped by the server at dispatch, only when the connection negotiated
+     * FSS_FEATURE_SERVER_COMMAND_ID; left 0 otherwise so the wire bytes stay
+     * identical to a legacy command. */
+    void setServerCommandId(uint64_t t_server_command_id) { this->server_command_id = t_server_command_id; }
+    virtual auto getServerCommandId() -> uint64_t;
 };
 
 class fss_message_smm_settings : public fss_message {

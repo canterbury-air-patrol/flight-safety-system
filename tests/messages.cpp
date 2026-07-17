@@ -459,6 +459,91 @@ TEST_CASE("Asset Command Message Check - Altitude", "[TC-FSS-002]")
     REQUIRE(decoded_generic->getAltitude() == altitude);
 }
 
+TEST_CASE("Asset Command carries an optional server command id", "[TC-FSS-002]")
+{
+    auto msg_id = static_cast<uint64_t>(random());
+    auto timestamp = static_cast<uint64_t>(random());
+    constexpr uint64_t server_command_id = 0x1122334455667788ULL;
+
+    auto msg = std::make_shared<flight_safety_system::transport::fss_message_asset_command>(
+        flight_safety_system::transport::asset_command_rtl, timestamp);
+    /* Not stamped yet: defaults to "not reported". */
+    REQUIRE(msg->getServerCommandId() == 0);
+    msg->setServerCommandId(server_command_id);
+    REQUIRE(msg->getServerCommandId() == server_command_id);
+
+    msg->setId(msg_id);
+    auto bl = msg->getPacked();
+    REQUIRE(bl != nullptr);
+
+    auto decoded = std::make_shared<flight_safety_system::transport::fss_message_asset_command>(msg_id, bl);
+    REQUIRE(decoded->getCommand() == flight_safety_system::transport::asset_command_rtl);
+    REQUIRE(decoded->getTimeStamp() == timestamp);
+    REQUIRE(decoded->getServerCommandId() == server_command_id);
+
+    auto decoded_generic = std::dynamic_pointer_cast<flight_safety_system::transport::fss_message_asset_command>(
+        flight_safety_system::transport::fss_message::decode(bl));
+    REQUIRE(decoded_generic != nullptr);
+    REQUIRE(decoded_generic->getServerCommandId() == server_command_id);
+}
+
+TEST_CASE("Asset Command with position keeps its server command id", "[TC-FSS-002]")
+{
+    /* The goto variant is the one whose payload trails coordinates — pin that
+     * the optional trailing id and the coordinates do not corrupt each other. */
+    auto msg_id = static_cast<uint64_t>(random());
+    auto timestamp = static_cast<uint64_t>(random());
+    constexpr double goto_lat = -43.5;
+    constexpr double goto_lng = 172.0;
+    constexpr uint64_t server_command_id = 987654321ULL;
+
+    auto msg = std::make_shared<flight_safety_system::transport::fss_message_asset_command>(
+        flight_safety_system::transport::asset_command_goto, timestamp, goto_lat, goto_lng);
+    msg->setServerCommandId(server_command_id);
+    msg->setId(msg_id);
+    auto bl = msg->getPacked();
+    REQUIRE(bl != nullptr);
+
+    auto decoded = std::make_shared<flight_safety_system::transport::fss_message_asset_command>(msg_id, bl);
+    REQUIRE(decoded->getCommand() == flight_safety_system::transport::asset_command_goto);
+    REQUIRE(decoded->getLatitude() == goto_lat);
+    REQUIRE(decoded->getLongitude() == goto_lng);
+    REQUIRE(decoded->getServerCommandId() == server_command_id);
+}
+
+TEST_CASE("Asset Command without a server command id is byte-identical to a legacy command", "[TC-FSS-002]")
+{
+    /* Backward compatibility: a command whose server command id is 0 (not
+     * reported) must pack to exactly the same bytes as before the optional
+     * field existed — no trailing 8 bytes — so a legacy peer sees an
+     * unchanged wire format, and a legacy frame decodes with the id at 0. */
+    auto timestamp = static_cast<uint64_t>(random());
+    auto without = std::make_shared<flight_safety_system::transport::fss_message_asset_command>(
+        flight_safety_system::transport::asset_command_rtl, timestamp);
+    auto with_zero = std::make_shared<flight_safety_system::transport::fss_message_asset_command>(
+        flight_safety_system::transport::asset_command_rtl, timestamp);
+    with_zero->setServerCommandId(0);
+    without->setId(7);
+    with_zero->setId(7);
+    auto bl_without = without->getPacked();
+    auto bl_with_zero = with_zero->getPacked();
+    REQUIRE(bl_without->getLength() == bl_with_zero->getLength());
+    REQUIRE(std::string(bl_without->getData(), bl_without->getLength()) ==
+            std::string(bl_with_zero->getData(), bl_with_zero->getLength()));
+
+    /* A legacy frame (packed without the field) decodes to "not reported". */
+    auto decoded = std::make_shared<flight_safety_system::transport::fss_message_asset_command>(7, bl_without);
+    REQUIRE(decoded->getServerCommandId() == 0);
+
+    /* And a command that does report an id is exactly 8 bytes longer. */
+    auto with_id = std::make_shared<flight_safety_system::transport::fss_message_asset_command>(
+        flight_safety_system::transport::asset_command_rtl, timestamp);
+    with_id->setServerCommandId(42);
+    with_id->setId(7);
+    auto bl_with_id = with_id->getPacked();
+    REQUIRE(bl_with_id->getLength() == bl_without->getLength() + sizeof(uint64_t));
+}
+
 TEST_CASE("Command Ack Message Check - Actioned")
 {
     auto msg_id = static_cast<uint64_t>(random());
