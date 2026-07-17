@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Dispatched commands now carry a per-server operator-action identifier:
+  `fss_message_asset_command.server_command_id` (the dispatching server's
+  command DB row id), negotiated via the new `FSS_FEATURE_SERVER_COMMAND_ID`
+  capability and carried as an optional trailing wire field, so legacy peers
+  see an unchanged wire format. Within one connection, the same id means the
+  same operator action (a redelivery) and a new id means a new action — a
+  deliberate operator retry with identical command/payload gets a fresh id on
+  every server, which is what lets an FMU connected to redundant servers tell
+  a genuine retry apart from another server's copy of the same push (cap-fmu
+  todo/86). Ids are unique per server only and must never be compared across
+  connections; 0 means "not reported". (todo/49)
 - Per-connection configurable `TCP_USER_TIMEOUT`: a flight-safety client
   (e.g. cap-fmu) can now bound how long a blocking send into a half-dead
   server can stall — `tcp_user_timeout_ms` in the client JSON config, a
