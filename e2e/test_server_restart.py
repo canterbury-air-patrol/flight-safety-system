@@ -5,6 +5,7 @@ ack bookkeeping settles rather than getting stuck."""
 from __future__ import annotations
 
 import os
+import re
 import signal
 import socket
 import subprocess
@@ -250,6 +251,19 @@ def test_client_reconnects_after_server_bounce(
         assert redelivered, (
             "command was not redelivered after reconnect\n"
             + client_log.read_text(errors="replace")
+        )
+        # todo/49: a redelivery is the SAME operator action, so every RTL
+        # delivery -- pre-bounce and redelivered -- carried this one row's id
+        # as its server command id (a fresh id would falsely signal a new
+        # operator action to an FMU deduping on it).
+        delivered_cmd_ids = {
+            int(m) for m in re.findall(
+                r"RCVD_CMD: RTL cmd_id=(\d+)", client_log.read_text(errors="replace"),
+            )
+        }
+        assert delivered_cmd_ids == {command_dbid}, (
+            f"redelivery changed (or dropped) the server command id: "
+            f"expected only {command_dbid}, saw {sorted(delivered_cmd_ids)}"
         )
         with conn.cursor() as cur:
             cur.execute(
