@@ -71,6 +71,31 @@ def crl_certs_dir(tmp_path_factory: pytest.TempPathFactory, certs_dir: Path) -> 
     return target
 
 
+def test_second_revocation_keeps_the_first_on_the_crl(crl_certs_dir: Path) -> None:
+    """Revoking a second client must not silently un-revoke the first.
+
+    todo/63: certtool --generate-crl honours only the last --load-certificate
+    flag (observed with certtool 3.8.13), so the script's old
+    one-flag-per-revoked-cert form produced a CRL holding only the newest
+    revocation -- a server reloading it (SIGHUP, or a fresh listener) would
+    re-admit every client revoked earlier. No server needed here: the defect
+    is in the CRL contents themselves.
+    """
+    for name in ("test1", "test2"):
+        subprocess.check_call(
+            ["./revoke-client.sh", name],
+            cwd=str(crl_certs_dir),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+    info = subprocess.check_output(
+        ["certtool", "--crl-info", "--infile", "crl.pem"],
+        cwd=str(crl_certs_dir), stdin=subprocess.DEVNULL, text=True,
+    )
+    assert "Revoked certificates (2):" in info, info
+    assert info.count("Serial Number") == 2, info
+
+
 @pytest.mark.requires_docker
 @pytest.mark.slow
 def test_revocation_disconnects_and_blocks_reconnect_but_not_others(

@@ -48,6 +48,10 @@ flight-safety-system (1.2.0) stable; urgency=medium
     password in secure_string.
   * Fix certs/revoke-client.sh hanging forever when run non-interactively,
     and stop the example fake_client dying on SIGPIPE after a peer reset.
+  * Fix certs/revoke-client.sh silently dropping every earlier revocation
+    from the CRL when revoking another client (certtool honours only the
+    last --load-certificate flag), which let a server reloading the CRL
+    re-admit previously revoked certificates.
   * Document the optional-trailing-wire-field extension rule in
     fss-transport.hpp so the next capability author does not have to
     re-derive it.
@@ -58,7 +62,7 @@ flight-safety-system (1.2.0) stable; urgency=medium
     fss-transport.hpp changed object layout and vtable shape since the 1.1.x
     line; consumers must rebuild.
 
- -- Scott Parlane <sjp@canterburyairpatrol.org>  Sat, 18 Jul 2026 17:41:31 +1200
+ -- Scott Parlane <sjp@canterburyairpatrol.org>  Sat, 18 Jul 2026 21:11:11 +1200
 
 flight-safety-system (1.1.1) stable; urgency=medium
 

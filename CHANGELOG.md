@@ -145,6 +145,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the process. Both surfaced by the CRL-revocation e2e test. (todo/29)
 
 ### Security
+- `certs/revoke-client.sh` no longer silently un-revokes earlier
+  revocations: certtool's `--generate-crl` honours only the last
+  `--load-certificate` flag (observed with certtool 3.8.13), so revoking a
+  second client produced a CRL containing only that client — and a server
+  reloading the CRL (SIGHUP, or a fresh listener) would accept every
+  previously revoked certificate again. The script now concatenates all
+  revoked certs into one PEM and passes it once, a form every certtool
+  version honours; regression-tested by revoking two clients and asserting
+  both serials stay on the CRL. (todo/63)
 - Two `secure_string` scrubbing gaps closed: the recv-side frame and the
   packed send buffer of `smm_settings` messages (SMM credentials in flight)
   are now wiped after use, and the PostgreSQL password is held in
