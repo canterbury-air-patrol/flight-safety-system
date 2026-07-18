@@ -190,9 +190,31 @@ auto main(int argc, char *argv[]) -> int
         {
             client_timeout_sec = config["client_timeout"].asUInt64();
         }
+        if (client_timeout_sec == 0)
+        {
+            /* isTimedOut() severs an identified client
+             * client_timeout_ms after its last RTT response; 0 makes that
+             * deadline expire one tick after identify, so checkTimeouts() severs
+             * every identified aircraft on every 1 s sweep -- a fleet-wide
+             * disconnect/reconnect loop. */
+            FSS_LOG_WARN("server", "client_timeout must be > 0 (0 disconnects every identified client almost "
+                                   "immediately); using default "
+                                       << default_client_timeout_sec);
+            client_timeout_sec = default_client_timeout_sec;
+        }
         if (config.isMember("identify_timeout"))
         {
             identify_timeout_sec = config["identify_timeout"].asUInt64();
+        }
+        if (identify_timeout_sec == 0)
+        {
+            /* isTimedOut() prunes an unidentified client identify_timeout_ms
+             * after activation; 0 prunes it before it can ever complete the
+             * identify handshake, so no client can ever connect. */
+            FSS_LOG_WARN("server",
+                         "identify_timeout must be > 0 (0 prunes every client before it can identify); using default "
+                             << default_identify_timeout_sec);
+            identify_timeout_sec = default_identify_timeout_sec;
         }
         if (config.isMember("position_staleness_ms"))
         {
@@ -202,9 +224,34 @@ auto main(int argc, char *argv[]) -> int
         {
             rate_capacity = config["message_rate_capacity"].asUInt64();
         }
+        if (rate_capacity == 0)
+        {
+            /* rate_limiter's token bucket saturates at max_tokens == 0
+             * (rate-limiter.hpp), so it can never grant a token -- every
+             * rate-limited message from every client is dropped forever. This is
+             * silent at the liveness layer: rtt_response is exempt from rate
+             * limiting (todo/37), so the aircraft still looks healthily
+             * connected while zero positions/status/search reports get through. */
+            FSS_LOG_WARN("server", "message_rate_capacity must be > 0 (0 drops every rate-limited message forever); "
+                                   "using default "
+                                       << default_rate_capacity);
+            rate_capacity = default_rate_capacity;
+        }
         if (config.isMember("message_rate_refill"))
         {
             rate_refill = config["message_rate_refill"].asUInt64();
+        }
+        if (rate_refill == 0)
+        {
+            /* The refill_per_s > 0 branch in rate_limiter::consume() never runs
+             * (rate-limiter.hpp), so once the initial bucket drains, all
+             * rate-limited traffic is dropped forever -- the same silent hazard
+             * as message_rate_capacity == 0, just delayed until the burst
+             * capacity is used up. */
+            FSS_LOG_WARN("server", "message_rate_refill must be > 0 (0 permanently drains the rate-limit bucket "
+                                   "once it empties); using default "
+                                       << default_rate_refill_per_s);
+            rate_refill = default_rate_refill_per_s;
         }
         if (config.isMember("duplicate_identity_policy"))
         {
