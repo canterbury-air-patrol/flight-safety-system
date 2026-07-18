@@ -2618,6 +2618,34 @@ TEST_CASE("session: a failed RTT send creates no outstanding request and is not 
     REQUIRE(conn->send_attempts.size() == attempts_before + 2);
 }
 
+TEST_CASE("session: sendRTTRequest on a cleared connection reaps via the handler instead of crashing (todo/53)")
+{
+    /* todo/53: sendRTTRequest() used to dereference getConnection() with no
+     * null guard, unlike its siblings sendCommand()/sendSMMSettings(). It was
+     * safe only because production calls it exclusively from the outbound
+     * worker, which never observes a null connection. Pin the fix directly:
+     * clear the connection (disconnect() already run, as a concurrent
+     * teardown would leave it) and confirm the call is a harmless failed-send
+     * that reaps the client through the handler, not a null-pointer crash. */
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 1;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+
+    session->disconnect();             // clears the connection out from under sendRTTRequest below
+    REQUIRE(handler.disconnects == 0); // baseline: disconnect() itself does not call clientDisconnected
+
+    auto rtt_req = std::make_shared<fss::transport::fss_message_rtt_request>();
+    session->sendRTTRequest(rtt_req); // must not crash
+
+    REQUIRE(handler.disconnects > 0);
+}
+
 TEST_CASE("asset_command: altitude above uint16_t max survives pack/decode round-trip")
 {
     /* Regression: altitude was stored as uint16_t, silently truncating any

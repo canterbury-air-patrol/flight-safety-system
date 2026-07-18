@@ -637,7 +637,12 @@ void fss::server::fss_client::sendRTTRequest(const std::shared_ptr<fss::transpor
      * sendMsg, under its own send_lock, before the blocking write), so the
      * real id is not known until the call returns. The entry is therefore
      * pushed immediately after a successful send (todo/22: only a request
-     * that actually went out is tracked), not before it. */
+     * that actually went out is tracked), not before it.
+     *
+     * todo/53: the send below now goes through the null-safe base-class
+     * sendMsg(), like sendCommand() and sendSMMSettings() — a connection
+     * cleared by a concurrent teardown reads as a failed send (handled below
+     * by reaping via clientDisconnected) instead of a null-pointer crash. */
     bool timed_out = false;
     {
         std::scoped_lock guard(this->client_lock);
@@ -660,7 +665,7 @@ void fss::server::fss_client::sendRTTRequest(const std::shared_ptr<fss::transpor
         return;
     }
     uint64_t now = this->clock->now_ms();
-    if (!this->getConnection()->sendMsg(rtt_req))
+    if (!this->sendMsg(rtt_req))
     {
         /* The socket write failed, so the connection is broken. Reap the client
          * now rather than waiting out the liveness timeout against a peer that
