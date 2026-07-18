@@ -8,11 +8,18 @@ flight-safety-system (1.2.0) stable; urgency=medium
   * Add a per-connection configurable TCP_USER_TIMEOUT so a flight-safety
     client can bound how long a blocking send into a half-dead server may
     stall.
+  * Add a configurable duplicate-identity policy, applied when a second
+    connection identifies as an already-connected asset:
+    reject_newcomer (default, keep the established session) or
+    evict_oldest.
   * Report a cut-short active-server read as an explicit failure status
     instead of throwing an exception across the poller thread.
   * Make a terminal command-ack outcome final for its dispatch, so a later,
     misordered or forged ack can no longer rewrite a settled outcome in the
     command audit trail.
+  * Detect failed telemetry/command DB writes at all: the ECPG write
+    functions never checked sqlca.sqlcode, so a failing write (e.g. a full
+    disk) was silent audit loss the fail-safe machinery never saw.
   * Trip the DB fail-safe on a dropped command dispatch/ack write, not just a
     logged counter change.
   * Latch the DB fail-safe behind an admission gate, so a write-only DB
@@ -20,6 +27,10 @@ flight-safety-system (1.2.0) stable; urgency=medium
   * Require a DB write-failure incident to genuinely span
     db_write_failure_disconnect_ticks before tripping the fail-safe, instead
     of tripping under the default configuration regardless.
+  * Move the per-connection DB reconnect health probe off the main loop onto
+    the command poller, and bound in-flight libpq stalls with
+    PGTCPUSERTIMEOUT, so a frozen or partitioned database degrades to stale
+    caches instead of freezing command dispatch fleet-wide.
   * Make duplicate-identity resolution atomic with the asset-id claim, so two
     connections identifying the same asset at the same instant can no longer
     both go live.
@@ -30,14 +41,24 @@ flight-safety-system (1.2.0) stable; urgency=medium
     looked healthily connected.
   * Harden sendRTTRequest() to use the null-safe base-class sendMsg(), the
     same guard sendCommand()/sendSMMSettings() already had.
+  * Pin the connection across processMessage so a concurrent teardown can
+    no longer leave message handlers dereferencing a cleared connection
+    pointer.
+  * Wipe SMM credential wire frames after use and hold the PostgreSQL
+    password in secure_string.
+  * Fix certs/revoke-client.sh hanging forever when run non-interactively,
+    and stop the example fake_client dying on SIGPIPE after a peer reset.
   * Document the optional-trailing-wire-field extension rule in
     fss-transport.hpp so the next capability author does not have to
     re-derive it.
+  * Ship LICENSE.md, CHANGELOG.md and tests/tsan.supp in the release
+    tarball, and stop developer-local caches and generated test reports
+    leaking into it.
   * Bump library sonames .so.2 -> .so.3 (-version-info 3:0:0): the installed
     fss-transport.hpp changed object layout and vtable shape since the 1.1.x
     line; consumers must rebuild.
 
- -- Scott Parlane <sjp@canterburyairpatrol.org>  Sat, 18 Jul 2026 11:30:46 +1200
+ -- Scott Parlane <sjp@canterburyairpatrol.org>  Sat, 18 Jul 2026 17:41:31 +1200
 
 flight-safety-system (1.1.1) stable; urgency=medium
 
