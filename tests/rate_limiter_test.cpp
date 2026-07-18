@@ -124,6 +124,30 @@ TEST_CASE("rate_limiter: refill rate above 1000/s does not stall the clock")
     REQUIRE(!rl.consume(2));
 }
 
+TEST_CASE("rate_limiter: zero capacity never grants a token (todo/50)")
+{
+    // Pins the config-validation hazard todo/50 guards against:
+    // message_rate_capacity == 0 means max_tokens == 0, so tokens saturates
+    // at 0 and consume() can never succeed, no matter how much time passes.
+    fss::rate_limiter rl(0, 5);
+    REQUIRE(!rl.consume(0));
+    REQUIRE(!rl.consume(1000));
+    REQUIRE(!rl.consume(1000000000));
+}
+
+TEST_CASE("rate_limiter: zero refill grants exactly the initial capacity, then never again (todo/50)")
+{
+    // Pins the other half of the todo/50 hazard: message_rate_refill == 0
+    // means the refill_per_s > 0 branch never runs, so the bucket drains once
+    // and stays empty forever, even after a very long elapsed time.
+    fss::rate_limiter rl(3, 0);
+    REQUIRE(rl.consume(0));
+    REQUIRE(rl.consume(0));
+    REQUIRE(rl.consume(0));
+    REQUIRE(!rl.consume(0));
+    REQUIRE(!rl.consume(1000000000));
+}
+
 TEST_CASE("rate_limiter: huge elapsed at a high refill rate does not overflow")
 {
     // elapsed * refill_per_s is computed in uint64_t. With refill_per_s = 2^32
