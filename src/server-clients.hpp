@@ -219,7 +219,14 @@ public:
      * per-connection id into the message instance it is given (the C8
      * invariant), so each client must get its own instance: decode() over
      * getPacked() builds an independent clone per client rather than sharing
-     * `msg` (packed once, since the bytes don't depend on the recipient). */
+     * `msg` (packed once, since the bytes don't depend on the recipient).
+     *
+     * todo/59: the isAircraft() filter below is deliberate, not an oversight —
+     * non-aircraft clients (ADS-B feeders, config utilities) are telemetry
+     * producers and never consumers of relayed traffic, so broadcasts are
+     * aircraft-only by design. That also means the periodic 15 s server-list
+     * push intentionally skips them: they get their server list from their
+     * own config, not from discovery. */
     void broadcastMsg(const std::shared_ptr<flight_safety_system::transport::fss_message> &msg,
                       flight_safety_system::server::fss_client *except = nullptr) override
     {

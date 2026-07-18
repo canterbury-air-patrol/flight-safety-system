@@ -212,6 +212,11 @@ TEST_CASE("server_clients: disconnecting unknown client is a no-op")
 
 TEST_CASE("server_clients: broadcastMsg reaches aircraft clients only")
 {
+    /* todo/59: the aircraft-only filter in broadcastMsg is by design, not an
+     * accident — non-aircraft clients (ADS-B feeders, config utilities) are
+     * telemetry producers and never consumers of relayed traffic. Pin that a
+     * non-aircraft participant receives nothing from a broadcast, turning the
+     * intended behaviour into a tested contract. */
     server_clients sc;
     fss_test::MockDatabase mock;
 
@@ -228,6 +233,11 @@ TEST_CASE("server_clients: broadcastMsg reaches aircraft clients only")
     // Broadcast should not crash and should only target aircraft
     auto msg = std::make_shared<fss::transport::fss_message_rtt_request>();
     sc.broadcastMsg(msg);
+
+    // The non-aircraft client is skipped by broadcastMsg's isAircraft() filter
+    // itself (synchronously, before any per-client worker dispatch), so its
+    // connection receives nothing regardless of worker-thread timing.
+    REQUIRE(conn2->sentSnapshot().empty());
 }
 
 TEST_CASE("server_clients: broadcastMsg does not block on one black-holed client (todo/36)")
