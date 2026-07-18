@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.2.0] - 2026-07-18
 
 ### Added
 - Dispatched commands now carry a per-server operator-action identifier:
@@ -37,6 +37,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   caller previously meant `std::terminate` on a safety-critical service.
   Behaviour on a failed read is unchanged (poller keeps the previous cached
   list; identify skips the server-list send). (todo/24)
+- ABI: all four library sonames bump `.so.2` → `.so.3`
+  (`-version-info 3:0:0` for `libfss`, `libfss-transport`,
+  `libfss-transport-ssl`, `libfss-client-ssl`). The installed
+  `fss-transport.hpp` changed object layout (`fss_connection` gained
+  `tcp_user_timeout_ms`, todo/26) and vtable shape
+  (`fss_message_asset_command` gained `getServerCommandId()`, todo/49) since
+  the 1.1.x line; a same-soname mix of an old library with the new header
+  (or vice versa) would silently corrupt derived-class layouts rather than
+  fail to link. Consumers must rebuild. (todo/61)
+- The optional-trailing-wire-field extension rule is now documented in
+  `fss-transport.hpp`, next to the `FSS_FEATURE` flag block: any future
+  optional trailing field on an already-extended message must be
+  prefix-closed with the earlier ones (emitted together, 0-filled if unset)
+  so length alone still decodes it unambiguously. No wire or code change —
+  the two fields this already governs (`rtt_response.client_timestamp`,
+  `asset_command.server_command_id`) are unaffected. (todo/51)
 
 ### Fixed
 - A terminal command-ack outcome (actioned/superseded/rejected/noop) is now
@@ -71,6 +87,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   live, violating both `duplicate_identity_policy` contracts (commands
   delivered to two sessions presenting the same aircraft identity, telemetry
   from two sources stored under one asset). (todo/44)
+- Four config fields that silently produce a live-looking but data-dead (or
+  flapping) server at 0 now warn and substitute a safe default, matching the
+  existing `tls_handshake_timeout_ms`/`max_concurrent_handshakes` guards:
+  `client_timeout` and `identify_timeout` (0 would sever/prune every client
+  on the very next tick) and `message_rate_capacity`/`message_rate_refill` (0
+  silently drops all rate-limited telemetry forever while the aircraft still
+  looks healthily connected, since `rtt_response` is exempt from rate
+  limiting — todo/37). (todo/50)
+- `sendRTTRequest()` now sends through the null-safe base-class `sendMsg()`,
+  closing the one remaining unguarded `getConnection()` dereference among the
+  three per-client send paths. Not reachable as a crash today — safe only
+  because of a call-graph ordering invariant documented nowhere near the call
+  site — but this hardens it the same way `sendCommand()` and
+  `sendSMMSettings()` already were. (todo/53)
 
 ## [1.1.1] - 2026-07-06
 
