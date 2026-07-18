@@ -7,6 +7,13 @@ AM_CXXFLAGS = -pthread -fPIC -std=c++17 -I. -Werror -Wall -Wshadow -Wunused -Wnu
 AM_CXXFLAGS += $(TSAN_CXXFLAGS)
 AM_LDFLAGS = $(TSAN_LDFLAGS)
 
+# EXTRA_DIST must stay outside every conditional: automake only distributes
+# conditional EXTRA_DIST entries when the condition was true in the tree that
+# ran `make dist`, and the release tarball must carry these files regardless
+# of that tree's configure flags (tsan.supp was silently dropped from the
+# 1.2.0 tarball this way).
+EXTRA_DIST = test_helpers.hpp mock_database.hpp tsan.supp
+
 if ENABLE_TSAN
 # Under --enable-tsan the whole suite runs instrumented, so `make check` needs
 # the suppression file in the environment or the documented kernel-synchronised
@@ -55,8 +62,6 @@ all_test_LDADD = ../src/libfss-transport.la ../src/libfss-client-ssl.la ../src/l
 
 all_test_SOURCES += connection-ssl.cpp
 all_test_LDADD += ../src/libfss-transport-ssl.la $(GNUTLS_LIBS) $(CATCH2_LIBS)
-
-EXTRA_DIST = test_helpers.hpp mock_database.hpp
 
 BUILT_SOURCES += certs certs-alt certs/expired certs/ghost certs/client.crl.pem certs/empty.crl.pem
 
@@ -129,8 +134,6 @@ concurrency_tsan_test_SOURCES = main.cpp \
 	../src/fss-main.cpp
 concurrency_tsan_test_CXXFLAGS = $(AM_CXXFLAGS)
 concurrency_tsan_test_LDADD = $(CATCH2_LIBS) $(pthread_LIBS)
-
-EXTRA_DIST += tsan.supp
 
 # Run the full unit suite *and* the concurrency stress binary under TSan in one
 # command. `make check` already runs all_test under TSan (TESTS +
