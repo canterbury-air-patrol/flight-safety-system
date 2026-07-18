@@ -41,7 +41,7 @@ pkgconfig_DATA += fss-transport-ssl.pc
 
 lib_LTLIBRARIES += libfss-client-ssl.la
 libfss_client_ssl_la_LDFLAGS = -version-info 3:0:0
-libfss_client_ssl_la_SOURCES = client-ssl.cpp
+libfss_client_ssl_la_SOURCES = client-ssl.cpp json-config.hpp
 libfss_client_ssl_la_CXXFLAGS = $(AM_CXXFLAGS) $(JSONCPP_CFLAGS)
 libfss_client_ssl_la_LIBADD = $(GNUTLS_LIBS) $(JSONCPP_LIBS) -L. libfss.la libfss-transport.la libfss-transport-ssl.la
 include_HEADERS += fss-client-ssl.hpp
@@ -58,7 +58,7 @@ CLEANFILES = server-db.c
 if SERVER
 sbin_PROGRAMS += fss-server
 
-fss_server_SOURCES = server.cpp client_session.cpp fss-server.hpp rate-limiter.hpp server-clients.hpp server-failsafe.hpp db.cpp server-db.pgc server-db.h db-write-queue.cpp db-write-queue.hpp
+fss_server_SOURCES = server.cpp client_session.cpp fss-server.hpp rate-limiter.hpp server-clients.hpp server-failsafe.hpp json-config.hpp db.cpp server-db.pgc server-db.h db-write-queue.cpp db-write-queue.hpp
 fss_server_CXXFLAGS = $(AM_CXXFLAGS) $(JSONCPP_CFLAGS)
 fss_server_CFLAGS = $(AM_CFLAGS) $(ECPG_CFLAGS)
 fss_server_LDADD = libfss.la libfss-transport.la $(JSONCPP_LIBS) $(ECPG_LIBS)

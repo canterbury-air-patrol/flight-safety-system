@@ -1,5 +1,6 @@
 #include <fss-client-ssl.hpp>
 #include "fss-log.hpp"
+#include "json-config.hpp"
 
 #include <algorithm>
 #include <iostream>
@@ -11,30 +12,6 @@
 #pragma GCC diagnostic ignored "-Weffc++"
 #include <json/json.h>
 #pragma GCC diagnostic pop
-
-namespace {
-
-constexpr int min_tcp_port = 1;
-constexpr int max_tcp_port = 65535;
-
-auto read_server_port(const Json::Value &server, unsigned int idx, uint16_t &out) -> bool
-{
-    if (!server.isMember("port") || !server["port"].isInt())
-    {
-        FSS_LOG_ERROR("client", "Invalid server config at index " << idx << ": port must be an integer TCP port");
-        return false;
-    }
-    int port = server["port"].asInt();
-    if (port < min_tcp_port || port > max_tcp_port)
-    {
-        FSS_LOG_ERROR("client", "Invalid server config at index " << idx << ": port " << port << " is outside 1-65535");
-        return false;
-    }
-    out = static_cast<uint16_t>(port);
-    return true;
-}
-
-} // namespace
 
 flight_safety_system::client_ssl::fss_client::fss_client(const std::string &t_fileName)
 {
@@ -76,7 +53,8 @@ flight_safety_system::client_ssl::fss_client::fss_client(const std::string &t_fi
         for (unsigned int idx = 0; idx < config["servers"].size(); idx++)
         {
             uint16_t port = 0;
-            if (!read_server_port(config["servers"][idx], idx, port))
+            if (!read_json_tcp_port(config["servers"][idx]["port"], "client",
+                                    "server config at index " + std::to_string(idx), port))
             {
                 continue;
             }
