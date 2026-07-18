@@ -61,6 +61,32 @@ inline auto negotiateFeatureFlags(uint32_t peer_flags) -> uint32_t
     return peer_flags & FSS_SUPPORTED_FEATURES;
 }
 
+/* Extension rule for a message that already carries an optional trailing wire
+ * field (rtt_response.client_timestamp, asset_command.server_command_id —
+ * see their field comments below): fss_message::decode() is static and
+ * connection-blind, so an optional field's presence can only be inferred from
+ * the remaining frame length, never from the negotiated feature_flags above.
+ * That makes the optional tail PREFIX-CLOSED: the day a message gains a
+ * SECOND optional trailing field, that new field may be emitted only
+ * together with every earlier optional field of that message (0-filled if
+ * unset/unknown) — never on its own. Existing omit-when-0 behaviour is
+ * unchanged when the new field itself is absent, so already-deployed peers
+ * see no wire change.
+ *
+ * Worked example for asset_command hypothetically gaining a second optional
+ * field X (today it has one, server_command_id):
+ *   0 trailing u64s -> legacy: no scid, no X
+ *   1 trailing u64  -> scid only (today's dialect)
+ *   2 trailing u64s -> scid (possibly 0-valued) + X
+ * A peer implementing X always emits both, so "1 field" can only mean an
+ * X-unaware peer; the 0-filled scid decodes to its existing "not reported"
+ * sentinel, which every consumer already handles. Emitting X alone with scid
+ * omitted would be indistinguishable by length from today's one-field
+ * dialect — hence the rule. (todo/51; the two fields it already governs are
+ * todo/17 item 3 and todo/49.) If a protocol v3 ever happens, fold these
+ * optional tails into an explicit presence mechanism (bitmap/TLV) and retire
+ * this rule. */
+
 /* Maximum payload length accepted from the wire. Anything larger is rejected
  * before allocation to prevent memory exhaustion attacks. Sized well above the
  * largest legitimate message (server_list with many entries) with headroom. */
@@ -465,7 +491,11 @@ private:
      * RTC or a simulator stub). That collision degrades safely — the consumer
      * treats epoch-0 as "no measurement", so the offset stays 0 and the
      * staleness gate falls back to a symmetric window; an aircraft with a
-     * frozen 1970 clock has no usable offset to feed it anyway. */
+     * frozen 1970 clock has no usable offset to feed it anyway.
+     *
+     * This is the first of the two optional trailing fields the
+     * prefix-closed extension rule above (todo/51) governs — read that
+     * before adding a second optional field to this message. */
     uint64_t client_timestamp{0};
 protected:
     void unpackData(const std::shared_ptr<buf_len> &bl);
@@ -578,7 +608,11 @@ private:
      * This is NOT the per-connection header id used for command-ack
      * correlation (dispatch_id): that one is scoped to a single delivery and
      * stable across resends of it; this one is scoped to the operator action
-     * and survives reconnects. */
+     * and survives reconnects.
+     *
+     * The other of the two optional trailing fields the prefix-closed
+     * extension rule above (todo/51) governs — read that before adding a
+     * second optional field to this message. */
     uint64_t server_command_id{0};
 protected:
     void unpackData(const std::shared_ptr<buf_len> &bl);
