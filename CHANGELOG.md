@@ -27,6 +27,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `fss_connection_client::create(..., t_tcp_user_timeout_ms)` at the
   transport layer. The default stays the established 30 s everywhere, and
   server-accepted sockets are unaffected. (todo/26)
+- Configurable duplicate-identity handling: a second connection identifying
+  as an already-connected asset is now resolved by policy instead of both
+  sessions going live. `duplicate_identity_policy` in `server.json` selects
+  `reject_newcomer` (default: keep the established session and refuse the
+  newcomer, avoiding flip-flop on a genuine misconfiguration) or
+  `evict_oldest` (favour a fast reconnect). Applied at identify, aircraft
+  connections only — non-aircraft clients never claim an asset id. (todo/31)
+- Client-library hooks added for the e2e harness, usable by any consumer: a
+  `non_aircraft` config flag so `sendIdentify()` sends
+  `identity_non_aircraft`, and `clock_offset_ms` (config field) +
+  `getSkewedTimestamp()` so a client reports a deliberately skewed clock.
+  (todo/28, todo/33)
 
 ### Changed
 - `IDatabase::getActiveServers()` now reports a cut-short read (mid-cursor
@@ -55,6 +67,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `asset_command.server_command_id`) are unaffected. (todo/51)
 
 ### Fixed
+- Failed telemetry/command DB writes are now detected at all: the six ECPG
+  write functions (position/RTT/status/search/dispatch/ack) ran their SQL
+  and returned unconditionally, never checking `sqlca.sqlcode`, so a failing
+  write — e.g. a full disk — was silent audit loss that the fail-safe
+  machinery never saw (`write_failure_count()` stayed 0 through an entire
+  disk-full run). They now report failure, and the `db.cpp` wrappers raise
+  it into the write queue's failure accounting — the signal that arms the
+  todo/45/47 fail-safe entries below. (todo/34)
+- The main loop no longer makes blocking DB calls: the per-connection
+  reconnect health probe (a live `SELECT 1` per tick) moved onto the
+  command poller, which already owns every DB read, so a frozen or
+  black-holed Postgres now degrades to "caches go stale" instead of
+  "command dispatch stops fleet-wide". Defence in depth:
+  `PGTCPUSERTIMEOUT=25000` bounds in-flight libpq stalls on the same 25 s
+  clock as the keepalive envelope, so a sustained partition fails writes —
+  tripping the fail-safe — instead of hanging the writer forever. (todo/46)
 - A terminal command-ack outcome (actioned/superseded/rejected/noop) is now
   final for its dispatch: a later terminal ack — from a buggy, misordered or
   forged peer — can no longer silently rewrite a settled outcome in the
@@ -101,6 +129,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   because of a call-graph ordering invariant documented nowhere near the call
   site — but this hardens it the same way `sendCommand()` and
   `sendSMMSettings()` already were. (todo/53)
+- `processMessage()` now captures the connection `shared_ptr` once, up
+  front, and bails if teardown has already cleared it; the local reference
+  keeps the connection alive and non-null for the whole call, so a
+  mid-message teardown reads as failed sends on a closed fd. Previously
+  several handler sites dereferenced `getConnection()` unguarded — safe in
+  production only via the recv-thread join inside `disconnect()`, and a
+  concurrent teardown (evict_oldest severing a client mid-identify) crashed
+  the unit harness under TSan through exactly that window. (PR #332)
+- `certs/revoke-client.sh` no longer hangs forever when run
+  non-interactively — `certtool --generate-crl` had no `--template`, so any
+  scripted invocation sat at an interactive prompt — and the example
+  `fake_client` now ignores SIGPIPE the way the server does, so a send
+  after the peer resets the connection fails the send instead of killing
+  the process. Both surfaced by the CRL-revocation e2e test. (todo/29)
+
+### Security
+- Two `secure_string` scrubbing gaps closed: the recv-side frame and the
+  packed send buffer of `smm_settings` messages (SMM credentials in flight)
+  are now wiped after use, and the PostgreSQL password is held in
+  `secure_string` end-to-end (`pg_pass` and `db_connection`'s copy), with a
+  by-value nul-terminated accessor for ECPG rather than a cached mutable
+  buffer the two reconnecting DB threads could race on. (todo/43)
+
+### Packaging
+- The release tarball now ships `LICENSE.md` and `CHANGELOG.md`, and always
+  includes `tests/tsan.supp` and the test support headers — automake only
+  distributes conditional `EXTRA_DIST` entries when the condition is true
+  in the tree that runs `make dist`, so tarballs rolled without
+  `--enable-tsan` silently dropped the TSan suppression file. The dist-hook
+  now also strips `e2e/.ruff_cache` and the generated `e2e/traceability.json`.
 
 ## [1.1.1] - 2026-07-06
 
@@ -487,6 +545,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.12.3] - 2025-11-07
 
+[1.2.0]: https://github.com/canterbury-air-patrol/flight-safety-system/compare/1.1.1...1.2.0
+[1.1.1]: https://github.com/canterbury-air-patrol/flight-safety-system/compare/1.1.0...1.1.1
+[1.1.0]: https://github.com/canterbury-air-patrol/flight-safety-system/compare/1.0.3...1.1.0
+[1.0.3]: https://github.com/canterbury-air-patrol/flight-safety-system/compare/1.0.2...1.0.3
+[1.0.2]: https://github.com/canterbury-air-patrol/flight-safety-system/compare/1.0.1...1.0.2
 [1.0.1]: https://github.com/canterbury-air-patrol/flight-safety-system/compare/1.0.0...1.0.1
 [1.0.0]: https://github.com/canterbury-air-patrol/flight-safety-system/compare/0.12.3...1.0.0
 [0.12.3]: https://github.com/canterbury-air-patrol/flight-safety-system/releases/tag/0.12.3
