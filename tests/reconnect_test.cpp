@@ -11,11 +11,16 @@
 #endif
 
 #include <algorithm>
+#include <array>
+#include <atomic>
 #include <chrono>
 #include <memory>
 #include <string>
 #include <thread>
 #include <vector>
+
+#include <sys/socket.h>
+#include <unistd.h>
 
 #include "fss-transport.hpp"
 #include "fss-client-ssl.hpp"
@@ -64,6 +69,62 @@ protected:
         ++attempts;
         return false;
     }
+};
+
+/* Replacement connection that "sends" successfully without any socket. */
+class NullConnection : public flight_safety_system::transport::fss_connection {
+public:
+    NullConnection() = default;
+    NullConnection(const NullConnection&) = delete;
+    NullConnection(NullConnection&&) = delete;
+    auto operator=(const NullConnection&) -> NullConnection& = delete;
+    auto operator=(NullConnection&&) -> NullConnection& = delete;
+    ~NullConnection() override = default;
+protected:
+    auto sendMsg(const std::shared_ptr<flight_safety_system::transport::buf_len>&) -> bool override { return true; }
+};
+
+/* A server that can adopt an externally built connection (standing in for
+ * the live one a liveness trip is about to replace) and whose redial always
+ * succeeds by installing a NullConnection. */
+class SwapServer : public flight_safety_system::client_ssl::fss_server {
+public:
+    using fss_server::fss_server;
+    SwapServer(const SwapServer&) = delete;
+    SwapServer(SwapServer&&) = delete;
+    auto operator=(const SwapServer&) -> SwapServer& = delete;
+    auto operator=(SwapServer&&) -> SwapServer& = delete;
+    ~SwapServer() override = default;
+    auto connected() -> bool override { return true; }
+    void adopt(const std::shared_ptr<flight_safety_system::transport::fss_connection>& t_conn)
+    {
+        this->setConnection(t_conn);
+    }
+protected:
+    auto reconnect_to() -> bool override
+    {
+        this->setConnection(std::make_shared<NullConnection>());
+        return true;
+    }
+};
+
+/* A client that counts serverRequiresReconnect calls, to detect a stale
+ * connection's closed event being misattributed to a healthy server. */
+class ObservingClient : public flight_safety_system::client_ssl::fss_client {
+public:
+    using fss_client::fss_client;
+    ObservingClient(const ObservingClient&) = delete;
+    ObservingClient(ObservingClient&&) = delete;
+    auto operator=(const ObservingClient&) -> ObservingClient& = delete;
+    auto operator=(ObservingClient&&) -> ObservingClient& = delete;
+    ~ObservingClient() override = default;
+    std::atomic<int> reconnect_requests{0};
+    void serverRequiresReconnect(flight_safety_system::client_ssl::fss_server* server) override
+    {
+        ++this->reconnect_requests;
+        fss_client::serverRequiresReconnect(server);
+    }
+    void add(const std::shared_ptr<flight_safety_system::client_ssl::fss_server>& server) { this->addServer(server); }
 };
 
 } // namespace
@@ -332,4 +393,65 @@ TEST_CASE("reconnect: multi-server failover keeps secondary reachable")
         return msg->getType() == flight_safety_system::transport::message_type_identity ||
                msg->getType() == flight_safety_system::transport::message_type_rtt_request;
     }));
+}
+
+TEST_CASE("reconnect: reconnect() retires the old connection instead of leaking it")
+{
+    /* todo/65: reconnect() used to drop its reference to the previous
+     * connection without disconnecting it. The recv-thread lambda holds the
+     * connection shared_ptr, so the "discarded" connection stayed fully
+     * alive — fd open, recv thread running — leaking a thread + fd per
+     * liveness-triggered reconnect and leaving the old session live at the
+     * server, which then rejects this asset's re-identify as a duplicate. */
+    auto client = std::make_shared<flight_safety_system::client_ssl::fss_client>();
+    auto server = std::make_shared<SwapServer>(client.get(), "127.0.0.1", static_cast<uint16_t>(20603), "", "", "");
+
+    std::array<int, 2> sv{};
+    REQUIRE(socketpair(AF_UNIX, SOCK_STREAM, 0, sv.data()) == 0);
+    auto old_conn = flight_safety_system::transport::fss_connection::create(sv[0]);
+    REQUIRE(old_conn != nullptr);
+    old_conn->setHandler(server.get());
+    server->adopt(old_conn);
+    std::weak_ptr<flight_safety_system::transport::fss_connection> retired = old_conn;
+    old_conn = nullptr;
+
+    REQUIRE(server->reconnect());
+    REQUIRE(server->connected());
+
+    /* The recv thread held the last reference; only a real disconnect (which
+     * joins that thread) lets the old connection actually die. */
+    REQUIRE(retired.expired());
+
+    close(sv[1]);
+}
+
+TEST_CASE("reconnect: a retired connection's closed event cannot tear down the replacement")
+{
+    /* todo/65: the old connection's handler used to stay wired to the
+     * fss_server across reconnect(), so when the old connection finally died
+     * its closed event hit serverRequiresReconnect() and yanked the server —
+     * with its healthy replacement connection — back into the reconnect
+     * queue, where the next tick would tear the replacement down too. */
+    auto client = std::make_shared<ObservingClient>();
+    auto server = std::make_shared<SwapServer>(client.get(), "127.0.0.1", static_cast<uint16_t>(20604), "", "", "");
+
+    std::array<int, 2> sv{};
+    REQUIRE(socketpair(AF_UNIX, SOCK_STREAM, 0, sv.data()) == 0);
+    auto old_conn = flight_safety_system::transport::fss_connection::create(sv[0]);
+    REQUIRE(old_conn != nullptr);
+    old_conn->setHandler(server.get());
+    server->adopt(old_conn);
+    old_conn = nullptr;
+    client->add(server);
+
+    REQUIRE(server->reconnect());
+    REQUIRE(client->reconnect_requests.load() == 0);
+
+    /* Sever the far end of the retired connection. Pre-fix, its still-wired
+     * recv thread delivered message_type_closed to the fss_server; with the
+     * handler detached before disconnect there is no thread left to deliver
+     * anything, so the replacement must stay untouched. */
+    close(sv[1]);
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    REQUIRE(client->reconnect_requests.load() == 0);
 }
