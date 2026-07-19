@@ -5,9 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.2.1] - 2026-07-19
 
 ### Fixed
+- The listener's connection-setup worker now retires an accepted connection
+  that its connect callback declines (returns false) or abandons by
+  throwing. Previously the worker discarded the callback's verdict and
+  dropped its reference, while the connection's own recv thread kept the
+  connection alive — an unreachable zombie session leaking a socket and a
+  thread per declined peer. Latent rather than live: the bundled server's
+  callback never declines, but the callback's documented bool return
+  invited exactly this usage.
 - Client reconnect no longer loops forever after a liveness timeout
   (todo/65, found by CAP test-plan Path G's mixed-version interop tests).
   `fss_server::reconnect()` now retires the superseded connection properly —

@@ -1,3 +1,18 @@
+flight-safety-system (1.2.1) stable; urgency=medium
+
+  * Stop a two-server client from tearing down and redialling both healthy
+    server connections every reconnect interval forever after a single
+    liveness timeout: a reconnect now properly retires the superseded
+    connection -- closing its socket and joining its receive thread, so the
+    server no longer rejects the client's own re-identify as a duplicate of
+    a leaked session -- and restarts the liveness timer in its cold-connect
+    state instead of judging the new connection by the old one's silence.
+  * Retire an accepted connection whose connect callback declines it (or
+    throws) instead of leaking its socket and receive thread as an
+    unreachable zombie session.
+
+ -- Scott Parlane <sjp@canterburyairpatrol.org>  Sun, 19 Jul 2026 21:56:17 +1200
+
 flight-safety-system (1.2.0) stable; urgency=medium
 
   * Add a per-server operator-action identifier to dispatched commands
