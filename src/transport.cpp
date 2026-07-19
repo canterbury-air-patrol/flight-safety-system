@@ -662,9 +662,31 @@ void flight_safety_system::transport::fss_listen::startSetupWorker(int t_newfd)
         flight_safety_system::exception_guard setup_guard("transport", "new connection setup");
         setup_guard.run([&]() -> void {
             auto conn = this->newConnection(t_newfd);
-            if (conn != nullptr && this->cb != nullptr)
+            if (conn == nullptr)
             {
-                this->cb(conn);
+                return;
+            }
+            /* The callback only takes ownership by returning true. On every
+             * other outcome — false (declined), no callback, or a throw —
+             * the connection must be actively retired: its recv thread holds
+             * a shared_ptr to it (the create() lambda capture), so merely
+             * dropping ours here would leave it alive forever — fd open,
+             * thread running, messages queueing — with nobody able to reach
+             * it again. Same leaked-zombie mechanism the client reconnect
+             * path had (todo/65). */
+            bool adopted = false;
+            try
+            {
+                adopted = this->cb != nullptr && this->cb(conn);
+            }
+            catch (...)
+            {
+                conn->disconnect();
+                throw; // setup_guard logs it
+            }
+            if (!adopted)
+            {
+                conn->disconnect();
             }
         });
         this->releaseSetupSlot();

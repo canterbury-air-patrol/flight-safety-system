@@ -14,6 +14,8 @@
 
 #include <atomic>
 #include <csignal>
+#include <mutex>
+#include <stdexcept>
 #include <thread>
 
 #include <netinet/in.h>
@@ -402,4 +404,94 @@ TEST_CASE("Listen - Callback")
     REQUIRE(!cb->connected());
 
     client_handoff.reset();
+}
+
+TEST_CASE("Listen - declined connection is retired, not leaked")
+{
+    /* The connect callback only adopts a connection by returning true
+     * (todo/65 family): the connection's recv thread holds a shared_ptr to
+     * it, so if the setup worker merely dropped its own reference on a
+     * false return, the declined connection would stay alive forever — fd
+     * open, recv thread running — invisible to the application. */
+    constexpr uint16_t listen_port = 20220;
+    std::mutex sync;
+    bool callback_ran = false;
+    std::weak_ptr<flight_safety_system::transport::fss_connection> accepted;
+    flight_safety_system::transport::fss_connect_cb decline =
+        [&](std::shared_ptr<flight_safety_system::transport::fss_connection> c) -> bool {
+        const std::scoped_lock guard(sync);
+        callback_ran = true;
+        accepted = c;
+        return false;
+    };
+    auto listen = std::make_shared<flight_safety_system::transport::fss_listen>(listen_port, decline);
+    REQUIRE(listen != nullptr);
+
+    auto conn = std::make_shared<flight_safety_system::transport::fss_connection>();
+    REQUIRE(conn->connectTo("localhost", listen_port));
+
+    REQUIRE(fss_test::wait_for([&]() {
+        const std::scoped_lock guard(sync);
+        return callback_ran;
+    }));
+
+    /* The worker must actively disconnect the declined connection so the
+     * recv thread exits and releases the last reference. */
+    REQUIRE(fss_test::wait_for([&]() {
+        const std::scoped_lock guard(sync);
+        return accepted.expired();
+    }));
+
+    /* The peer observes a close rather than a silent zombie. */
+    std::shared_ptr<flight_safety_system::transport::fss_message> msg;
+    REQUIRE(fss_test::wait_for([&]() {
+        msg = conn->getMsg();
+        return msg != nullptr;
+    }));
+    REQUIRE(msg->getType() == flight_safety_system::transport::message_type_closed);
+
+    conn->disconnect();
+}
+
+TEST_CASE("Listen - throwing connect callback retires the connection")
+{
+    /* Same guarantee on the exception path: a callback that throws has not
+     * taken ownership, so the worker must retire the connection before the
+     * exception guard swallows and logs the error. */
+    constexpr uint16_t listen_port = 20221;
+    std::mutex sync;
+    bool callback_ran = false;
+    std::weak_ptr<flight_safety_system::transport::fss_connection> accepted;
+    flight_safety_system::transport::fss_connect_cb thrower =
+        [&](std::shared_ptr<flight_safety_system::transport::fss_connection> c) -> bool {
+        {
+            const std::scoped_lock guard(sync);
+            callback_ran = true;
+            accepted = c;
+        }
+        throw std::runtime_error("declined loudly");
+    };
+    auto listen = std::make_shared<flight_safety_system::transport::fss_listen>(listen_port, thrower);
+    REQUIRE(listen != nullptr);
+
+    auto conn = std::make_shared<flight_safety_system::transport::fss_connection>();
+    REQUIRE(conn->connectTo("localhost", listen_port));
+
+    REQUIRE(fss_test::wait_for([&]() {
+        const std::scoped_lock guard(sync);
+        return callback_ran;
+    }));
+    REQUIRE(fss_test::wait_for([&]() {
+        const std::scoped_lock guard(sync);
+        return accepted.expired();
+    }));
+
+    std::shared_ptr<flight_safety_system::transport::fss_message> msg;
+    REQUIRE(fss_test::wait_for([&]() {
+        msg = conn->getMsg();
+        return msg != nullptr;
+    }));
+    REQUIRE(msg->getType() == flight_safety_system::transport::message_type_closed);
+
+    conn->disconnect();
 }
