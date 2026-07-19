@@ -242,9 +242,15 @@ TEST_CASE("session: rejects identify when claimed name does not match cert CN")
 
     auto writer = make_mock_writer(mock);
     auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    fss_test::capture_cerr cap;
     session->processMessage(std::make_shared<fss::transport::fss_message_identity>("imposter"));
 
     REQUIRE(handler.disconnects > 0);
+    /* The rejection must be logged, naming both sides of the mismatch —
+     * a silent sever here cost a day of misdiagnosis (todo/65 re-test). */
+    auto out = cap.str();
+    REQUIRE(out.find("Rejecting identity 'imposter'") != std::string::npos);
+    REQUIRE(out.find("certificate CN 'craft'") != std::string::npos);
     /* No server-list / command messages should leak out before disconnect. */
     for (const auto &m : conn->sent)
     {
@@ -386,10 +392,18 @@ TEST_CASE("session: rejects identify when asset unknown to database")
 
     auto writer = make_mock_writer(mock);
     auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    fss_test::capture_cerr cap;
     auto identify = std::make_shared<fss::transport::fss_message_identity>("unknownAsset");
     session->processMessage(identify);
 
     REQUIRE(conn->sent.empty());
+    /* The rejection must be logged with the unmatched name — a silent
+     * sever here cost a day of misdiagnosis (todo/65 re-test). The
+     * wording covers the DB-read-failure case too, which getAssetId()
+     * cannot yet distinguish (todo/60). */
+    auto out = cap.str();
+    REQUIRE(out.find("Rejecting identity 'unknownAsset'") != std::string::npos);
+    REQUIRE(out.find("no matching asset") != std::string::npos);
 }
 
 TEST_CASE("session: getCommand returns newest-timestamp entry")
