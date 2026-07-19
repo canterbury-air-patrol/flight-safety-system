@@ -510,8 +510,22 @@ auto flight_safety_system::client_ssl::fss_server::reconnect() -> bool
     uint64_t ts = this->clock->now_ms();
     uint64_t elapsed_time = ts - this->last_tried;
 
-    if (this->getConnection() != nullptr)
+    /* Retire any previous connection properly (todo/65). Detach the handler
+     * FIRST so the old connection's closed event queues on the dying
+     * connection instead of reaching processMessage(), where it would be
+     * misattributed to this server object and tear down the replacement
+     * connection on the next reconnect tick. Then disconnect(), which
+     * closes the fd and joins the recv thread: dropping the reference
+     * alone leaks the connection (the recv-thread lambda holds it), and
+     * the still-open session keeps this asset's identity claimed at the
+     * server, which then rejects the re-identify as a duplicate for as
+     * long as the orphan survives. Safe to join here: reconnect() runs on
+     * the thread driving reconnection, which never holds servers_lock. */
+    auto old_conn = this->getConnection();
+    if (old_conn != nullptr)
     {
+        old_conn->setHandler(nullptr);
+        old_conn->disconnect();
         this->clearConnection();
     }
 
@@ -535,6 +549,15 @@ auto flight_safety_system::client_ssl::fss_server::reconnect() -> bool
         }
         else
         {
+            /* A fresh connection restarts liveness from the cold-connect
+             * state (todo/65): disarmed until the first message arrives on
+             * THIS connection (processMessage re-arms it). Merely
+             * refreshing the timestamp would keep measuring the previous
+             * connection's silence, so a quiet-but-healthy server would be
+             * flagged as timed out again on the very next tick, forever.
+             * Store before setHandler() so a message delivered immediately
+             * cannot have its arming overwritten by this reset. */
+            this->liveness_active.store(false, std::memory_order_relaxed);
             this->getConnection()->setHandler(this);
             /* Protocol version handshake must be the first message
              * exchanged after TLS connect, before identity. */
@@ -549,7 +572,11 @@ auto flight_safety_system::client_ssl::fss_server::reconnect() -> bool
 
 auto flight_safety_system::client_ssl::fss_server::isServerTimedOut() -> bool
 {
-    if (!this->liveness_active.load(std::memory_order_relaxed))
+    /* Acquire pairs with the release in processMessage(): once the armed
+     * flag is observed, the timestamp stored before it is visible too, so
+     * arming can never be seen with a stale/zero timestamp (which would
+     * read as an instant timeout). */
+    if (!this->liveness_active.load(std::memory_order_acquire))
     {
         return false;
     }
@@ -579,8 +606,14 @@ void flight_safety_system::client_ssl::fss_server::processMessage(
     }
     else
     {
-        this->liveness_active.store(true, std::memory_order_relaxed);
+        /* Timestamp first, then arm with release (paired with the acquire
+         * in isServerTimedOut): a reader observing the armed flag is
+         * guaranteed a timestamp at least this fresh. Arming before the
+         * timestamp allowed a window where the flag was set but the
+         * timestamp still held its previous (or zero) value — an instant
+         * spurious timeout. */
         this->last_message_received_time.store(this->clock->now_ms(), std::memory_order_relaxed);
+        this->liveness_active.store(true, std::memory_order_release);
         switch (msg->getType())
         {
             case flight_safety_system::transport::message_type_unknown:

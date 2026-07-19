@@ -233,6 +233,27 @@ protected:
     auto reconnect_to() -> bool override { return false; }
 };
 
+/* A server whose reconnect() succeeds by installing a fresh in-memory
+ * connection, for exercising post-reconnect state. */
+class ReconnectingServer : public fss::client_ssl::fss_server {
+public:
+    using fss_server::fss_server;
+    ReconnectingServer(const ReconnectingServer &) = delete;
+    ReconnectingServer(ReconnectingServer &&) = delete;
+    auto operator=(const ReconnectingServer &) -> ReconnectingServer & = delete;
+    auto operator=(ReconnectingServer &&) -> ReconnectingServer & = delete;
+    ~ReconnectingServer() override = default;
+    auto connected() -> bool override { return true; }
+    int reconnects{0};
+protected:
+    auto reconnect_to() -> bool override
+    {
+        ++reconnects;
+        this->setConnection(std::make_shared<FakeConnection>());
+        return true;
+    }
+};
+
 /* A client that exposes addServer and captures status changes. */
 class TestClient : public fss::client_ssl::fss_client {
 public:
@@ -311,4 +332,44 @@ TEST_CASE("timeout: attemptReconnect moves timed-out server to reconnect queue")
      * server moved from servers to reconnect_servers. */
     REQUIRE(client->status_changes > 0);
     REQUIRE(client->last_status == fss::client_ssl::CLIENT_CONNECTION_STATUS_DISCONNECTED);
+}
+
+TEST_CASE("timeout: successful reconnect restores cold-start liveness")
+{
+    /* todo/65: reconnect() used to leave liveness armed against the previous
+     * connection's last-received timestamp, so a reconnected server whose
+     * peer had nothing to say yet was flagged timed out again on the very
+     * next attemptReconnect() tick — tearing down a healthy connection every
+     * reconnect interval, forever. A fresh connection must restart from the
+     * cold-connect state: liveness disarmed until the first message arrives
+     * on THAT connection. */
+    auto client = std::make_shared<TestClient>();
+    auto server = std::make_shared<ReconnectingServer>(client.get(), "127.0.0.1", uint16_t{9999}, "", "", "");
+    auto clock = std::make_shared<FakeClock>();
+    server->setClock(clock);
+    client->add(server);
+
+    /* Arm liveness, then let it expire; the reconnect driver tears down and
+     * redials in the same attemptReconnect() pass. */
+    server->processMessage(std::make_shared<fss::transport::fss_message_rtt_request>());
+    clock->advance(30001);
+    REQUIRE(server->isServerTimedOut());
+
+    client->attemptReconnect();
+    REQUIRE(server->reconnects == 1);
+    REQUIRE(client->last_status == fss::client_ssl::CLIENT_CONNECTION_STATUS_CONNECTED_1_SERVER);
+
+    /* Nothing has been received on the new connection: however long it stays
+     * quiet, it must not be timed out on the old connection's stale clock. */
+    clock->advance(30001);
+    REQUIRE_FALSE(server->isServerTimedOut());
+    clock->advance(1000000);
+    REQUIRE_FALSE(server->isServerTimedOut());
+
+    /* The first message on the new connection re-arms liveness normally. */
+    server->processMessage(std::make_shared<fss::transport::fss_message_rtt_request>());
+    clock->advance(29999);
+    REQUIRE_FALSE(server->isServerTimedOut());
+    clock->advance(2);
+    REQUIRE(server->isServerTimedOut());
 }
