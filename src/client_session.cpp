@@ -957,12 +957,32 @@ void fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss
                 }
                 if (!name_valid)
                 {
+                    if (!possible_names.empty())
+                    {
+                        /* The empty-CN case logged above; this is the
+                         * cert-present-but-name-differs case — a
+                         * misconfigured client at best, an impersonation
+                         * attempt at worst. Name both sides so the
+                         * mismatch is diagnosable from this line alone. */
+                        FSS_LOG_ERROR("server", "Rejecting identity '" << client_name
+                                                                       << "': does not match certificate CN '"
+                                                                       << possible_names.front() << "'");
+                    }
                     this->client_handler->clientDisconnected(this);
                     return;
                 }
                 uint64_t asset_id = this->dbc->getAssetId(client_name);
                 if (asset_id == 0)
                 {
+                    /* 0 conflates "no such asset" with "DB read failed"
+                     * (todo/60), so the wording must cover both until that
+                     * is split. A client whose identify lands here will
+                     * redial and be rejected again on every reconnect
+                     * tick, so this line recurs at that cadence — which is
+                     * the visibility we want for an unregistered asset. */
+                    FSS_LOG_WARN("server", "Rejecting identity '"
+                                               << client_name
+                                               << "': no matching asset in the database (or DB read failure)");
                     this->client_handler->clientDisconnected(this);
                     return;
                 }

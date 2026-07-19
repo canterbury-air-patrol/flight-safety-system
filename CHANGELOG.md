@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- The server now logs every silently-rejected aircraft identify: an ERROR
+  naming both sides of a certificate-CN/identity mismatch, and a WARN
+  naming an identity with no matching asset in the database (wording also
+  covers a DB read failure, which getAssetId() cannot yet distinguish —
+  todo/60). Previously both paths severed the connection without a single
+  log line, so a permanently rejected client — e.g. an unregistered asset
+  name — was indistinguishable from network flapping at every layer's logs
+  (this cost a day of misdiagnosis in the todo/65 re-test).
+
 ## [1.2.1] - 2026-07-19
 
 ### Fixed
