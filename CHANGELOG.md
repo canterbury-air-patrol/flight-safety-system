@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- Client reconnect no longer loops forever after a liveness timeout
+  (todo/65, found by CAP test-plan Path G's mixed-version interop tests).
+  `fss_server::reconnect()` now retires the superseded connection properly —
+  handler detached, socket disconnected, recv thread joined — instead of
+  just dropping its reference, which leaked a thread + fd per reconnect,
+  left the old session live at the server (where the default
+  `reject_newcomer` policy then refused the client's own re-identify as a
+  duplicate), and let the old connection's eventual closed event tear down
+  the healthy replacement. Liveness also restarts in the cold-connect
+  disarmed state on a fresh connection, so a quiet-but-healthy server is no
+  longer judged against the previous connection's silence and torn down
+  again on the very next reconnect tick; and the arming stores are now
+  ordered timestamp-before-flag (release/acquire) so a freshly armed timer
+  can never be observed with a stale timestamp.
+
 ## [1.2.0] - 2026-07-18
 
 ### Added
