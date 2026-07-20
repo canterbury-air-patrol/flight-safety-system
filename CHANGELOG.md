@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Connection teardown no longer closes the socket before the threads that
+  might still use it are joined (todo/52). `disconnect()` used to shutdown
+  *and* close the descriptor up front, then join the recv thread — so a
+  recv/send that had already loaded the old fd number could, after an
+  adversarially timed fd reuse (e.g. a concurrent accept in the TLS
+  setup-worker pool), perform I/O on an unrelated connection: cross-session
+  data injection. Teardown is now shutdown-first (which is what actually
+  unblocks a stalled recv()/send(); the I/O loops bail on the retired fd),
+  with the close deferred until the recv thread is joined; a recv-thread
+  self-disconnect (garbage-frame threshold, oversized frame) defers the
+  close to the owner's later disconnect() or the destructor, since it
+  cannot join itself and a server-side outbound worker may still be
+  mid-send. The server's `fss_client::disconnect()` uses the new
+  shutdown-only primitive (`fss_connection::shutdownSocket()`) to quiesce
+  its outbound worker between shutdown and close, closing the same window
+  for its sender thread; and the TLS destructor no longer sends the gnutls
+  close-notify once the descriptor has been retired — gnutls holds the raw
+  fd number, so that write could likewise land on a reused descriptor. Not
+  observable by TSan or the e2e suite (fd-number reuse is not a data race);
+  unit tests pin the new ordering with fcntl probes instead.
+  `fss_connection` gained a data member — an ABI layout change to the
+  installed `fss-transport.hpp`, covered by a `-version-info` bump at the
+  next release (the todo/61 checklist step).
+
 ### Added
 - The server now logs every silently-rejected aircraft identify: an ERROR
   naming both sides of a certificate-CN/identity mismatch, and a WARN
