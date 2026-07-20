@@ -64,8 +64,14 @@ flight_safety_system::transport_ssl::fss_connection::~fss_connection()
      * paths capture the connection shared_ptr in the recv-thread lambda, so
      * this destructor only runs once that thread has dropped its reference —
      * i.e. after processMessages() returned (or on the recv thread itself,
-     * where recv() has likewise finished). */
-    if (this->usable.load())
+     * where recv() has likewise finished).
+     *
+     * The getFd() != -1 guard is part of todo/52: gnutls holds the raw fd
+     * NUMBER (gnutls_transport_set_int), so once a disconnect has retired the
+     * descriptor, bye() would write the close-notify into whatever that
+     * number means by now — possibly an unrelated session's socket. Skip it;
+     * it could only ever have failed with EBADF anyway. */
+    if (this->usable.load() && this->getFd() != -1)
     {
         try
         {

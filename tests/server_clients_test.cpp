@@ -66,6 +66,17 @@ public:
         std::scoped_lock guard(this->sent_lock);
         return this->sent;
     }
+    /* fss_client::disconnect() (todo/52) shuts the connection down and joins
+     * its outbound worker BEFORE calling disconnect(), so shutdownSocket() is
+     * the hook that must release a blocked send here — it is not fd-mediated,
+     * so the base class's fd-shutdown alone would never wake it, and the
+     * worker join would hang forever waiting on a send this override never
+     * releases. */
+    void shutdownSocket() override
+    {
+        this->setBlocked(false);
+        fss::transport::fss_connection::shutdownSocket();
+    }
     void disconnect() override
     {
         this->disconnect_calls++;

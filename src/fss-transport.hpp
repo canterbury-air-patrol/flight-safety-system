@@ -272,6 +272,13 @@ class fss_connection {
     static constexpr size_t default_max_queue_size = 1000;
     std::atomic<bool> run{false};
     std::atomic<int> fd{-1};
+    /* A descriptor that has been shut down and retired from `fd` but whose
+     * close is deferred (todo/52): close() frees the fd NUMBER for reuse, so
+     * it must not run while any thread that could still pass the old number
+     * to a syscall is unjoined — a concurrently accepted connection can be
+     * handed the same number back, turning a late recv()/send() into I/O on
+     * an unrelated session. -1 when nothing is pending. */
+    std::atomic<int> pending_close_fd{-1};
     std::atomic<uint64_t> last_msg_id{0};
     fss_message_cb *handler{nullptr};
     std::queue<std::shared_ptr<fss_message>> messages{};
@@ -354,6 +361,18 @@ public:
     auto sendMsg(const std::shared_ptr<fss_message> &msg) -> bool;
     auto getMsg() -> std::shared_ptr<fss_message>;
     virtual void processMessages();
+    /* The shutdown-only half of disconnect() (todo/52): wakes any thread
+     * blocked in recv()/send() on this connection and makes every I/O loop
+     * bail fast (fd reads -1) WITHOUT releasing the descriptor number for
+     * reuse; disconnect() closes it once the recv thread is joined. Public so
+     * an owner with a sender thread of its own (the server-side fss_client
+     * outbound worker) can quiesce that thread between the shutdown and the
+     * close. Idempotent, safe to call concurrently with disconnect(). Virtual
+     * so a subclass whose blocking I/O is not fd-mediated (a test double
+     * blocking sendMsg() on its own condition variable, standing in for a
+     * black-holed peer) has the same hook disconnect() itself already relies
+     * on to release it — mirroring the existing virtual disconnect(). */
+    virtual void shutdownSocket();
     virtual void disconnect();
     virtual auto getClientNames() -> std::list<std::string>;
     virtual auto isPeerCertRevoked(const std::string &) const -> bool { return false; }

@@ -386,26 +386,35 @@ void fss::server::fss_client::stopOutboundWorker()
 
 void fss::server::fss_client::disconnect()
 {
-    /* Order matters (todo/21): signal the worker to stop, then close the socket
-     * so a worker blocked in a send() returns, then join it — all before the
-     * base class clears the connection. The worker only ever sees a non-null
-     * connection (its sends fail fast once the fd is closed), so it can never
-     * dereference a cleared connection. */
+    /* Order matters (todo/21, todo/52): signal the worker to stop, then shut
+     * the socket down — not close it — so a worker blocked in send() returns
+     * (EPIPE) while the descriptor number stays reserved, then join the
+     * worker, and only then run the connection's disconnect(), which joins the
+     * recv thread and performs the deferred close. Closing any earlier would
+     * free the fd number for reuse while the worker may still be about to pass
+     * its stale value to send() — I/O into an unrelated session (todo/52). All
+     * of this runs before the base class clears the connection, and the worker
+     * only ever sees a non-null connection (its sends fail fast once the fd
+     * reads -1), so it can never dereference a cleared connection. */
     this->requestOutboundStop();
     auto active_conn = this->getConnection();
     if (active_conn != nullptr)
     {
-        active_conn->disconnect(); // closes the fd (unblocking a stalled worker send) and joins the recv thread
+        active_conn->shutdownSocket(); // unblocks a stalled worker send and the recv thread
     }
     this->stopOutboundWorker();
+    if (active_conn != nullptr)
+    {
+        active_conn->disconnect(); // joins the recv thread, then closes the fd
+    }
     fss_message_cb::disconnect(); // a second disconnect() on the connection here is a safe no-op
 }
 
 fss::server::fss_client::~fss_client()
 {
-    /* Single teardown entry point: disconnect() stops the worker (closing the fd
-     * first so a blocked send returns) and clears the connection. It is
-     * idempotent, so this is safe whether or not disconnect() was already
+    /* Single teardown entry point: disconnect() stops the worker (shutting the
+     * socket down first so a blocked send returns) and clears the connection.
+     * It is idempotent, so this is safe whether or not disconnect() was already
      * called. */
     fss_client::disconnect();
 }
