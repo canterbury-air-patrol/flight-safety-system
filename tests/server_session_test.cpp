@@ -104,7 +104,17 @@ public:
     }
 
     /* Releasing a blocked send is also needed when the connection is torn down,
-     * so a worker parked in sendMsg can exit and be joined. */
+     * so a worker parked in sendMsg can exit and be joined. fss_client::
+     * disconnect() (todo/52) now shuts the connection down and joins its
+     * outbound worker BEFORE calling disconnect(), so shutdownSocket() is the
+     * hook that must release the block — this send is not fd-mediated, so the
+     * base class's fd-shutdown alone would never wake it, and the worker join
+     * would hang forever waiting on a send this override never releases. */
+    void shutdownSocket() override
+    {
+        this->setBlocked(false);
+        fss::transport::fss_connection::shutdownSocket();
+    }
     void disconnect() override
     {
         this->setBlocked(false);

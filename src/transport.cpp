@@ -109,24 +109,54 @@ auto flight_safety_system::transport::fss_connection::getNullMsgCount() -> uint6
     return this->consecutive_null_msgs.load();
 }
 
+void flight_safety_system::transport::fss_connection::shutdownSocket()
+{
+    int orig_fd = this->fd.exchange(-1);
+    if (orig_fd == -1)
+    {
+        return;
+    }
+    /* shutdown() operates on the still-open socket, so it is what actually
+     * unblocks a peer thread stuck in recv()/send(); the I/O loops then bail
+     * on the -1 they re-load. Publish the fd for the deferred close only
+     * after the shutdown, so whoever performs the close can never observe it
+     * un-shut-down. */
+    safe_shutdown_fd(orig_fd, "transport/shutdown");
+    int prev = this->pending_close_fd.exchange(orig_fd);
+    if (prev != -1)
+    {
+        /* Only possible when this object was reconnected after a deferred
+         * close was left pending; every thread of that earlier session is
+         * past its last syscall on it, so release it rather than leak it. */
+        safe_close_fd(prev, "transport/shutdown");
+    }
+}
+
 void flight_safety_system::transport::fss_connection::disconnect()
 {
     this->run.store(false);
-    int orig_fd = this->fd.exchange(-1);
-    if (orig_fd != -1)
-    {
-        safe_shutdown_fd(orig_fd, "transport/disconnect");
-        safe_close_fd(orig_fd, "transport/disconnect");
-    }
+    /* Shut down first, close later (todo/52): close() frees the descriptor
+     * NUMBER for reuse, so it must wait until no thread that could still pass
+     * the old number to a syscall is unjoined — a setup worker accepting a
+     * new client can be handed the same number back, turning a late
+     * recv()/send() into I/O on an unrelated session. */
+    this->shutdownSocket();
+    bool recv_thread_quiesced = true;
     if (this->recv_thread.joinable())
     {
         if (this->recv_thread.get_id() == std::this_thread::get_id())
         {
-            /* Destructor called from within the recv thread itself (possible
-             * when the lambda is the last shared_ptr owner).  Detach so the
-             * thread can finish normally without trying to join itself. */
+            /* disconnect() called from within the recv thread itself (garbage
+             * threshold, oversized frame, or a destructor running there when
+             * the lambda held the last shared_ptr).  Detach so the thread can
+             * finish normally without trying to join itself. This thread
+             * issues no further I/O, but a caller-owned sender thread (the
+             * server-side fss_client outbound worker) may still be about to;
+             * leave the close pending for the owner's own disconnect() — which
+             * runs after it joined its sender — or the destructor. */
             this->recv_thread.detach();
             this->recv_thread = std::thread();
+            recv_thread_quiesced = false;
         }
         else
         {
@@ -139,11 +169,22 @@ void flight_safety_system::transport::fss_connection::disconnect()
                 /* join() failed, so the thread is still joinable; leaving it
                  * would make ~std::thread call std::terminate. Detach to avoid
                  * that (leaking the thread) — we are already in a degenerate
-                 * state where the thread could not be joined. */
+                 * state where the thread could not be joined. It may still be
+                 * running, so the fd must stay reserved as well: leave the
+                 * close pending for the destructor. */
                 FSS_LOG_ERROR("transport", "recv_thread.join() failed, detaching: " << e.what());
                 this->recv_thread.detach();
                 this->recv_thread = std::thread();
+                recv_thread_quiesced = false;
             }
+        }
+    }
+    if (recv_thread_quiesced)
+    {
+        int to_close = this->pending_close_fd.exchange(-1);
+        if (to_close != -1)
+        {
+            safe_close_fd(to_close, "transport/disconnect");
         }
     }
 }
@@ -151,6 +192,15 @@ void flight_safety_system::transport::fss_connection::disconnect()
 flight_safety_system::transport::fss_connection::~fss_connection()
 {
     fss_connection::disconnect();
+    /* Backstop for the deferred-close paths disconnect() cannot finish itself
+     * (recv-thread self-disconnect, failed join): once the last owner is
+     * destroying this object no thread can still be about to use the fd, so
+     * release the descriptor number now. */
+    int to_close = this->pending_close_fd.exchange(-1);
+    if (to_close != -1)
+    {
+        safe_close_fd(to_close, "transport/destructor");
+    }
     while (!this->messages.empty())
     {
         auto msg = this->messages.front();
@@ -365,10 +415,13 @@ auto flight_safety_system::transport::fss_connection::sendMsg(const std::shared_
 #endif
     while (sent < to_send)
     {
-        /* Re-load fd every iteration: a concurrent disconnect() does
-         * fd.exchange(-1) then closes the descriptor.  If that races with
-         * a multi-iteration send we must stop rather than write into a
-         * stale (possibly reused) descriptor. */
+        /* Re-load fd every iteration so a multi-iteration send stops promptly
+         * when a concurrent shutdownSocket()/disconnect() retires the fd.
+         * This alone does not prevent send() on a stale value (the load-vs-
+         * syscall window is unavoidable); what does is the deferred close
+         * (todo/52): the descriptor number is only released once the threads
+         * that could still send on it are joined, so until then a late send()
+         * hits the shut-down-but-open socket and fails with EPIPE. */
         current_fd = this->fd.load();
         if (current_fd == -1)
         {
