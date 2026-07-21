@@ -53,6 +53,11 @@ public:
     /* -1 until the recv thread observes teardown; then 1 if the descriptor was
      * still open at that moment (fcntl succeeded), 0 if it was already gone. */
     auto fdOpenAtShutdown() -> int { return this->fd_open_at_shutdown.load(); }
+    /* Simulates the object-reuse reconnect pattern fss_connection::connectTo()
+     * itself uses on this base class (fd == -1 check, then a fresh socket on
+     * the SAME instance) — exposes the protected setFd() so a test can set up
+     * the reuse-with-a-stale-pending-close scenario. */
+    void reuseFd(int new_fd) { this->setFd(new_fd); }
 protected:
     explicit fd_probe_connection(int t_fd) : fss_connection(t_fd), raw_fd(t_fd) {}
     auto recvBytes(void *t_bytes, size_t t_max_bytes) -> ssize_t override
@@ -123,6 +128,47 @@ TEST_CASE("transport: shutdownSocket() reserves the fd number until disconnect()
     conn->disconnect();
     errno = 0;
     REQUIRE(::fcntl(raw_fd, F_GETFD) == -1);
+    REQUIRE(errno == EBADF);
+}
+
+TEST_CASE("transport: shutdownSocket() closes a stale pending fd when the object is reused")
+{
+    /* fss_connection::connectTo() reuses the same object for a reconnect (an
+     * fd == -1 check, then a fresh socket) rather than allocating a new
+     * fss_connection. If an earlier session's disconnect() left its close
+     * pending (self-disconnect or a failed join — see the previous test), the
+     * next shutdownSocket() on the reused object must roll that stale
+     * descriptor over into a real close rather than leaking it. */
+    int fds_a[2];
+    REQUIRE(::socketpair(AF_UNIX, SOCK_STREAM, 0, fds_a) == 0);
+    fss_test::scoped_fd peer_a(fds_a[0]);
+    int raw_fd_a = fds_a[1];
+    auto conn = fd_probe_connection::create(raw_fd_a);
+
+    conn->shutdownSocket();
+    REQUIRE(wait_for_closed(conn));
+    /* Session A's fd is shut down but deliberately left open — the state a
+     * self-disconnect or failed join leaves behind, with nobody left to call
+     * disconnect() for that session again. */
+    REQUIRE(::fcntl(raw_fd_a, F_GETFD) != -1);
+
+    int fds_b[2];
+    REQUIRE(::socketpair(AF_UNIX, SOCK_STREAM, 0, fds_b) == 0);
+    fss_test::scoped_fd peer_b(fds_b[0]);
+    int raw_fd_b = fds_b[1];
+    conn->reuseFd(raw_fd_b);
+
+    conn->shutdownSocket();
+    errno = 0;
+    REQUIRE(::fcntl(raw_fd_a, F_GETFD) == -1);
+    REQUIRE(errno == EBADF);
+    /* B's own fd is shut down but not yet closed — same deferred-close
+     * contract as every other session. */
+    REQUIRE(::fcntl(raw_fd_b, F_GETFD) != -1);
+
+    conn->disconnect();
+    errno = 0;
+    REQUIRE(::fcntl(raw_fd_b, F_GETFD) == -1);
     REQUIRE(errno == EBADF);
 }
 

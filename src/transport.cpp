@@ -62,6 +62,20 @@ auto safe_shutdown_fd(int fd, const char *context) -> int
     }
 }
 
+/* Atomically take whatever fd is parked in `slot` (if any) and close it.
+ * Shared by every todo/52 deferred-close consumer (shutdownSocket()'s
+ * stale-pending rollover, disconnect()'s quiesced-thread close, and the
+ * destructor's backstop) so the exchange-then-close pattern lives in one
+ * place. */
+static void close_pending_fd(std::atomic<int> &slot, const char *context)
+{
+    int fd = slot.exchange(-1);
+    if (fd != -1)
+    {
+        safe_close_fd(fd, context);
+    }
+}
+
 #ifdef DEBUG
 /* Run inet_ntop on a sockaddr_storage object */
 const char *inet_ntop_stor(struct sockaddr_storage *src, char *dst, size_t dstlen, uint16_t *port)
@@ -127,7 +141,11 @@ void flight_safety_system::transport::fss_connection::shutdownSocket()
     {
         /* Only possible when this object was reconnected after a deferred
          * close was left pending; every thread of that earlier session is
-         * past its last syscall on it, so release it rather than leak it. */
+         * past its last syscall on it, so release it rather than leak it.
+         * prev is already taken out of pending_close_fd above (the exchange
+         * that just stored orig_fd), so close it directly rather than
+         * through close_pending_fd (which would re-exchange a slot that no
+         * longer holds it). */
         safe_close_fd(prev, "transport/shutdown");
     }
 }
@@ -181,11 +199,7 @@ void flight_safety_system::transport::fss_connection::disconnect()
     }
     if (recv_thread_quiesced)
     {
-        int to_close = this->pending_close_fd.exchange(-1);
-        if (to_close != -1)
-        {
-            safe_close_fd(to_close, "transport/disconnect");
-        }
+        close_pending_fd(this->pending_close_fd, "transport/disconnect");
     }
 }
 
@@ -196,11 +210,7 @@ flight_safety_system::transport::fss_connection::~fss_connection()
      * (recv-thread self-disconnect, failed join): once the last owner is
      * destroying this object no thread can still be about to use the fd, so
      * release the descriptor number now. */
-    int to_close = this->pending_close_fd.exchange(-1);
-    if (to_close != -1)
-    {
-        safe_close_fd(to_close, "transport/destructor");
-    }
+    close_pending_fd(this->pending_close_fd, "transport/destructor");
     while (!this->messages.empty())
     {
         auto msg = this->messages.front();
