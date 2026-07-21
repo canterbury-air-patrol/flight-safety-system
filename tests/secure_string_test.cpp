@@ -109,6 +109,25 @@ TEST_CASE("secure_string: string_view comparison with different length is not eq
     REQUIRE(s != std::string_view{"h"});
 }
 
+TEST_CASE("secure_string: two empty secure_strings compare equal")
+{
+    fss::secure_string a;
+    fss::secure_string b;
+    REQUIRE(a == b);
+    REQUIRE(!(a != b));
+}
+
+TEST_CASE("secure_string: operator== detects a mismatch confined to the last byte")
+{
+    // Pins that the constant-time compare (todo/57) walks the full length
+    // rather than stopping early — a mismatch only at the end must still
+    // be caught.
+    fss::secure_string a(std::string_view{"aaaaaaaaab"});
+    fss::secure_string b(std::string_view{"aaaaaaaaac"});
+    REQUIRE(a != b);
+    REQUIRE(!(a == b));
+}
+
 TEST_CASE("secure_string: data() returns pointer to content")
 {
     fss::secure_string s(std::string_view{"test"});
