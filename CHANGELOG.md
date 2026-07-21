@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- `secure_string::operator==` (both the `secure_string` and `string_view`
+  overloads) now compares in constant time — an accumulated XOR over the
+  full length rather than a short-circuiting `memcmp` — instead of a
+  documented "don't do this" boundary (todo/57). No production caller
+  verifies a secret against untrusted input today (credentials are carried
+  to aircraft, never checked locally; the operators are exercised only by
+  tests), so this closes a latent timing side channel before a future
+  caller could reach for the type's `==` in good faith and introduce one.
+  Length is still checked first (short-circuiting) since length is not the
+  secret; only content comparison is walked to completion regardless of
+  where a mismatch falls.
+
 ### Fixed
 - Connection teardown no longer closes the socket before the threads that
   might still use it are joined (todo/52). `disconnect()` used to shutdown
