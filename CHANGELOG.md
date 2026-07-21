@@ -33,14 +33,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   next release (the todo/61 checklist step).
 
 ### Added
-- The server now logs every silently-rejected aircraft identify: an ERROR
-  naming both sides of a certificate-CN/identity mismatch, and a WARN
-  naming an identity with no matching asset in the database (wording also
-  covers a DB read failure, which getAssetId() cannot yet distinguish —
-  todo/60). Previously both paths severed the connection without a single
-  log line, so a permanently rejected client — e.g. an unregistered asset
-  name — was indistinguishable from network flapping at every layer's logs
-  (this cost a day of misdiagnosis in the todo/65 re-test).
+- The server now logs every silently-rejected aircraft and non-aircraft
+  identify: an ERROR naming both sides of a certificate-CN/identity
+  mismatch, a WARN naming an identity with no matching asset in the
+  database, and a separate ERROR when the asset lookup itself failed (e.g. a
+  DB read outage) rather than folding that case into the "no matching asset"
+  wording (todo/60). `IDatabase::getAssetId()` now returns
+  `std::optional<uint64_t>` — nullopt for a failed read, 0 for a
+  definitively unknown asset, matching the `getActiveServers()` convention —
+  so a read outage during identify shows up in the logs as a DB incident
+  instead of looking identical to a fleet of misconfigured certificates.
+  Previously all these paths severed the connection without a single log
+  line, so a permanently rejected client — e.g. an unregistered asset name,
+  or every client during a DB read outage — was indistinguishable from
+  network flapping at every layer's logs (this cost a day of misdiagnosis in
+  the todo/65 re-test).
 
 ## [1.2.1] - 2026-07-19
 
