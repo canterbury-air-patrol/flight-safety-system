@@ -1,6 +1,5 @@
 #pragma once
 
-#include <cstring>
 #include <strings.h>
 #include <string>
 #include <string_view>
@@ -75,13 +74,31 @@ public:
      * copy, out of scope for wiping per the policy above. */
     [[nodiscard]] auto toNulTerminated() const -> std::string { return {data_.begin(), data_.end()}; }
     [[nodiscard]] auto empty() const -> bool { return data_.empty(); }
-    auto operator==(const secure_string &o) const -> bool { return data_ == o.data_; }
-    auto operator!=(const secure_string &o) const -> bool { return data_ != o.data_; }
+    auto operator==(const secure_string &o) const -> bool
+    {
+        return data_.size() == o.data_.size() && constantTimeEquals(data_.data(), o.data_.data(), data_.size());
+    }
+    auto operator!=(const secure_string &o) const -> bool { return !(*this == o); }
     auto operator==(std::string_view sv) const -> bool
     {
-        return sv.size() == data_.size() && memcmp(data_.data(), sv.data(), data_.size()) == 0;
+        return sv.size() == data_.size() && constantTimeEquals(data_.data(), sv.data(), data_.size());
     }
     auto operator!=(std::string_view sv) const -> bool { return !(*this == sv); }
+private:
+    /* Length is checked (short-circuit) by each caller above before this
+     * runs — length is not the secret here, only content is. This walks the
+     * full length regardless of where a mismatch falls, so operator== can't
+     * be turned into a timing oracle if a future caller ever verifies a
+     * secret against attacker-supplied input (todo/57). */
+    [[nodiscard]] static auto constantTimeEquals(const char *a, const char *b, std::size_t n) -> bool
+    {
+        volatile unsigned char diff = 0;
+        for (std::size_t i = 0; i < n; ++i)
+        {
+            diff |= static_cast<unsigned char>(a[i]) ^ static_cast<unsigned char>(b[i]);
+        }
+        return diff == 0;
+    }
 };
 
 } // namespace flight_safety_system
