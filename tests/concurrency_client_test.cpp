@@ -98,7 +98,10 @@ protected:
  * else. No real database is involved. */
 class stub_database : public flight_safety_system::server::IDatabase {
 public:
-    auto getAssetId(const std::string &name) -> uint64_t override { return name == "craft" ? 1 : 0; }
+    auto getAssetId(const std::string &name) -> std::optional<uint64_t> override
+    {
+        return uint64_t{name == "craft" ? 1U : 0U};
+    }
     void recordPosition(uint64_t, double, double, uint32_t) override {}
     void recordRtt(uint64_t, uint64_t) override {}
     void recordStatus(uint64_t, uint8_t, uint32_t, double) override {}

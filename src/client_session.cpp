@@ -980,18 +980,29 @@ void fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss
                     this->client_handler->clientDisconnected(this);
                     return;
                 }
-                uint64_t asset_id = this->dbc->getAssetId(client_name);
+                auto asset_id_opt = this->dbc->getAssetId(client_name);
+                if (!asset_id_opt.has_value())
+                {
+                    /* The lookup itself failed (DB read error) -- distinct
+                     * from a genuinely unknown asset below (todo/60), so a
+                     * read outage reads as a DB incident, not a fleet of bad
+                     * CNs. A client whose identify lands here will redial and
+                     * be rejected again on every reconnect tick until the
+                     * outage clears. */
+                    FSS_LOG_ERROR("server",
+                                  "Rejecting identity '" << client_name << "': asset lookup failed (DB read error)");
+                    this->client_handler->clientDisconnected(this);
+                    return;
+                }
+                uint64_t asset_id = *asset_id_opt;
                 if (asset_id == 0)
                 {
-                    /* 0 conflates "no such asset" with "DB read failed"
-                     * (todo/60), so the wording must cover both until that
-                     * is split. A client whose identify lands here will
-                     * redial and be rejected again on every reconnect
-                     * tick, so this line recurs at that cadence — which is
-                     * the visibility we want for an unregistered asset. */
-                    FSS_LOG_WARN("server", "Rejecting identity '"
-                                               << client_name
-                                               << "': no matching asset in the database (or DB read failure)");
+                    /* The query ran fine and found no asset by this name --
+                     * an unregistered/misconfigured client, not a DB
+                     * problem. Recurs at reconnect-backoff cadence, which is
+                     * the visibility we want for this case. */
+                    FSS_LOG_WARN("server",
+                                 "Rejecting identity '" << client_name << "': no matching asset in the database");
                     this->client_handler->clientDisconnected(this);
                     return;
                 }
@@ -1050,7 +1061,18 @@ void fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss
                 return;
             }
             const auto &client_name = possible_names.front();
-            if (this->dbc->getAssetId(client_name) != 0)
+            auto asset_id_opt = this->dbc->getAssetId(client_name);
+            if (!asset_id_opt.has_value())
+            {
+                /* Can't prove this CN isn't an aircraft's -- treat the read
+                 * failure the same as the aircraft branch above (todo/60),
+                 * not as "belongs to a known aircraft". */
+                FSS_LOG_ERROR("server", "Rejecting non-aircraft client: asset lookup failed for CN "
+                                            << client_name << " (DB read error)");
+                this->client_handler->clientDisconnected(this);
+                return;
+            }
+            if (*asset_id_opt != 0)
             {
                 FSS_LOG_ERROR("server",
                               "Rejecting non-aircraft client: CN " << client_name << " belongs to a known aircraft");

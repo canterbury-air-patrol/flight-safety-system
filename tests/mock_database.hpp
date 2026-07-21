@@ -71,10 +71,10 @@ public:
     auto operator=(MockDatabase &&) -> MockDatabase & = delete;
     ~MockDatabase() override = default;
 
-    auto getAssetId(const std::string &name) -> uint64_t override
+    auto getAssetId(const std::string &name) -> std::optional<uint64_t> override
     {
         auto it = asset_ids.find(name);
-        return it == asset_ids.end() ? 0 : it->second;
+        return it == asset_ids.end() ? uint64_t{0} : it->second;
     }
 
     void recordPosition(uint64_t asset_id, double latitude, double longitude, uint32_t altitude) override

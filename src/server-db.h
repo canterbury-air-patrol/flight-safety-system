@@ -7,7 +7,11 @@ int db_connect(const char *conn, const char *host, int port, const char *user, c
 void db_disconnect(const char *conn);
 int db_ping(const char *conn);
 
-unsigned long long db_get_asset_id(const char *conn, const char *asset_name);
+/* error_out (may be NULL) is set to 1 when the query itself failed (e.g. the
+ * connection is down), distinct from a 0 return for a genuinely unknown
+ * asset name (todo/60) -- mirrors the db_active_fss_servers_get(..., int
+ * *error_out) convention. */
+unsigned long long db_get_asset_id(const char *conn, const char *asset_name, int *error_out);
 
 /* todo/34: these six writers return 1 on success, 0 if sqlca.sqlcode < 0
  * (e.g. disk-full) -- the caller (db.cpp) throws database_error on 0 so a
