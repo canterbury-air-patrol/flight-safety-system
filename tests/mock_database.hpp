@@ -29,6 +29,10 @@ public:
     /* When set, getActiveServers returns nullopt, simulating a mid-cursor
      * read failure so tests can exercise the partial-result discard path. */
     bool active_servers_fail{false};
+    /* When set, getAssetId returns nullopt regardless of name, simulating a
+     * DB read failure so tests can exercise the todo/60 split from a
+     * genuinely unknown asset (which stays a 0 lookup miss). */
+    bool asset_id_lookup_fail{false};
 
     struct recorded_rtt {
         uint64_t asset_id;
@@ -73,6 +77,10 @@ public:
 
     auto getAssetId(const std::string &name) -> std::optional<uint64_t> override
     {
+        if (asset_id_lookup_fail)
+        {
+            return std::nullopt;
+        }
         auto it = asset_ids.find(name);
         return it == asset_ids.end() ? uint64_t{0} : it->second;
     }
