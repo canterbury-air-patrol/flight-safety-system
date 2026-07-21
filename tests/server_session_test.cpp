@@ -322,6 +322,31 @@ TEST_CASE("session: rejects non-aircraft identify when cert CN belongs to a know
     REQUIRE_FALSE(session->isAircraft());
 }
 
+TEST_CASE("session: rejects non-aircraft identify with a distinct log when the asset lookup itself fails (todo/60)")
+{
+    /* Can't prove this CN isn't an aircraft's when the lookup itself fails,
+     * so it must still be rejected — but logged as a read failure, not as
+     * "belongs to a known aircraft" (which would be misleading: nothing
+     * proved that). */
+    fss_test::MockDatabase mock;
+    mock.asset_id_lookup_fail = true;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("ground-station-1");
+    NullClientHandler handler;
+
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    fss_test::capture_cerr cap;
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity_non_aircraft>());
+
+    REQUIRE(handler.disconnects == 1);
+    REQUIRE_FALSE(session->isAircraft());
+    auto out = cap.str();
+    REQUIRE(out.find("DB read error") != std::string::npos);
+    REQUIRE(out.find("belongs to a known aircraft") == std::string::npos);
+}
+
 TEST_CASE("session: accepts non-aircraft identify when cert CN is not a known aircraft")
 {
     fss_test::MockDatabase mock;
@@ -408,12 +433,39 @@ TEST_CASE("session: rejects identify when asset unknown to database")
 
     REQUIRE(conn->sent.empty());
     /* The rejection must be logged with the unmatched name — a silent
-     * sever here cost a day of misdiagnosis (todo/65 re-test). The
-     * wording covers the DB-read-failure case too, which getAssetId()
-     * cannot yet distinguish (todo/60). */
+     * sever here cost a day of misdiagnosis (todo/65 re-test). */
     auto out = cap.str();
     REQUIRE(out.find("Rejecting identity 'unknownAsset'") != std::string::npos);
     REQUIRE(out.find("no matching asset") != std::string::npos);
+    REQUIRE(session->getCachedAssetId() == 0);
+}
+
+TEST_CASE("session: rejects identify with a distinct log when the asset lookup itself fails (todo/60)")
+{
+    /* getAssetId() returning nullopt (DB read error, e.g. mid-outage) must be
+     * rejected the same way as a genuinely unknown asset, but logged
+     * differently — the whole point of todo/60 is that an operator can tell
+     * "every cert CN is wrong" apart from "the DB read is down" from the log
+     * alone. */
+    fss_test::MockDatabase mock;
+    mock.asset_id_lookup_fail = true;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    fss_test::capture_cerr cap;
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+
+    REQUIRE(handler.disconnects == 1);
+    REQUIRE(conn->sent.empty());
+    REQUIRE(session->getCachedAssetId() == 0);
+    auto out = cap.str();
+    REQUIRE(out.find("Rejecting identity 'craft'") != std::string::npos);
+    REQUIRE(out.find("DB read error") != std::string::npos);
+    REQUIRE(out.find("no matching asset") == std::string::npos);
 }
 
 TEST_CASE("session: getCommand returns newest-timestamp entry")

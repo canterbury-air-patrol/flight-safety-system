@@ -120,6 +120,18 @@ TEST_CASE("db_connection: getAssetId returns non-zero for pre-inserted asset")
     get_test_asset_id(*dbc);
 }
 
+TEST_CASE("db_connection: getAssetId returns nullopt when the read connection is down (todo/60)")
+{
+    /* Distinguishes a DB read failure from a genuinely unknown asset: before
+     * todo/60, both collapsed to 0 and the identify path could not tell a
+     * bad CN from a read outage. Force the read connection down (no
+     * reconnect) so the query is guaranteed to fail at the ECPG layer, the
+     * same technique the todo/34 write-side test uses. */
+    LIVE_DB_OR_SKIP(dbc);
+    db_disconnect(flight_safety_system::server::db_connection::read_conn_name);
+    REQUIRE_FALSE(dbc->getAssetId("test-asset").has_value());
+}
+
 TEST_CASE("db_connection: recordRtt writes a row without error")
 {
     LIVE_DB_OR_SKIP(dbc);
