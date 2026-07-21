@@ -15,6 +15,7 @@
 #include <cstdlib>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -70,6 +71,18 @@ auto make_live_db() -> std::unique_ptr<flight_safety_system::server::db_connecti
     return dbc;
 }
 
+/* getAssetId returns nullopt on a DB read failure, 0 for a genuinely unknown
+ * asset (todo/60). Most tests just want the "test-asset" fixture's id and
+ * should hard-fail if either variant fires, so unwrap both here rather than
+ * repeating the two checks at every call site. */
+auto get_test_asset_id(flight_safety_system::server::db_connection &dbc) -> uint64_t
+{
+    auto id = dbc.getAssetId("test-asset");
+    REQUIRE(id.has_value());
+    REQUIRE(*id != 0);
+    return *id;
+}
+
 } // namespace
 
 /* Catch2's SKIP() macro arrived in 3.3; distro packages can be older (Debian
@@ -104,46 +117,41 @@ TEST_CASE("db_connection: connects to live database")
 TEST_CASE("db_connection: getAssetId returns non-zero for pre-inserted asset")
 {
     LIVE_DB_OR_SKIP(dbc);
-    REQUIRE(dbc->getAssetId("test-asset") != 0);
+    get_test_asset_id(*dbc);
 }
 
 TEST_CASE("db_connection: recordRtt writes a row without error")
 {
     LIVE_DB_OR_SKIP(dbc);
-    auto asset_id = dbc->getAssetId("test-asset");
-    REQUIRE(asset_id != 0);
+    auto asset_id = get_test_asset_id(*dbc);
     dbc->recordRtt(asset_id, uint64_t{42});
 }
 
 TEST_CASE("db_connection: recordStatus writes a row without error")
 {
     LIVE_DB_OR_SKIP(dbc);
-    auto asset_id = dbc->getAssetId("test-asset");
-    REQUIRE(asset_id != 0);
+    auto asset_id = get_test_asset_id(*dbc);
     dbc->recordStatus(asset_id, uint8_t{80}, uint32_t{1000}, 12.4);
 }
 
 TEST_CASE("db_connection: recordSearchStatus writes a row without error")
 {
     LIVE_DB_OR_SKIP(dbc);
-    auto asset_id = dbc->getAssetId("test-asset");
-    REQUIRE(asset_id != 0);
+    auto asset_id = get_test_asset_id(*dbc);
     dbc->recordSearchStatus(asset_id, uint64_t{1}, uint64_t{50}, uint64_t{100});
 }
 
 TEST_CASE("db_connection: recordPosition with valid altitude inserts row")
 {
     LIVE_DB_OR_SKIP(dbc);
-    auto asset_id = dbc->getAssetId("test-asset");
-    REQUIRE(asset_id != 0);
+    auto asset_id = get_test_asset_id(*dbc);
     dbc->recordPosition(asset_id, -43.5, 172.6, uint32_t{100});
 }
 
 TEST_CASE("db_connection: recordPosition with overflow altitude is discarded")
 {
     LIVE_DB_OR_SKIP(dbc);
-    auto asset_id = dbc->getAssetId("test-asset");
-    REQUIRE(asset_id != 0);
+    auto asset_id = get_test_asset_id(*dbc);
     constexpr auto huge_alt = static_cast<uint32_t>(std::numeric_limits<int>::max()) + uint32_t{1};
     dbc->recordPosition(asset_id, -43.5, 172.6, huge_alt);
 }
@@ -157,8 +165,7 @@ TEST_CASE("db_connection: write methods throw database_error when the write conn
      * the write connection down (no reconnect) so the write is guaranteed to
      * fail, and require every write method surfaces it as database_error. */
     LIVE_DB_OR_SKIP(dbc);
-    auto asset_id = dbc->getAssetId("test-asset");
-    REQUIRE(asset_id != 0);
+    auto asset_id = get_test_asset_id(*dbc);
     db_disconnect(flight_safety_system::server::db_connection::write_conn_name);
 
     auto threw_database_error = [](auto &&write_call) -> bool {
@@ -185,8 +192,7 @@ TEST_CASE("db_connection: write methods throw database_error when the write conn
 TEST_CASE("db_connection: getSmmSettings returns non-null for configured asset")
 {
     LIVE_DB_OR_SKIP(dbc);
-    auto asset_id = dbc->getAssetId("test-asset");
-    REQUIRE(asset_id != 0);
+    auto asset_id = get_test_asset_id(*dbc);
     auto settings = dbc->getSmmSettings(asset_id);
     REQUIRE(settings != nullptr);
     REQUIRE_FALSE(settings->getAddress().empty());
@@ -303,8 +309,7 @@ TEST_CASE("db_connection: tryReconnectIfNeeded restores a single dropped connect
      * is lost, tryReconnectIfNeeded must restore it — and operations on that
      * connection must work again — while the other is left untouched. */
     LIVE_DB_OR_SKIP(dbc);
-    auto asset_id = dbc->getAssetId("test-asset");
-    REQUIRE(asset_id != 0);
+    auto asset_id = get_test_asset_id(*dbc);
 
     /* Drop one connection by name, recover it, then exercise both a read
      * (getAssetId) and a write (recordRtt): whichever connection was dropped
@@ -334,8 +339,7 @@ TEST_CASE("db_connection: getCommand returns non-null for asset with pending com
     /* The test fixture inserts an RTL command for test-asset before the test
      * suite runs.  getCommand() must find it and return a non-null result. */
     LIVE_DB_OR_SKIP(dbc);
-    auto asset_id = dbc->getAssetId("test-asset");
-    REQUIRE(asset_id != 0);
+    auto asset_id = get_test_asset_id(*dbc);
     auto cmd = dbc->getCommand(asset_id);
     REQUIRE(cmd != nullptr);
 }
@@ -411,8 +415,7 @@ auto get_command_column(uint64_t command_id, const std::string &column) -> std::
 TEST_CASE("db_connection: recordCommandDispatch stores the dispatch id")
 {
     LIVE_DB_OR_SKIP(dbc);
-    auto asset_id = dbc->getAssetId("test-asset");
-    REQUIRE(asset_id != 0);
+    auto asset_id = get_test_asset_id(*dbc);
     auto command_id = insert_test_command(asset_id);
 
     dbc->recordCommandDispatch(command_id, uint64_t{4242});
@@ -423,8 +426,7 @@ TEST_CASE("db_connection: recordCommandDispatch stores the dispatch id")
 TEST_CASE("db_connection: recordCommandAck stores ack_state, ack_timestamp and ack_superseded_by")
 {
     LIVE_DB_OR_SKIP(dbc);
-    auto asset_id = dbc->getAssetId("test-asset");
-    REQUIRE(asset_id != 0);
+    auto asset_id = get_test_asset_id(*dbc);
     auto command_id = insert_test_command(asset_id);
     dbc->recordCommandDispatch(command_id, uint64_t{5555});
 
@@ -443,8 +445,7 @@ TEST_CASE("db_connection: recordCommandAck does not regress an already-terminal 
      * the comment above the UPDATE in db_command_record_ack(). Simulate an
      * out-of-order ack arrival: actioned first, then a stale "received". */
     LIVE_DB_OR_SKIP(dbc);
-    auto asset_id = dbc->getAssetId("test-asset");
-    REQUIRE(asset_id != 0);
+    auto asset_id = get_test_asset_id(*dbc);
     auto command_id = insert_test_command(asset_id);
     dbc->recordCommandDispatch(command_id, uint64_t{6666});
 
@@ -466,8 +467,7 @@ TEST_CASE("db_connection: recordCommandAck refuses a second terminal outcome")
      * must not rewrite a settled "actioned" in the audit record -- the
      * query-enforced writable set is stored-state NULL or received only. */
     LIVE_DB_OR_SKIP(dbc);
-    auto asset_id = dbc->getAssetId("test-asset");
-    REQUIRE(asset_id != 0);
+    auto asset_id = get_test_asset_id(*dbc);
 
     const std::array<uint8_t, 3> later_terminals = {
         static_cast<uint8_t>(flight_safety_system::transport::command_ack_superseded),
@@ -498,8 +498,7 @@ TEST_CASE("db_connection: recordCommandAck admits the conforming received-then-t
     /* The two-phase ack a conforming FMU sends (received, then exactly one
      * terminal outcome) must be unaffected by the todo/48 finality guard. */
     LIVE_DB_OR_SKIP(dbc);
-    auto asset_id = dbc->getAssetId("test-asset");
-    REQUIRE(asset_id != 0);
+    auto asset_id = get_test_asset_id(*dbc);
     auto command_id = insert_test_command(asset_id);
     dbc->recordCommandDispatch(command_id, uint64_t{7780});
 
@@ -524,8 +523,7 @@ TEST_CASE("db_connection: recordCommandDispatch reopens the ack cycle")
      * by test_server_restart.py's post-bounce re-ack check; this covers the
      * same contract at the query level. */
     LIVE_DB_OR_SKIP(dbc);
-    auto asset_id = dbc->getAssetId("test-asset");
-    REQUIRE(asset_id != 0);
+    auto asset_id = get_test_asset_id(*dbc);
     auto command_id = insert_test_command(asset_id);
     dbc->recordCommandDispatch(command_id, uint64_t{7790});
     dbc->recordCommandAck(asset_id, uint64_t{7790},

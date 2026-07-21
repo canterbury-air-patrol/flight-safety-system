@@ -94,7 +94,12 @@ public:
     auto operator=(const IDatabase &) -> IDatabase & = delete;
     auto operator=(IDatabase &&) -> IDatabase & = delete;
     virtual ~IDatabase() = default;
-    virtual auto getAssetId(const std::string &name) -> uint64_t = 0;
+    /* nullopt means the lookup itself failed (DB read error); 0 means the
+     * query ran and found no asset by that name; anything else is the id.
+     * An explicit status, not an in-band sentinel, so a read outage isn't
+     * indistinguishable from a fleet of unregistered assets (todo/60,
+     * matches the getActiveServers() convention below). */
+    virtual auto getAssetId(const std::string &name) -> std::optional<uint64_t> = 0;
     virtual void recordPosition(uint64_t asset_id, double latitude, double longitude, uint32_t altitude) = 0;
     virtual void recordRtt(uint64_t asset_id, uint64_t rtt_ms) = 0;
     virtual void recordStatus(uint64_t asset_id, uint8_t bat_percent, uint32_t bat_mah_used, double bat_voltage) = 0;
@@ -163,7 +168,7 @@ public:
     auto operator=(db_connection &) -> db_connection & = delete;
     auto operator=(db_connection &&) -> db_connection & = delete;
     ~db_connection() override;
-    auto getAssetId(const std::string &name) -> uint64_t override;
+    auto getAssetId(const std::string &name) -> std::optional<uint64_t> override;
     void recordPosition(uint64_t asset_id, double latitude, double longitude, uint32_t altitude) override;
     void recordRtt(uint64_t asset_id, uint64_t rtt_ms) override;
     void recordStatus(uint64_t asset_id, uint8_t bat_percent, uint32_t bat_mah_used, double bat_voltage) override;

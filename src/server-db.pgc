@@ -83,8 +83,13 @@ int db_connect(const char *conn_arg, const char *host, int port, const char *use
     return 1;
 }
 
-unsigned long long db_get_asset_id(const char *conn_arg, const char *asset_name_arg)
+unsigned long long db_get_asset_id(const char *conn_arg, const char *asset_name_arg, int *error_out)
 {
+    if (error_out != NULL)
+    {
+        *error_out = 0;
+    }
+
     EXEC SQL BEGIN DECLARE SECTION;
     const char *conn = conn_arg;
     const char *asset_name = asset_name_arg;
@@ -95,11 +100,16 @@ unsigned long long db_get_asset_id(const char *conn_arg, const char *asset_name_
 
     if (sqlca.sqlcode < 0)
     {
-        /* A query failure (connection down, etc.) returns 0 just like an
-         * unknown asset, and the caller rejects the client either way.
-         * Print the SQL error so the log tells the truth about why
-         * identification failed. */
+        /* A query failure (connection down, etc.) still returns 0 for the id
+         * like an unknown asset, but error_out lets the caller (todo/60) tell
+         * the two apart instead of treating every read outage as a fleet of
+         * unregistered assets. Print the SQL error so the log tells the truth
+         * about why identification failed. */
         sqlprint();
+        if (error_out != NULL)
+        {
+            *error_out = 1;
+        }
     }
 
     return asset_id;

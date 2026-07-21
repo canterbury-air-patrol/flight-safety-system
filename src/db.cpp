@@ -94,10 +94,21 @@ flight_safety_system::server::db_connection::~db_connection()
     }
 }
 
-auto flight_safety_system::server::db_connection::getAssetId(const std::string &name) -> uint64_t
+auto flight_safety_system::server::db_connection::getAssetId(const std::string &name) -> std::optional<uint64_t>
 {
-    std::scoped_lock guard(this->read_lock);
-    return db_get_asset_id(read_conn_name, name.c_str());
+    int fetch_error = 0;
+    unsigned long long asset_id = 0;
+    {
+        std::scoped_lock guard(this->read_lock);
+        asset_id = db_get_asset_id(read_conn_name, name.c_str(), &fetch_error);
+    }
+    /* nullopt tells the caller the lookup itself failed (todo/60) -- distinct
+     * from 0, which means the query ran fine and found no matching asset. */
+    if (fetch_error != 0)
+    {
+        return std::nullopt;
+    }
+    return asset_id;
 }
 
 void flight_safety_system::server::db_connection::recordRtt(uint64_t asset_id, uint64_t rtt_ms)
