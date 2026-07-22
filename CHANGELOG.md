@@ -61,6 +61,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   or every client during a DB read outage — was indistinguishable from
   network flapping at every layer's logs (this cost a day of misdiagnosis in
   the todo/65 re-test).
+- `docker/start-server.sh` now accepts an optional `CRL_FILE` env var and,
+  when set, adds it as `ssl.crl_file` in the generated `server.json`
+  (todo/62). Previously the entrypoint's generated config had no way to
+  reach `crl_file` at all — the server and `transport-ssl.cpp` have
+  supported it (and its SIGHUP reload) since todo/29, but a container built
+  from this image could only get CRL support by bind-mounting a
+  hand-written `server.json` over the entrypoint's DB/port wiring entirely.
+  Omitting `CRL_FILE` reproduces the previous config byte-for-byte.
 
 ## [1.2.1] - 2026-07-19
 
