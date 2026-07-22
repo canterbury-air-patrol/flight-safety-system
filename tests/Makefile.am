@@ -50,6 +50,7 @@ all_test_SOURCES = main.cpp messages.cpp connection.cpp client.cpp \
 	exception_isolation_test.cpp \
 	../src/client_session.cpp \
 	../src/db-write-queue.cpp \
+	../src/server-clients.cpp \
 	../src/db.cpp
 # server-db.c is generated from server-db.pgc by ecpg (see src/Makefile.am).
 # It must be nodist_ so `make dist` distributes the .pgc source, not the
