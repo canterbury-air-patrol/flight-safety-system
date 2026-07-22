@@ -70,6 +70,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   hand-written `server.json` over the entrypoint's DB/port wiring entirely.
   Omitting `CRL_FILE` reproduces the previous config byte-for-byte.
 
+### Changed
+- `server_clients` (the client-list/asset-claim/degraded-gate class used by
+  `server.cpp`) now splits its declaration and implementation across
+  `src/server-clients.hpp` and a new `src/server-clients.cpp`, matching the
+  header/impl split already used elsewhere (`fss-server.hpp` +
+  `client_session.cpp`, `db-write-queue.hpp` + `.cpp`) instead of being the
+  one ~450-line exception with every method body inline in the header
+  (todo/56). Trivial one-liner accessors stay inline; the header now only
+  declares the nontrivial methods. No API, ABI, or behaviour change — the
+  class is not part of any installed header.
+
 ## [1.2.1] - 2026-07-19
 
 ### Fixed
