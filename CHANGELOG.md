@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- The command poller now issues a single batched database read per tick for
+  the newest pending command across all connected aircraft, instead of one
+  `getCommand` query per connected aircraft (todo/23). This drops the
+  steady-state command-read load on the single serialised read connection from
+  ~10*N queries/second (N = connected aircraft) to a constant ~10/second,
+  raising the fleet size the server sustains before that connection becomes the
+  bottleneck. Behaviour per aircraft is unchanged: each still receives its own
+  newest command, an asset with no pending command is cleared exactly as
+  before, and the resend-window dedup still governs what reaches the aircraft.
+  A new `DISTINCT ON (asset_id)` cursor read (`db_asset_commands_get`) backs the
+  new `IDatabase::getCommands` batch method; the single-row `getCommand` is
+  retained for the identify-time dispatch path.
+
 ### Security
 - `secure_string::operator==` (both the `secure_string` and `string_view`
   overloads) now compares in constant time — an accumulated XOR over the
