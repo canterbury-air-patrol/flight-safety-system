@@ -1066,3 +1066,44 @@ TEST_CASE("server_clients: gate-then-sever leaves no session live or admissible 
     sc.clientConnected(returned);
     REQUIRE(sc.getTotalClients() == 1);
 }
+
+TEST_CASE("server_clients: pollCommands fans the batched read out to the owning clients")
+{
+    /* The batched pollCommands (todo/23) must deliver each asset's newest
+     * command to exactly the client that owns that asset, and stage nothing for
+     * a client whose asset has no pending command -- the same per-client outcome
+     * the old one-getCommand-per-client loop produced. Built inline rather than
+     * via make_aircraft_client so the test keeps each FakeConnection to inspect
+     * what was sent. */
+    server_clients sc;
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft1"] = 1;
+    mock.asset_ids["craft2"] = 2;
+
+    auto conn1 = std::make_shared<FakeConnection>();
+    conn1->cert_names.push_back("craft1");
+    auto client1 = std::make_shared<fss::server::fss_client>(conn1, &mock, make_null_writer(), &sc);
+    /* Identify before pushing the command so the identify-time dispatch path
+     * does not deliver it -- this isolates pollCommands as the sole delivery. */
+    client1->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft1"));
+    sc.clientConnected(client1);
+
+    auto conn2 = std::make_shared<FakeConnection>();
+    conn2->cert_names.push_back("craft2");
+    auto client2 = std::make_shared<fss::server::fss_client>(conn2, &mock, make_null_writer(), &sc);
+    client2->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft2"));
+    sc.clientConnected(client2);
+
+    /* Only craft1 (asset 1) has a pending command. */
+    mock.pushCommand(
+        1, std::make_shared<fss::server::asset_command>(uint64_t{100}, uint64_t{1000}, "RTL", 0.0, 0.0, uint32_t{0}));
+
+    sc.pollCommands(&mock);
+
+    /* sendCommand() is synchronous; it dispatches whatever pollCommands staged. */
+    client1->sendCommand();
+    client2->sendCommand();
+
+    REQUIRE(count_sent<fss::transport::fss_message_asset_command>(conn1->sentSnapshot()) == 1);
+    REQUIRE(count_sent<fss::transport::fss_message_asset_command>(conn2->sentSnapshot()) == 0);
+}
