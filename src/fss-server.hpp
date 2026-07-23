@@ -15,6 +15,7 @@
 #include <list>
 #include <mutex>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 namespace flight_safety_system {
@@ -121,6 +122,15 @@ public:
     virtual void recordCommandAck(uint64_t asset_id, uint64_t dispatch_id, uint8_t ack_state, uint64_t ack_timestamp,
                                   uint8_t ack_reason) = 0;
     virtual auto getCommand(uint64_t asset_id) -> std::shared_ptr<asset_command> = 0;
+    /* Batched getCommand: the newest command for each id in asset_ids, keyed by
+     * asset_id. Assets with no pending command are simply absent from the map,
+     * so callers treat "absent" exactly as getCommand's nullptr. Lets the
+     * command poller issue one query per tick instead of one per client
+     * (todo/23). A mid-read error yields a partial map — the same envelope as
+     * getCommand returning nullptr per asset when the read connection is down,
+     * since both share the one read connection. */
+    virtual auto getCommands(const std::vector<uint64_t> &asset_ids)
+        -> std::unordered_map<uint64_t, std::shared_ptr<asset_command>> = 0;
     /* The complete set of active servers, or nullopt when the read was cut
      * short (mid-cursor error, truncated row) and could only produce a
      * partial, misleading list. nullopt is NOT an empty list: the caller must
@@ -177,6 +187,8 @@ public:
     void recordCommandAck(uint64_t asset_id, uint64_t dispatch_id, uint8_t ack_state, uint64_t ack_timestamp,
                           uint8_t ack_reason) override;
     auto getCommand(uint64_t asset_id) -> std::shared_ptr<asset_command> override;
+    auto getCommands(const std::vector<uint64_t> &asset_ids)
+        -> std::unordered_map<uint64_t, std::shared_ptr<asset_command>> override;
     auto getActiveServers() -> std::optional<std::vector<fss_server_details>> override;
     auto getSmmSettings(uint64_t asset_id) -> std::shared_ptr<smm_settings> override;
     auto isConnected() const -> bool override;

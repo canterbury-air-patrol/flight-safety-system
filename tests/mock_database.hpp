@@ -7,6 +7,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "fss-server.hpp"
@@ -171,6 +172,23 @@ public:
             }
         }
         return newest;
+    }
+
+    auto getCommands(const std::vector<uint64_t> &ids)
+        -> std::unordered_map<uint64_t, std::shared_ptr<flight_safety_system::server::asset_command>> override
+    {
+        /* Reuse getCommand's newest-by-timestamp selection so batched and
+         * single reads can never disagree; assets with no command are omitted,
+         * matching the production "absent == nullptr" contract. */
+        std::unordered_map<uint64_t, std::shared_ptr<flight_safety_system::server::asset_command>> res;
+        for (uint64_t asset_id : ids)
+        {
+            if (auto cmd = getCommand(asset_id))
+            {
+                res[asset_id] = std::move(cmd);
+            }
+        }
+        return res;
     }
 
     auto getActiveServers() -> std::optional<std::vector<flight_safety_system::server::fss_server_details>> override

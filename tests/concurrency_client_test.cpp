@@ -112,6 +112,11 @@ public:
     {
         return nullptr;
     }
+    auto getCommands(const std::vector<uint64_t> &)
+        -> std::unordered_map<uint64_t, std::shared_ptr<flight_safety_system::server::asset_command>> override
+    {
+        return {};
+    }
     auto getActiveServers() -> std::optional<std::vector<flight_safety_system::server::fss_server_details>> override
     {
         /* An engaged empty vector: no servers configured, not a failed read. */

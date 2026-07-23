@@ -47,6 +47,17 @@ TEST_CASE("db_connection: construction bounds in-flight TCP stalls via PGTCPUSER
     REQUIRE(std::getenv("PGTCPUSERTIMEOUT") != nullptr);
 }
 
+TEST_CASE("db_connection: getCommands short-circuits empty input without a round-trip")
+{
+    /* An empty asset set returns before any DB access (it would also build an
+     * invalid "IN ()" clause), so it must succeed even against a connection
+     * that never came up -- the poller relies on this when no client is yet
+     * identified. */
+    flight_safety_system::server::db_connection dbc(
+        "db.invalid", 5432, "user", flight_safety_system::secure_string(std::string_view{"pass"}), "db");
+    REQUIRE(dbc.getCommands({}).empty());
+}
+
 namespace {
 
 /* Build a db_connection from the TEST_DB_* env vars and REQUIRE it has
@@ -423,6 +434,40 @@ auto get_command_column(uint64_t command_id, const std::string &column) -> std::
 }
 
 } // namespace
+
+TEST_CASE("db_connection: getCommands returns the newest command per asset and omits absent ones")
+{
+    /* Exercises the batched read end-to-end: DISTINCT ON must pick the newest
+     * command for the asset, the IN-list must filter to only the requested
+     * asset, and an id with no command must be absent (not a null entry). */
+    LIVE_DB_OR_SKIP(dbc);
+    auto asset_id = get_test_asset_id(*dbc);
+    insert_test_command(asset_id);
+    auto newest_id = insert_test_command(asset_id);
+
+    constexpr uint64_t absent_asset = 999999999ULL; /* no such asset -> no command */
+    auto commands = dbc->getCommands({asset_id, absent_asset});
+
+    REQUIRE(commands.count(asset_id) == 1);
+    REQUIRE(commands.at(asset_id)->getDBId() == newest_id);
+    REQUIRE(commands.count(absent_asset) == 0);
+}
+
+TEST_CASE("db_connection: getCommands agrees with getCommand for the same asset")
+{
+    /* The batched and single-row reads must never disagree about which row is
+     * newest, or the poller would dispatch a different command than the
+     * identify-time path. */
+    LIVE_DB_OR_SKIP(dbc);
+    auto asset_id = get_test_asset_id(*dbc);
+    insert_test_command(asset_id);
+
+    auto single = dbc->getCommand(asset_id);
+    auto batch = dbc->getCommands({asset_id});
+    REQUIRE(single != nullptr);
+    REQUIRE(batch.count(asset_id) == 1);
+    REQUIRE(batch.at(asset_id)->getDBId() == single->getDBId());
+}
 
 TEST_CASE("db_connection: recordCommandDispatch stores the dispatch id")
 {

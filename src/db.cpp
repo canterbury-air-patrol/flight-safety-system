@@ -203,6 +203,50 @@ auto flight_safety_system::server::db_connection::getCommand(uint64_t asset_id) 
     return res;
 }
 
+auto flight_safety_system::server::db_connection::getCommands(const std::vector<uint64_t> &asset_ids)
+    -> std::unordered_map<uint64_t, std::shared_ptr<asset_command>>
+{
+    std::unordered_map<uint64_t, std::shared_ptr<asset_command>> res;
+    if (asset_ids.empty())
+    {
+        return res;
+    }
+    /* db_asset_commands_get takes the C asset-id type (unsigned long long) used
+     * throughout server-db.h; copy into it because uint64_t may be a distinct
+     * type (unsigned long here) whose pointer will not implicitly convert. */
+    std::vector<unsigned long long> ids(asset_ids.begin(), asset_ids.end());
+    struct asset_command_row_s **rows = nullptr;
+    int fetch_error = 0;
+    {
+        std::scoped_lock guard(this->read_lock);
+        rows = db_asset_commands_get(read_conn_name, ids.data(), ids.size(), &fetch_error);
+    }
+    if (rows)
+    {
+        for (size_t i = 0; rows[i] != nullptr; i++)
+        {
+            struct asset_command_row_s *row = rows[i];
+            res[row->asset_id] =
+                std::make_shared<asset_command>(row->dbid, row->timestamp, std::string(row->command), row->latitude,
+                                                row->longitude, row->altitude, row->altitude_null == 0);
+            free(row->command);
+            free(row);
+        }
+        db_free_asset_commands(rows);
+    }
+    /* A mid-cursor failure leaves res holding only the assets read before the
+     * error; the rest are absent (treated as "no pending command"). This is the
+     * same outcome the per-asset getCommand path already produces when the read
+     * connection is down — both serialise on the one read connection, so a drop
+     * fails them all — so the poller's next tick simply retries. No discard. */
+    if (fetch_error != 0)
+    {
+        FSS_LOG_ERROR("db",
+                      "batched command read failed mid-cursor; " << res.size() << " asset(s) read before the error");
+    }
+    return res;
+}
+
 auto flight_safety_system::server::db_connection::getSmmSettings(uint64_t asset_id) -> std::shared_ptr<smm_settings>
 {
     std::shared_ptr<smm_settings> res = nullptr;
