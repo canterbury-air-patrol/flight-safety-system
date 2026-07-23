@@ -55,6 +55,10 @@ fss-server server.json
 | SIGINT  | Same as SIGTERM. |
 | SIGHUP  | Reloads the CRL file (if configured) and disconnects any currently connected clients whose certificates appear on the updated CRL. No restart required. |
 
+#### Supported scale
+
+The server is sized for RPAS fleets of tens of aircraft against a single local PostgreSQL+PostGIS database. Command dispatch runs from in-memory caches on the main loop; the poller performs one batched database read per tick for the newest pending command across all connected aircraft, so the steady-state command-read rate is a constant (~10 queries/second) rather than growing with the number of aircraft. Each connection uses a small, fixed number of threads. Deployments approaching hundreds of concurrent aircraft should re-evaluate the single read-connection and per-connection thread model first.
+
 ### Client
 
 There is no full client implementation shipped with flight-safety-system, however there is a [library](src/fss-client-ssl.hpp) to use and an [example client](examples/fake_client.cpp) that can be used as a starting point.
