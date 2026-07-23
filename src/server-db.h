@@ -1,3 +1,4 @@
+#include <stddef.h>
 #include <stdint.h>
 
 /* Every entry point takes the name of the ECPG connection to run on, so the
@@ -56,6 +57,34 @@ struct asset_command_s {
 };
 
 struct asset_command_s *db_asset_command_get(const char *conn, unsigned long long asset_id_arg);
+
+/* One newest-command row per asset, as returned by the batched read below.
+ * Carries the same fields as asset_command_s plus the asset_id it belongs to,
+ * so a single query can answer for many assets at once (todo/23 phase 1). */
+struct asset_command_row_s {
+    unsigned long long asset_id;
+    char *command;
+    unsigned long long timestamp;
+    unsigned long long dbid;
+    /* NaN when the row's position is NULL (see asset_command_s). */
+    double latitude;
+    double longitude;
+    uint32_t altitude;
+    /* Non-zero when the row's altitude is NULL. */
+    int altitude_null;
+};
+
+/* Batched replacement for calling db_asset_command_get once per asset: returns
+ * the newest command row for each id in asset_ids in a single round-trip, as a
+ * NULL-terminated array. Assets with no command row -- or whose command string
+ * was truncated -- are simply absent from the result (same per-row drop as the
+ * single-row read). error_out (may be NULL) is set to 1 on a mid-cursor read
+ * error, mirroring db_active_fss_servers_get; the accumulated rows are then a
+ * partial set. Returns NULL only on allocation failure. Free with
+ * db_free_asset_commands. count == 0 returns an empty list without querying. */
+struct asset_command_row_s **db_asset_commands_get(const char *conn, const unsigned long long *asset_ids, size_t count,
+                                                   int *error_out);
+void db_free_asset_commands(struct asset_command_row_s **commands);
 
 struct smm_settings_s {
     char *address;

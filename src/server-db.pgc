@@ -330,6 +330,168 @@ db_asset_command_get(const char *conn_arg, unsigned long long asset_id_arg)
     return res;
 }
 
+struct asset_command_row_s **
+db_asset_commands_get(const char *conn_arg, const unsigned long long *asset_ids, size_t count, int *error_out)
+{
+    size_t len = 0;
+    if (error_out != NULL)
+    {
+        *error_out = 0;
+    }
+    struct asset_command_row_s **res =
+        (struct asset_command_row_s **)malloc(sizeof(struct asset_command_row_s *) * (len + 1));
+    if (res != NULL)
+    {
+        res[len] = NULL;
+    }
+
+    /* No assets means no rows to read, and an empty set would build an invalid
+     * "IN ()" clause -- return the empty list without touching the DB. Also
+     * bail if the initial allocation failed (res == NULL). */
+    if (count == 0 || res == NULL)
+    {
+        return res;
+    }
+
+    /* Build "... WHERE AC.asset_id IN (id,id,...) ..." by concatenating our own
+     * uint64 asset ids. They are integers the server holds, never text from a
+     * client, so this cannot inject SQL -- the batched analogue of passing
+     * :asset_id as a host variable in db_asset_command_get. Each id is at most
+     * 20 decimal digits plus a separator. */
+    static const char *sql_prefix =
+        "SELECT DISTINCT ON (AC.asset_id) AC.asset_id, AC.id, "
+        "(extract(epoch from AC.timestamp) * 1000)::bigint, AC.command, "
+        "ST_Y(AC.position::geometry), ST_X(AC.position::geometry), AC.altitude "
+        "FROM assets_assetcommand AS AC WHERE AC.asset_id IN (";
+    static const char *sql_suffix = ") ORDER BY AC.asset_id, AC.timestamp DESC, AC.id DESC";
+    const size_t id_max = 21; /* up to 20 digits + ',' */
+    size_t buf_size = strlen(sql_prefix) + strlen(sql_suffix) + (count * id_max) + 1;
+    char *query_buf = (char *)malloc(buf_size);
+    if (query_buf == NULL)
+    {
+        if (error_out != NULL)
+        {
+            *error_out = 1;
+        }
+        return res;
+    }
+    int written = snprintf(query_buf, buf_size, "%s", sql_prefix);
+    size_t off = (written < 0) ? 0 : (size_t)written;
+    for (size_t i = 0; i < count; i++)
+    {
+        written = snprintf(query_buf + off, buf_size - off, "%s%llu", (i == 0) ? "" : ",", asset_ids[i]);
+        off += (written < 0) ? 0 : (size_t)written;
+    }
+    snprintf(query_buf + off, buf_size - off, "%s", sql_suffix);
+
+    EXEC SQL BEGIN DECLARE SECTION;
+    const char *conn = conn_arg;
+    const char *query = query_buf;
+    unsigned long long r_asset_id = 0;
+    unsigned long long id = 0;
+    unsigned long long ts = 0;
+    char command[COMMAND_LEN];
+    double lat = 0.0;
+    double lng = 0.0;
+    unsigned int alt = 0;
+    int lat_ind = 0;
+    int lng_ind = 0;
+    int alt_ind = 0;
+    EXEC SQL END DECLARE SECTION;
+
+    /* Cursor over a dynamically-prepared statement, mirroring the AUTOCOMMIT
+     * OFF / DECLARE / OPEN / FETCH-loop / CLOSE idiom in
+     * db_active_fss_servers_get. The prepared statement is DEALLOCATE'd (and, on
+     * a mid-cursor error, discarded by the rollback SET AUTOCOMMIT ON performs)
+     * so re-preparing the same name next tick never collides. */
+    EXEC SQL AT :conn SET AUTOCOMMIT TO OFF;
+    EXEC SQL AT :conn PREPARE cmdstmt FROM :query;
+    EXEC SQL AT :conn DECLARE cmdcur CURSOR FOR cmdstmt;
+    EXEC SQL AT :conn OPEN cmdcur;
+
+    EXEC SQL WHENEVER NOT FOUND DO BREAK;
+    EXEC SQL WHENEVER SQLERROR DO BREAK;
+    while (1)
+    {
+        EXEC SQL AT :conn FETCH FROM cmdcur INTO :r_asset_id, :id, :ts, :command, :lat :lat_ind, :lng :lng_ind,
+            :alt :alt_ind;
+
+        /* A truncated command (DB string longer than COMMAND_LEN) must not be
+         * dispatched: it would silently become a different command. Drop just
+         * this row and keep reading the rest of the batch, matching the per-row
+         * guard in db_asset_command_get. SQLWARNING is left at its default
+         * CONTINUE so a truncation warning does not end the cursor. */
+        if (sqlca.sqlwarn[1] == 'W')
+        {
+            fprintf(stderr, "command for asset %llu exceeds buffer size; ignoring row\n", r_asset_id);
+            continue;
+        }
+
+        struct asset_command_row_s *row = (struct asset_command_row_s *)malloc(sizeof(struct asset_command_row_s));
+        if (row != NULL)
+        {
+            row->command = strdup(command);
+            if (row->command == NULL)
+            {
+                free(row);
+                row = NULL;
+            }
+            else
+            {
+                row->asset_id = r_asset_id;
+                row->dbid = id;
+                row->timestamp = ts;
+                /* NULL position -> NaN so the dispatch layer's coordinate
+                 * validation refuses a GOTO built from it; altitude has no NaN,
+                 * so carry an explicit flag (as db_asset_command_get does). */
+                row->latitude = (lat_ind < 0) ? NAN : lat;
+                row->longitude = (lng_ind < 0) ? NAN : lng;
+                row->altitude = alt;
+                row->altitude_null = (alt_ind < 0);
+            }
+        }
+        /* Only append a real entry: a NULL row written into the middle of the
+         * array would act as a premature terminator for the caller (same reason
+         * db_active_fss_servers_get guards its append). */
+        if (row != NULL)
+        {
+            struct asset_command_row_s **old = res;
+            res = (struct asset_command_row_s **)realloc(res, sizeof(struct asset_command_row_s *) * (len + 2));
+            if (res)
+            {
+                res[len] = row;
+                len++;
+                res[len] = NULL;
+            }
+            else
+            {
+                res = old;
+                free(row->command);
+                free(row);
+                row = NULL;
+            }
+        }
+    }
+    EXEC SQL WHENEVER NOT FOUND CONTINUE;
+    EXEC SQL WHENEVER SQLERROR CONTINUE;
+
+    /* sqlca still reflects the FETCH that ended the loop. A negative sqlcode is
+     * a mid-cursor error (e.g. the read connection dropped) rather than the
+     * normal NOT FOUND (100): the accumulated list is partial. Capture it before
+     * CLOSE / SET AUTOCOMMIT overwrite sqlca. */
+    if (error_out != NULL && sqlca.sqlcode < 0)
+    {
+        *error_out = 1;
+    }
+
+    EXEC SQL AT :conn CLOSE cmdcur;
+    EXEC SQL AT :conn DEALLOCATE PREPARE cmdstmt;
+    EXEC SQL AT :conn SET AUTOCOMMIT TO ON;
+
+    free(query_buf);
+    return res;
+}
+
 #define HTTP_PORT 80
 #define HTTPS_PORT 443
 
@@ -541,4 +703,11 @@ int db_ping(const char *conn_arg)
 void db_free_fss_servers(struct fss_server_s **servers)
 {
     free(servers);
+}
+
+void db_free_asset_commands(struct asset_command_row_s **commands)
+{
+    /* Frees only the array; the caller frees each row (and its command string)
+     * as it consumes them, as getActiveServers does for db_free_fss_servers. */
+    free(commands);
 }
