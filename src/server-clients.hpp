@@ -138,13 +138,36 @@ public:
     };
     void pollCommands(flight_safety_system::server::IDatabase *dbc)
     {
+        /* Capture (client, asset_id) once rather than re-reading the atomic
+         * cached_asset_id when mapping results back: a client that identifies
+         * mid-pass must not be queried under one id and looked up under
+         * another. */
+        std::vector<std::pair<std::shared_ptr<flight_safety_system::server::fss_client>, uint64_t>> identified;
+        std::vector<uint64_t> asset_ids;
         for (const auto &client : this->snapshotClients())
         {
             uint64_t asset_id = client->getCachedAssetId(); /* atomic */
             if (asset_id != 0)
             {
-                client->setPendingCommand(dbc->getCommand(asset_id));
+                identified.emplace_back(client, asset_id);
+                asset_ids.push_back(asset_id);
             }
+        }
+        if (identified.empty())
+        {
+            return;
+        }
+        /* One query for the whole fleet's newest-command-per-asset instead of a
+         * getCommand round-trip per client (todo/23): 10*N reads/sec collapse to
+         * 10/sec. An asset absent from the map has no pending command -- the same
+         * as getCommand returning nullptr -- so clear it, preserving the prior
+         * per-client behaviour exactly (the resend-window dedup in sendCommand
+         * still governs what actually reaches the aircraft). */
+        auto commands = dbc->getCommands(asset_ids);
+        for (const auto &[client, asset_id] : identified)
+        {
+            auto found = commands.find(asset_id);
+            client->setPendingCommand(found != commands.end() ? found->second : nullptr);
         }
     };
     void sendCommand()
