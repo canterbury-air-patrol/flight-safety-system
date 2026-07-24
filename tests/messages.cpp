@@ -1,6 +1,7 @@
 #include <cstdlib>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <utility>
 
 #ifdef HAVE_CATCH2_CATCH_ALL_HPP
@@ -1163,4 +1164,58 @@ TEST_CASE("messages: BufferReader readUint32 short-read returns false")
         fss_test::make_framed_buffer(static_cast<uint16_t>(message_type_version), 1, std::string(payload, '\0'), total);
     auto decoded = flight_safety_system::transport::fss_message::decode(bl);
     REQUIRE(decoded != nullptr);
+}
+
+/* peekType is the front half of decode() (todo/55): it reads the framed type
+ * straight out of a packed frame so a byte-level sender (fss_connection::
+ * sendPacked) can refuse a credential-bearing frame without reconstructing the
+ * message. */
+TEST_CASE("fss_message::peekType reads the framed type without decoding (todo/55)")
+{
+    auto position = std::make_shared<flight_safety_system::transport::fss_message_position_report>(
+        1.0, 2.0, 100U, 0U, 0U, int16_t{0}, 0U, std::string{}, 0U, uint8_t{0}, 0U, uint8_t{0}, uint8_t{0}, uint64_t{0});
+    auto position_bl = position->getPacked();
+    REQUIRE(flight_safety_system::transport::fss_message::peekType(*position_bl) ==
+            flight_safety_system::transport::message_type_position_report);
+
+    auto settings = std::make_shared<flight_safety_system::transport::fss_message_smm_settings>(
+        "https://smm.example/", flight_safety_system::secure_string(std::string_view{"user"}),
+        flight_safety_system::secure_string(std::string_view{"pass"}));
+    auto settings_bl = settings->getPacked();
+    REQUIRE(flight_safety_system::transport::fss_message::peekType(*settings_bl) ==
+            flight_safety_system::transport::message_type_smm_settings);
+
+    /* A frame too short to hold the length+type prefix cannot name a type. */
+    flight_safety_system::transport::buf_len empty;
+    REQUIRE(flight_safety_system::transport::fss_message::peekType(empty) ==
+            flight_safety_system::transport::message_type_unknown);
+}
+
+/* stampId writes the per-connection id at the same offset decode() reads it from
+ * (todo/55), so a broadcaster can restamp one shared packed frame per recipient
+ * without decoding and re-packing. */
+TEST_CASE("fss_message::stampId restamps the id where decode reads it (todo/55)")
+{
+    auto msg = std::make_shared<flight_safety_system::transport::fss_message_rtt_request>();
+    msg->setId(0);
+    auto bl = msg->getPacked();
+    REQUIRE(bl != nullptr);
+
+    REQUIRE(flight_safety_system::transport::fss_message::stampId(*bl, 0xA1B2C3D4E5F6ULL));
+    auto decoded = flight_safety_system::transport::fss_message::decode(bl);
+    REQUIRE(decoded != nullptr);
+    REQUIRE(decoded->getId() == 0xA1B2C3D4E5F6ULL);
+
+    /* Restamping overwrites in place — each recipient's id off one shared frame. */
+    REQUIRE(flight_safety_system::transport::fss_message::stampId(*bl, 7ULL));
+    decoded = flight_safety_system::transport::fss_message::decode(bl);
+    REQUIRE(decoded != nullptr);
+    REQUIRE(decoded->getId() == 7ULL);
+
+    /* A frame too short to hold a header is left untouched and reported false, so
+     * a caller can roll its sequence id back rather than emit a gap. */
+    flight_safety_system::transport::buf_len tiny;
+    uint16_t two_bytes = 0;
+    tiny.addData(&two_bytes, sizeof(two_bytes));
+    REQUIRE_FALSE(flight_safety_system::transport::fss_message::stampId(tiny, 1ULL));
 }

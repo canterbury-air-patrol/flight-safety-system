@@ -475,11 +475,28 @@ public:
     virtual auto getPacked() -> std::shared_ptr<buf_len>;
     /* Byte offset of the 8-byte big-endian id within a packed frame. createHeader
      * lays the header out as [length:u16][type:u16][id:u64], so the id follows the
-     * length and type fields. Exposed as the single source of truth for that
-     * offset so a byte-clone sender (fss_connection::sendPacked) can stamp the
-     * per-connection id straight into packed bytes without re-packing, and can
-     * never drift from where createHeader actually writes it. */
+     * length and type fields. The single source of truth for that offset, shared
+     * by createHeader (which writes it while packing) and stampId (which restamps
+     * it into an already-packed frame), with a static_assert in createHeader
+     * pinning it to the layout actually written. */
     static constexpr size_t id_offset = sizeof(uint16_t) + sizeof(uint16_t);
+    /* Restamp the per-connection sequence id into an already-packed frame, in
+     * place, at id_offset (big-endian, matching createHeader). This is how a
+     * byte-clone sender (fss_connection::sendPacked) gives each broadcast
+     * recipient its own uniquely-stamped copy without decoding and re-packing.
+     * The one place that owns the id write, so callers hold no offset/endianness
+     * assumptions of their own. Returns false without writing if `bl` is too
+     * short to hold a full header (so the caller can roll its sequence id back
+     * rather than emit a gap); a frame from getPacked() always fits. */
+    static auto stampId(buf_len &bl, uint64_t t_id) -> bool;
+    /* Read the message type out of an already-packed frame without decoding the
+     * whole message, mapping any undefined wire value to message_type_unknown
+     * (same validation decode() applies). Returns message_type_unknown if `bl` is
+     * too short to hold the length+type prefix. Lets a byte-level sender inspect a
+     * frame's type — e.g. sendPacked refusing to broadcast a credential-bearing
+     * message_type_smm_settings — with the header layout owned here, not the
+     * caller. */
+    static auto peekType(buf_len &bl) -> fss_message_type;
     void createHeader(const std::shared_ptr<buf_len> &bl);
     static void updateSize(const std::shared_ptr<buf_len> &bl);
     static auto decode(const std::shared_ptr<buf_len> &bl) -> std::shared_ptr<fss_message>;
