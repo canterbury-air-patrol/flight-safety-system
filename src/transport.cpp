@@ -201,6 +201,18 @@ void flight_safety_system::transport::fss_connection::disconnect()
     {
         close_pending_fd(this->pending_close_fd, "transport/disconnect");
     }
+    /* Callbacks now run outside msg_lock (todo/25), so joining the recv thread
+     * is no longer the only thing that can prove one is not still running —
+     * and in the two detach branches above it never proved it at all. Wait for
+     * delivery-idle so that once disconnect() returns, no processMessage() is
+     * in flight. That is what keeps the fss_client teardown path safe: it
+     * clears its connection pointer before ~fss_message_cb runs, so it never
+     * reaches setHandler(nullptr) and this is its only barrier. A disconnect()
+     * issued from inside a handler is exempt, mirroring the self-detach branch. */
+    {
+        std::unique_lock lock_holder(this->msg_lock);
+        this->waitForDeliveryIdle(lock_holder);
+    }
 }
 
 flight_safety_system::transport::fss_connection::~fss_connection()
@@ -211,6 +223,11 @@ flight_safety_system::transport::fss_connection::~fss_connection()
      * destroying this object no thread can still be about to use the fd, so
      * release the descriptor number now. */
     close_pending_fd(this->pending_close_fd, "transport/destructor");
+    /* Under msg_lock: disconnect() above detaches rather than joins on two
+     * paths, so a recv thread can still be inside processMessages() touching
+     * the queue. It can no longer be inside a callback (disconnect() waits for
+     * delivery-idle), but it may still be queueing. */
+    const std::scoped_lock lock_holder(this->msg_lock);
     while (!this->messages.empty())
     {
         auto msg = this->messages.front();
@@ -221,6 +238,61 @@ flight_safety_system::transport::fss_connection::~fss_connection()
 auto flight_safety_system::transport::fss_connection::getMessageId() -> uint64_t
 {
     return ++this->last_msg_id;
+}
+
+void flight_safety_system::transport::fss_connection::waitForDeliveryIdle(std::unique_lock<std::mutex> &t_lock)
+{
+    while (this->delivery_depth != 0 && this->delivering_thread != std::this_thread::get_id())
+    {
+        this->delivery_cv.wait(t_lock);
+    }
+}
+
+void flight_safety_system::transport::fss_connection::deliverUnlocked(
+    std::unique_lock<std::mutex> &t_lock, const std::shared_ptr<flight_safety_system::transport::fss_message> &msg,
+    flight_safety_system::exception_guard *t_guard)
+{
+    /* Copy the handler out before releasing the lock: setHandler() cannot
+     * change it again until delivery_depth returns to 0, so the local stays
+     * valid for the whole call (see the `handler` member's lifetime note). */
+    auto *cb = this->handler;
+    if (this->delivery_depth++ == 0)
+    {
+        this->delivering_thread = std::this_thread::get_id();
+    }
+    t_lock.unlock();
+    try
+    {
+        if (t_guard != nullptr)
+        {
+            t_guard->run([&]() -> void { cb->processMessage(msg); });
+        }
+        else
+        {
+            cb->processMessage(msg);
+        }
+    }
+    catch (...)
+    {
+        /* Only reachable with t_guard == nullptr (setHandler's flush, which
+         * propagates handler exceptions as it always has). Unwind the delivery
+         * state before letting the exception out, or the connection would look
+         * permanently busy and every later delivery would block forever. */
+        t_lock.lock();
+        this->endDeliveryLocked();
+        throw;
+    }
+    t_lock.lock();
+    this->endDeliveryLocked();
+}
+
+void flight_safety_system::transport::fss_connection::endDeliveryLocked()
+{
+    if (--this->delivery_depth == 0)
+    {
+        this->delivering_thread = std::thread::id();
+        this->delivery_cv.notify_all();
+    }
 }
 
 void flight_safety_system::transport::fss_connection::processMessages()
@@ -260,10 +332,14 @@ void flight_safety_system::transport::fss_connection::processMessages()
             FSS_LOG_INFO("transport", "Remote closed the connection");
             this->run.store(false);
             {
-                std::scoped_lock lock_holder(this->msg_lock);
+                std::unique_lock lock_holder(this->msg_lock);
+                /* Wait out any delivery already in flight (a setHandler()
+                 * backlog flush on another thread), then re-read the handler:
+                 * that flush may have detached it while we waited. */
+                this->waitForDeliveryIdle(lock_holder);
                 if (this->handler != nullptr)
                 {
-                    handler_guard.run([&]() -> void { this->handler->processMessage(msg); });
+                    this->deliverUnlocked(lock_holder, msg, &handler_guard);
                 }
                 else
                 {
@@ -273,10 +349,11 @@ void flight_safety_system::transport::fss_connection::processMessages()
             break;
         }
         {
-            std::scoped_lock lock_holder(this->msg_lock);
+            std::unique_lock lock_holder(this->msg_lock);
+            this->waitForDeliveryIdle(lock_holder);
             if (this->handler != nullptr)
             {
-                handler_guard.run([&]() -> void { this->handler->processMessage(msg); });
+                this->deliverUnlocked(lock_holder, msg, &handler_guard);
             }
             else
             {
@@ -502,16 +579,23 @@ auto flight_safety_system::transport::fss_connection::sendMsg(const std::shared_
 
 void flight_safety_system::transport::fss_connection::setHandler(fss_message_cb *cb)
 {
-    std::scoped_lock lock_holder(this->msg_lock);
+    std::unique_lock lock_holder(this->msg_lock);
+    /* Nothing may be in flight into the outgoing handler when we swap it out:
+     * this wait is what makes setHandler(nullptr) — in particular the one in
+     * ~fss_message_cb — a barrier proving the handler outlives every call the
+     * transport makes into it (todo/25). A handler that calls setHandler()
+     * from inside its own processMessage() is exempt and does not self-block. */
+    this->waitForDeliveryIdle(lock_holder);
     this->handler = cb;
-    if (this->handler != nullptr)
+    /* Re-read this->handler each iteration rather than trusting cb: a flushed
+     * callback may re-enter setHandler(nullptr) to detach mid-flush, and the
+     * rest of the backlog must then stay queued rather than be delivered to a
+     * handler that has just asked to stop hearing from us. */
+    while (this->handler != nullptr && !this->messages.empty())
     {
-        while (!this->messages.empty())
-        {
-            auto msg = this->messages.front();
-            this->messages.pop();
-            cb->processMessage(msg);
-        }
+        auto msg = this->messages.front();
+        this->messages.pop();
+        this->deliverUnlocked(lock_holder, msg, nullptr);
     }
 }
 
@@ -904,7 +988,23 @@ flight_safety_system::transport::fss_message_cb::~fss_message_cb()
     // this object, so conn cannot be concurrently read or written here.
     if (this->conn != nullptr)
     {
-        this->conn->setHandler(nullptr);
+        /* setHandler() propagates exceptions thrown by a handler it flushes the
+         * backlog into, and a destructor must not. Detaching (cb == nullptr)
+         * never flushes anything, so this cannot fire — but the compiler and
+         * cppcheck only see a potentially-throwing call in a noexcept function,
+         * and a stray throw here would be std::terminate rather than a leak. */
+        try
+        {
+            this->conn->setHandler(nullptr);
+        }
+        catch (const std::exception &e)
+        {
+            FSS_LOG_ERROR("transport", "Exception detaching handler in ~fss_message_cb: " << e.what());
+        }
+        catch (...)
+        {
+            FSS_LOG_ERROR("transport", "Unknown exception detaching handler in ~fss_message_cb");
+        }
         this->conn.reset();
     }
 }
