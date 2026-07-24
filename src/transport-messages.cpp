@@ -543,7 +543,11 @@ auto flight_safety_system::transport::fss_message::getTimeStamp() -> uint64_t
 
 void flight_safety_system::transport::fss_message::createHeader(const std::shared_ptr<buf_len> &bl)
 {
-    /* Make space for length (filled in by updateSize), type, id */
+    /* Make space for length (filled in by updateSize), type, id. The id lands at
+     * id_offset (past length+type); fss_connection::sendPacked stamps directly
+     * there, so keep this layout and that constant in lockstep. */
+    static_assert(id_offset == sizeof(uint16_t) + sizeof(uint16_t),
+                  "id_offset must match the length+type prefix written here");
     uint16_t placeholder = 0;
     uint16_t type_n = fss_htobe16(this->getType());
     uint64_t id_n = fss_htobe64(this->getId());

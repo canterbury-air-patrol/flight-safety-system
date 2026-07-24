@@ -10,6 +10,7 @@
 #include <vector>
 #include "fss-transport.hpp"
 #include "fss-log.hpp"
+#include "fss-endian.hpp"
 
 #include <iostream>
 
@@ -395,6 +396,30 @@ auto flight_safety_system::transport::fss_connection::sendMsg(const std::shared_
         bl->wipeSecure();
     }
     return ret;
+}
+
+auto flight_safety_system::transport::fss_connection::sendPacked(const std::shared_ptr<buf_len> &packed) -> bool
+{
+    /* The frame was built and framed by getPacked() and validated by the
+     * broadcaster before it reached the outbound queue, so the too-big-to-frame
+     * case that sendMsg(fss_message) rolls an id back for (todo/38) cannot occur
+     * here. Guard defensively anyway and bail BEFORE consuming a sequence id, so
+     * a bad frame never leaves a gap the peer's v2 sequence check treats as
+     * out-of-order (todo/39). */
+    if (packed == nullptr || !packed->isValid() || packed->getLength() < fss_message::id_offset + sizeof(uint64_t))
+    {
+        return false;
+    }
+    std::scoped_lock lock_holder(this->send_lock);
+    uint64_t assigned_id = this->getMessageId();
+    /* Clone the bytes, not the message (todo/55): the shared `packed` frame is
+     * read-only and identical for every recipient — the only per-connection
+     * difference is the id — so copy it once and stamp the id straight in at the
+     * fixed header offset, bypassing decode and re-pack entirely. */
+    auto bl = std::make_shared<buf_len>(*packed);
+    uint64_t id_n = flight_safety_system::fss_htobe64(assigned_id);
+    bl->writeAt(fss_message::id_offset, &id_n, sizeof(uint64_t));
+    return this->sendMsg(bl);
 }
 
 #ifdef DEBUG
