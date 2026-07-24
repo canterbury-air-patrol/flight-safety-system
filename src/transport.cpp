@@ -397,7 +397,7 @@ auto flight_safety_system::transport::fss_connection::sendMsg(const std::shared_
     return ret;
 }
 
-auto flight_safety_system::transport::fss_connection::sendPacked(const std::shared_ptr<buf_len> &packed) -> bool
+auto flight_safety_system::transport::fss_connection::sendPacked(const std::shared_ptr<const buf_len> &packed) -> bool
 {
     if (packed == nullptr || !packed->isValid())
     {
