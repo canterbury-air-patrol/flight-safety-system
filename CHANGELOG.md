@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- Broadcast relays now pack the source message once and share that frame,
+  read-only, across every recipient instead of decoding a fresh clone per
+  recipient (todo/55). Previously each relayed position report to N connected
+  aircraft cost N+1 full message decodes (heap allocation, a field-by-field
+  buffer walk, a `std::string` callsign) plus N re-packs; fleet-wide, that relay
+  work grew as O(N²) decodes/second. A new `fss_connection::sendPacked()` copies
+  the shared packed bytes and stamps the per-connection sequence id straight into
+  the header at send time, so each recipient still gets its own uniquely-stamped
+  frame (the C8 no-shared-instance invariant is preserved) but the per-recipient
+  decode and re-pack are gone. Delivered behaviour per recipient is unchanged;
+  this raises the fleet size the server sustains before broadcast fan-out becomes
+  the bottleneck. Companion to the todo/23 batched command poll below.
 - The command poller now issues a single batched database read per tick for
   the newest pending command across all connected aircraft, instead of one
   `getCommand` query per connected aircraft (todo/23). This drops the
