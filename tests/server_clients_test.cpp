@@ -337,7 +337,9 @@ TEST_CASE("server_clients: position relay drops oldest and counts drops once the
         auto position = std::make_shared<fss::transport::fss_message_position_report>(
             0.0, 0.0, 0U, 0U, 0U, int16_t{0}, 0U, std::string{}, 0U, uint8_t{0}, 0U, uint8_t{0}, uint8_t{0},
             uint64_t{0});
-        stuck_client->queuePositionRelay(position);
+        /* todo/55: the relay queue now carries the packed frame, shared across
+         * recipients, not a decoded message clone. */
+        stuck_client->queuePositionRelay(position->getPacked());
     }
 
     REQUIRE(stuck_client->getPositionRelayDropped() == reports_sent - queue_cap);
@@ -354,6 +356,60 @@ TEST_CASE("server_clients: broadcastMsg skips the 'except' client")
     auto msg = std::make_shared<fss::transport::fss_message_rtt_request>();
     // Passing aircraft as the 'except' client — should send to 0 clients (no crash)
     sc.broadcastMsg(msg, aircraft.get());
+}
+
+TEST_CASE("server_clients: broadcast stamps a per-connection sequence id into the shared frame (todo/55)")
+{
+    /* todo/55: broadcastMsg now packs once and shares the frame, read-only,
+     * across recipients; sendPacked copies it and stamps this connection's next
+     * sequence id straight into the header bytes rather than decoding and
+     * re-packing a per-recipient clone. Pin both halves of that: (a) the relayed
+     * frame arrives decodable with its payload intact (the bytes were copied),
+     * and (b) the id is a per-connection sequence stamped at the offset decode
+     * reads it back from — proven by two successive broadcasts landing
+     * consecutive ids. A wrong offset would leave the source frame's placeholder
+     * id (0) in place, so both would decode as 0 and 0 != 0 + 1. */
+    server_clients sc;
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft1"] = 1;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft1");
+    auto writer = make_null_writer();
+    auto client = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &sc);
+    client->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft1"));
+    sc.clientConnected(client);
+
+    auto make_report = [](uint32_t altitude) {
+        return std::make_shared<fss::transport::fss_message_position_report>(0.0, 0.0, altitude, 0U, 0U, int16_t{0}, 0U,
+                                                                             std::string{"TESTID"}, 0U, uint8_t{0}, 0U,
+                                                                             uint8_t{0}, uint8_t{0}, uint64_t{0});
+    };
+
+    sc.broadcastMsg(make_report(11111U));
+    sc.broadcastMsg(make_report(22222U));
+
+    REQUIRE(fss_test::wait_for(
+        [&]() -> bool { return count_sent<fss::transport::fss_message_position_report>(conn->sentSnapshot()) == 2; }));
+
+    std::vector<std::shared_ptr<fss::transport::fss_message_position_report>> reports;
+    for (const auto &m : conn->sentSnapshot())
+    {
+        if (auto report = std::dynamic_pointer_cast<fss::transport::fss_message_position_report>(m))
+        {
+            reports.push_back(report);
+        }
+    }
+    REQUIRE(reports.size() == 2);
+    // Payload copied verbatim through the byte clone (distinct per broadcast).
+    REQUIRE(reports[0]->getAltitude() == 11111U);
+    REQUIRE(reports[1]->getAltitude() == 22222U);
+    REQUIRE(reports[0]->getCallSign() == "TESTID");
+    // Freshly stamped, sequential per-connection id at the header offset.
+    REQUIRE(reports[0]->getId() != 0);
+    REQUIRE(reports[1]->getId() == reports[0]->getId() + 1);
+
+    client->disconnect();
 }
 
 TEST_CASE("server_clients: checkTimeouts disconnects timed-out client")
