@@ -21,8 +21,8 @@ lib_LTLIBRARIES = libfss.la libfss-transport.la
 include_HEADERS = fss.hpp fss-log.hpp
 pkgconfig_DATA = fss.pc
 
-libfss_la_LDFLAGS = -version-info 3:0:0
-libfss_transport_la_LDFLAGS = -version-info 3:0:0
+libfss_la_LDFLAGS = -version-info 4:0:0
+libfss_transport_la_LDFLAGS = -version-info 4:0:0
 
 libfss_la_SOURCES = fss-main.cpp fss.hpp
 
@@ -32,7 +32,7 @@ libfss_transport_la_SOURCES = transport.cpp transport-helpers.cpp transport-mess
 libfss_transport_la_LIBADD = $(pthread_LIBS)
 
 lib_LTLIBRARIES += libfss-transport-ssl.la
-libfss_transport_ssl_la_LDFLAGS = -version-info 3:0:0
+libfss_transport_ssl_la_LDFLAGS = -version-info 4:0:0
 libfss_transport_ssl_la_SOURCES = transport-ssl.cpp
 libfss_transport_ssl_la_CXXFLAGS = $(AM_CXXFLAGS) $(GNUTLS_CFLAGS)
 libfss_transport_ssl_la_LIBADD = $(GNUTLS_LIBS) -L. libfss-transport.la
@@ -40,7 +40,7 @@ include_HEADERS += fss-transport-ssl.hpp
 pkgconfig_DATA += fss-transport-ssl.pc
 
 lib_LTLIBRARIES += libfss-client-ssl.la
-libfss_client_ssl_la_LDFLAGS = -version-info 3:0:0
+libfss_client_ssl_la_LDFLAGS = -version-info 4:0:0
 libfss_client_ssl_la_SOURCES = client-ssl.cpp json-config.hpp
 libfss_client_ssl_la_CXXFLAGS = $(AM_CXXFLAGS) $(JSONCPP_CFLAGS)
 libfss_client_ssl_la_LIBADD = $(GNUTLS_LIBS) $(JSONCPP_LIBS) -L. libfss.la libfss-transport.la libfss-transport-ssl.la

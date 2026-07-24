@@ -8,6 +8,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- `fss_connection` now invokes `fss_message_cb::processMessage()` with its
+  internal `msg_lock` released, instead of holding it across the callback
+  (todo/25). Holding a transport mutex across arbitrary user code meant any
+  handler that re-entered the connection's message-queue API from inside its own
+  callback — `getMsg()`, `setHandler()`, `disconnect()`, or anything reaching
+  them — self-deadlocked on a plain `std::mutex`. The in-tree handlers were
+  hand-shaped to avoid it, but the API itself was the hazard for every future
+  callback. New delivery bookkeeping preserves the two properties the lock-held
+  shape provided: deliveries on one connection stay serialized (a would-be
+  deliverer waits for delivery-idle first), and `setHandler()` — including the
+  `setHandler(nullptr)` in `~fss_message_cb` — waits for any in-flight callback
+  to return before swapping the handler, which is the lifetime proof for the
+  connection's non-owning `fss_message_cb *`. The delivering thread is exempt
+  from that wait, which is what makes re-entrant calls work. `disconnect()`
+  gained the same wait, so its two thread-*detach* paths now also guarantee no
+  callback is in flight when it returns — previously they guaranteed nothing,
+  which was the only barrier the server-side client teardown path had.
+  Cross-thread lock-order cycles are unaffected: `setHandler()` still blocks on
+  a running callback, so the existing "call `activate()`/`reconnect()` outside
+  our own lock" rules in `server-clients.cpp` and `client-ssl.cpp` remain
+  load-bearing. No behaviour change for existing handlers.
+- ABI: all four library sonames bump `.so.3` → `.so.4` (`-version-info 4:0:0`
+  for `libfss`, `libfss-transport`, `libfss-transport-ssl`,
+  `libfss-client-ssl`). The installed `fss-transport.hpp` changed object layout
+  since 1.2.1: `fss_connection` gained the todo/25 delivery members above and
+  the todo/52 deferred-close descriptor. A same-soname mix of an old library
+  with the new header (or vice versa) would silently corrupt derived-class
+  layouts rather than fail to link, so consumers must rebuild.
 - Broadcast relays now pack the source message once and share that frame,
   read-only, across every recipient instead of decoding a fresh clone per
   recipient (todo/55). Previously each relayed position report to N connected
@@ -68,8 +96,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   observable by TSan or the e2e suite (fd-number reuse is not a data race);
   unit tests pin the new ordering with fcntl probes instead.
   `fss_connection` gained a data member — an ABI layout change to the
-  installed `fss-transport.hpp`, covered by a `-version-info` bump at the
-  next release (the todo/61 checklist step).
+  installed `fss-transport.hpp`, covered by the `.so.3` → `.so.4` soname
+  bump recorded below.
 
 ### Added
 - The server now logs every silently-rejected aircraft and non-aircraft
