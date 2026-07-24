@@ -10,7 +10,6 @@
 #include <vector>
 #include "fss-transport.hpp"
 #include "fss-log.hpp"
-#include "fss-endian.hpp"
 
 #include <iostream>
 
@@ -400,25 +399,39 @@ auto flight_safety_system::transport::fss_connection::sendMsg(const std::shared_
 
 auto flight_safety_system::transport::fss_connection::sendPacked(const std::shared_ptr<buf_len> &packed) -> bool
 {
-    /* The frame was built and framed by getPacked() and validated by the
-     * broadcaster before it reached the outbound queue, so the too-big-to-frame
-     * case that sendMsg(fss_message) rolls an id back for (todo/38) cannot occur
-     * here. Guard defensively anyway and bail BEFORE consuming a sequence id, so
-     * a bad frame never leaves a gap the peer's v2 sequence check treats as
-     * out-of-order (todo/39). */
-    if (packed == nullptr || !packed->isValid() || packed->getLength() < fss_message::id_offset + sizeof(uint64_t))
+    if (packed == nullptr || !packed->isValid())
     {
         return false;
     }
     std::scoped_lock lock_holder(this->send_lock);
+    /* Enforce the no-credentials precondition at runtime, not just by convention:
+     * this path deliberately skips the message_type_smm_settings wipeSecure scrub
+     * sendMsg() does (todo/43), and a shared broadcast frame must never carry
+     * credentials in the first place. Refuse (loudly — a routing bug) before an id
+     * is consumed, so a misrouted settings frame is dropped rather than broadcast
+     * in the clear. */
+    if (fss_message::peekType(*packed) == flight_safety_system::transport::message_type_smm_settings)
+    {
+        FSS_LOG_ERROR("transport", "sendPacked refused a message_type_smm_settings frame; credentials must not be "
+                                   "broadcast — dropping");
+        return false;
+    }
     uint64_t assigned_id = this->getMessageId();
     /* Clone the bytes, not the message (todo/55): the shared `packed` frame is
      * read-only and identical for every recipient — the only per-connection
      * difference is the id — so copy it once and stamp the id straight in at the
-     * fixed header offset, bypassing decode and re-pack entirely. */
+     * fixed header offset (fss_message owns that layout), bypassing decode and
+     * re-pack entirely. */
     auto bl = std::make_shared<buf_len>(*packed);
-    uint64_t id_n = flight_safety_system::fss_htobe64(assigned_id);
-    bl->writeAt(fss_message::id_offset, &id_n, sizeof(uint64_t));
+    if (!fss_message::stampId(*bl, assigned_id))
+    {
+        /* Too short to hold a header — the frame the broadcaster validated should
+         * never be, but if it is, roll the id back (still under send_lock, as
+         * getMessageId() incremented it) so the peer's v2 sequence check sees no
+         * gap (todo/38, todo/39), exactly as sendMsg(fss_message) does. */
+        --this->last_msg_id;
+        return false;
+    }
     return this->sendMsg(bl);
 }
 

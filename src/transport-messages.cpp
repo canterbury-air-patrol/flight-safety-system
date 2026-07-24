@@ -3,6 +3,7 @@
 #include "fss-log.hpp"
 
 #include <cmath>
+#include <cstring>
 #include <limits>
 #include <memory>
 
@@ -600,6 +601,28 @@ auto flight_safety_system::transport::fss_message::getPacked() -> std::shared_pt
     this->updateSize(bl);
 
     return bl;
+}
+
+auto flight_safety_system::transport::fss_message::stampId(buf_len &bl, uint64_t t_id) -> bool
+{
+    if (bl.getLength() < id_offset + sizeof(uint64_t))
+    {
+        return false;
+    }
+    uint64_t id_n = fss_htobe64(t_id);
+    bl.writeAt(id_offset, &id_n, sizeof(uint64_t));
+    return true;
+}
+
+auto flight_safety_system::transport::fss_message::peekType(buf_len &bl) -> fss_message_type
+{
+    if (bl.getLength() < sizeof(uint16_t) + sizeof(uint16_t))
+    {
+        return message_type_unknown;
+    }
+    uint16_t type_n = 0;
+    std::memcpy(&type_n, bl.getData() + sizeof(uint16_t), sizeof(type_n));
+    return decode_message_type(fss_be16toh(type_n));
 }
 
 void flight_safety_system::transport::fss_message_closed::packData(std::shared_ptr<buf_len> bl __attribute__((unused)))

@@ -427,3 +427,26 @@ TEST_CASE("client: base class handleCommand, handlePositionReport, handleSMMSett
                                                                           fss::secure_string(std::string_view{"pass"}));
     server->processMessage(smm); /* fss_client::handleSMMSettings — no-op */
 }
+
+TEST_CASE("fss_connection::sendPacked stamps a broadcast and refuses credentials (todo/55)")
+{
+    /* sendPacked is the byte-clone broadcast path: it copies a shared, pre-packed
+     * frame and stamps this connection's next sequence id into the copy. A normal
+     * broadcast frame goes out with a stamped id; a credential-bearing
+     * smm_settings frame must be refused at runtime (it would otherwise skip the
+     * wipeSecure scrub sendMsg does and leak credentials to every recipient). */
+    auto conn = std::make_shared<CapturingConnection>();
+
+    auto position = std::make_shared<fss::transport::fss_message_position_report>(
+        1.0, 2.0, 50U, 0U, 0U, int16_t{0}, 0U, std::string{}, 0U, uint8_t{0}, 0U, uint8_t{0}, uint8_t{0}, uint64_t{0});
+    REQUIRE(conn->sendPacked(position->getPacked()));
+    REQUIRE(conn->sent.size() == 1);
+    REQUIRE(conn->sent[0]->getType() == fss::transport::message_type_position_report);
+    REQUIRE(conn->sent[0]->getId() != 0); // a per-connection id was stamped in
+
+    auto settings = std::make_shared<fss::transport::fss_message_smm_settings>(
+        "https://smm.example/", fss::secure_string(std::string_view{"user"}),
+        fss::secure_string(std::string_view{"pass"}));
+    REQUIRE_FALSE(conn->sendPacked(settings->getPacked())); // refused
+    REQUIRE(conn->sent.size() == 1);                        // nothing sent
+}
