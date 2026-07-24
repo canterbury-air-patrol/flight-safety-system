@@ -250,11 +250,14 @@ void fss::server::fss_client::outboundWorkerRun()
         }
         if (work.server_list_broadcast != nullptr)
         {
-            this->getConnection()->sendMsg(work.server_list_broadcast);
+            /* Broadcast frames are pre-packed and shared read-only across
+             * recipients; sendPacked copies and stamps this connection's id
+             * (todo/55) rather than re-packing a decoded clone. */
+            this->getConnection()->sendPacked(work.server_list_broadcast);
         }
         for (const auto &relay_msg : work.position_relay)
         {
-            this->getConnection()->sendMsg(relay_msg);
+            this->getConnection()->sendPacked(relay_msg);
         }
     }
 }
@@ -298,7 +301,7 @@ void fss::server::fss_client::queueSMMSettings()
     this->outbound_cv.notify_one();
 }
 
-void fss::server::fss_client::queueServerListBroadcast(std::shared_ptr<fss::transport::fss_message> msg)
+void fss::server::fss_client::queueServerListBroadcast(std::shared_ptr<fss::transport::buf_len> packed)
 {
     {
         std::scoped_lock guard(this->outbound_lock);
@@ -306,12 +309,12 @@ void fss::server::fss_client::queueServerListBroadcast(std::shared_ptr<fss::tran
         {
             return;
         }
-        this->pending_server_list_broadcast = std::move(msg);
+        this->pending_server_list_broadcast = std::move(packed);
     }
     this->outbound_cv.notify_one();
 }
 
-void fss::server::fss_client::queuePositionRelay(std::shared_ptr<fss::transport::fss_message> msg)
+void fss::server::fss_client::queuePositionRelay(std::shared_ptr<fss::transport::buf_len> packed)
 {
     uint64_t dropped = 0;
     {
@@ -325,7 +328,7 @@ void fss::server::fss_client::queuePositionRelay(std::shared_ptr<fss::transport:
             this->pending_position_relay.pop_front();
             dropped = ++this->position_relay_dropped;
         }
-        this->pending_position_relay.push_back(std::move(msg));
+        this->pending_position_relay.push_back(std::move(packed));
     }
     this->outbound_cv.notify_one();
     /* Logged outside outbound_lock: getName() takes client_lock, and name is

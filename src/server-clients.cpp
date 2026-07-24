@@ -149,29 +149,32 @@ void server_clients::broadcastMsg(const std::shared_ptr<flight_safety_system::tr
 {
     bool is_server_list = msg->getType() == flight_safety_system::transport::message_type_server_list;
     auto packed = msg->getPacked();
-    /* decode() failing is a property of `packed` (truncated/corrupt bytes
-     * or a type it refuses to reconstruct), not of any one recipient, so
-     * check once here rather than per-client: a per-client `continue`
-     * would look like "skip this one client" but actually silently drops
-     * the whole broadcast, one client at a time, with no record of why. */
-    if (flight_safety_system::transport::fss_message::decode(packed) == nullptr)
+    /* todo/55: pack once and share the frame, read-only, across every recipient
+     * — each stamps only its own id into a private copy at send time
+     * (fss_connection::sendPacked), so there is no per-recipient decode or
+     * re-pack. We also drop the old once-per-broadcast validation decode:
+     * getPacked() already framed the message and updateSize() invalidates a
+     * frame too large to frame, so isValid() is the cheap equivalent of the old
+     * "did it round-trip" guard. Invalidity is a property of `packed`, not of any
+     * one recipient, so drop the whole broadcast and log once rather than
+     * silently per client. */
+    if (!packed->isValid())
     {
-        FSS_LOG_ERROR("server", "broadcastMsg: message of type "
-                                    << msg->getType() << " did not round-trip through pack/decode; dropping");
+        FSS_LOG_ERROR("server", "broadcastMsg: message of type " << msg->getType()
+                                                                 << " did not pack into a valid frame; dropping");
         return;
     }
     for (const auto &client : this->snapshotClients())
     {
         if (client->isAircraft() && client.get() != except)
         {
-            auto clone = flight_safety_system::transport::fss_message::decode(packed);
             if (is_server_list)
             {
-                client->queueServerListBroadcast(std::move(clone));
+                client->queueServerListBroadcast(packed);
             }
             else
             {
-                client->queuePositionRelay(std::move(clone));
+                client->queuePositionRelay(packed);
             }
         }
     }
