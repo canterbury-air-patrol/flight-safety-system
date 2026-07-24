@@ -211,6 +211,9 @@ auto flight_safety_system::server::db_connection::getCommands(const std::vector<
     {
         return res;
     }
+    /* At most one entry per requested asset (fewer when some have no pending
+     * command); reserve up front so this per-tick poll path never rehashes. */
+    res.reserve(asset_ids.size());
     /* db_asset_commands_get takes the C asset-id type (unsigned long long) used
      * throughout server-db.h; copy into it because uint64_t may be a distinct
      * type (unsigned long here) whose pointer will not implicitly convert. */
