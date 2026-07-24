@@ -350,15 +350,25 @@ public:
     /* Sends one message on this connection. NOTE: this mutates the message —
      * it stamps the per-connection sequence id into msg (setId) before packing.
      * Invariant (todo/12 C8): a single fss_message instance must not be sent
-     * concurrently on multiple connections; the id stamp would race. Every
-     * broadcaster (server_clients::broadcastMsg, one msg logically bound for
-     * every client) satisfies this by giving each recipient its own
-     * independent clone (todo/36) rather than sharing one instance.
+     * concurrently on multiple connections; the id stamp would race.
      * sendRTTRequest sends a single message and then reads its assigned id back
      * immediately after this returns, so it too relies on the stamp being
      * synchronous and unraced. (sendSMMSettings builds a fresh message per
-     * client, so it never shares an instance.) */
+     * client, so it never shares an instance.) Broadcasters do NOT use this
+     * path — see sendPacked. */
     auto sendMsg(const std::shared_ptr<fss_message> &msg) -> bool;
+    /* Byte-clone send for broadcasts (todo/55): takes a frame already packed by
+     * fss_message::getPacked() and shared, unmodified, across every recipient.
+     * Copies the bytes, stamps this connection's next sequence id straight into
+     * the copy at fss_message::id_offset under send_lock, and sends — no decode,
+     * no re-pack. This is how a broadcaster satisfies the C8 invariant above: the
+     * shared packed frame is read-only, and each recipient stamps only its own
+     * private copy, so no fss_message instance is shared or its id raced (todo/36).
+     * Precondition: `packed` is a valid, fully framed frame whose payload carries
+     * no credentials (never message_type_smm_settings) — broadcasts are only
+     * server_list / position_report, so the todo/43 wipeSecure scrub does not
+     * apply here. */
+    auto sendPacked(const std::shared_ptr<buf_len> &packed) -> bool;
     auto getMsg() -> std::shared_ptr<fss_message>;
     virtual void processMessages();
     /* The shutdown-only half of disconnect() (todo/52): wakes any thread
@@ -463,6 +473,13 @@ public:
     virtual auto getAltitude() -> uint32_t;
     virtual auto getTimeStamp() -> uint64_t;
     virtual auto getPacked() -> std::shared_ptr<buf_len>;
+    /* Byte offset of the 8-byte big-endian id within a packed frame. createHeader
+     * lays the header out as [length:u16][type:u16][id:u64], so the id follows the
+     * length and type fields. Exposed as the single source of truth for that
+     * offset so a byte-clone sender (fss_connection::sendPacked) can stamp the
+     * per-connection id straight into packed bytes without re-packing, and can
+     * never drift from where createHeader actually writes it. */
+    static constexpr size_t id_offset = sizeof(uint16_t) + sizeof(uint16_t);
     void createHeader(const std::shared_ptr<buf_len> &bl);
     static void updateSize(const std::shared_ptr<buf_len> &bl);
     static auto decode(const std::shared_ptr<buf_len> &bl) -> std::shared_ptr<fss_message>;
