@@ -224,13 +224,13 @@ public:
     auto operator=(buf_len &&) -> buf_len & = delete;
     virtual ~buf_len();
     auto operator=(const buf_len &other) -> buf_len &;
-    auto isValid() -> bool;
+    auto isValid() const -> bool;
     auto addData(const char *new_data, size_t len) -> bool;
     auto addData(const void *new_data, size_t len) -> bool;
     void writeAt(size_t offset, const char *src, size_t len);
     void writeAt(size_t offset, const void *src, size_t len);
-    auto getData() -> const char *;
-    auto getLength() -> size_t;
+    auto getData() const -> const char *;
+    auto getLength() const -> size_t;
     /* Marks an already-built buffer as unusable (todo/38): clears the content
      * so isValid() reports false. Used when a packed message turns out too
      * large to frame — the buffer already holds the unframed bytes by that
@@ -362,13 +362,14 @@ public:
      * Copies the bytes, stamps this connection's next sequence id straight into
      * the copy at fss_message::id_offset under send_lock, and sends — no decode,
      * no re-pack. This is how a broadcaster satisfies the C8 invariant above: the
-     * shared packed frame is read-only, and each recipient stamps only its own
-     * private copy, so no fss_message instance is shared or its id raced (todo/36).
+     * shared packed frame is read-only — `shared_ptr<const buf_len>` enforces that
+     * at the type level — and each recipient stamps only its own private copy, so
+     * no fss_message instance is shared or its id raced (todo/36).
      * Precondition: `packed` is a valid, fully framed frame whose payload carries
      * no credentials (never message_type_smm_settings) — broadcasts are only
      * server_list / position_report, so the todo/43 wipeSecure scrub does not
      * apply here. */
-    auto sendPacked(const std::shared_ptr<buf_len> &packed) -> bool;
+    auto sendPacked(const std::shared_ptr<const buf_len> &packed) -> bool;
     auto getMsg() -> std::shared_ptr<fss_message>;
     virtual void processMessages();
     /* The shutdown-only half of disconnect() (todo/52): wakes any thread
@@ -496,7 +497,7 @@ public:
      * frame's type — e.g. sendPacked refusing to broadcast a credential-bearing
      * message_type_smm_settings — with the header layout owned here, not the
      * caller. */
-    static auto peekType(buf_len &bl) -> fss_message_type;
+    static auto peekType(const buf_len &bl) -> fss_message_type;
     void createHeader(const std::shared_ptr<buf_len> &bl);
     static void updateSize(const std::shared_ptr<buf_len> &bl);
     static auto decode(const std::shared_ptr<buf_len> &bl) -> std::shared_ptr<fss_message>;

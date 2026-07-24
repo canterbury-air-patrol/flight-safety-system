@@ -370,7 +370,7 @@ auto flight_safety_system::transport::buf_len::operator=(const buf_len &other) -
     return *this;
 }
 
-auto flight_safety_system::transport::buf_len::isValid() -> bool
+auto flight_safety_system::transport::buf_len::isValid() const -> bool
 {
     return this->data.length() != 0;
 }
@@ -397,12 +397,12 @@ void flight_safety_system::transport::buf_len::writeAt(size_t offset, const void
     this->data.replace(offset, len, static_cast<const char *>(src), len);
 }
 
-auto flight_safety_system::transport::buf_len::getData() -> const char *
+auto flight_safety_system::transport::buf_len::getData() const -> const char *
 {
     return this->data.c_str();
 }
 
-auto flight_safety_system::transport::buf_len::getLength() -> size_t
+auto flight_safety_system::transport::buf_len::getLength() const -> size_t
 {
     return this->data.length();
 }
@@ -614,7 +614,7 @@ auto flight_safety_system::transport::fss_message::stampId(buf_len &bl, uint64_t
     return true;
 }
 
-auto flight_safety_system::transport::fss_message::peekType(buf_len &bl) -> fss_message_type
+auto flight_safety_system::transport::fss_message::peekType(const buf_len &bl) -> fss_message_type
 {
     if (bl.getLength() < sizeof(uint16_t) + sizeof(uint16_t))
     {

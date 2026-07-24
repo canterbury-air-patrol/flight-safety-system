@@ -301,7 +301,7 @@ void fss::server::fss_client::queueSMMSettings()
     this->outbound_cv.notify_one();
 }
 
-void fss::server::fss_client::queueServerListBroadcast(std::shared_ptr<fss::transport::buf_len> packed)
+void fss::server::fss_client::queueServerListBroadcast(std::shared_ptr<const fss::transport::buf_len> packed)
 {
     {
         std::scoped_lock guard(this->outbound_lock);
@@ -314,7 +314,7 @@ void fss::server::fss_client::queueServerListBroadcast(std::shared_ptr<fss::tran
     this->outbound_cv.notify_one();
 }
 
-void fss::server::fss_client::queuePositionRelay(std::shared_ptr<fss::transport::buf_len> packed)
+void fss::server::fss_client::queuePositionRelay(std::shared_ptr<const fss::transport::buf_len> packed)
 {
     uint64_t dropped = 0;
     {
