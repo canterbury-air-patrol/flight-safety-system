@@ -15,6 +15,11 @@
 
 namespace flight_safety_system {
 
+/* Defined in fss-log.hpp; only referenced here as a pointer parameter on a
+ * private helper, so the declaration is enough and this header keeps its
+ * current include set. */
+class exception_guard;
+
 namespace transport {
 
 static constexpr double FSS_COORD_SCALE = 0.0000001;
@@ -280,8 +285,32 @@ class fss_connection {
      * an unrelated session. -1 when nothing is pending. */
     std::atomic<int> pending_close_fd{-1};
     std::atomic<uint64_t> last_msg_id{0};
+    /* Non-owning back-pointer to the installed handler, guarded by msg_lock.
+     * Lifetime (todo/25): it is only dereferenced with delivery_depth
+     * incremented, and setHandler() — the sole mutator, including the
+     * setHandler(nullptr) in ~fss_message_cb — waits for delivery-idle before
+     * touching it, so a handler cannot be destroyed while a call into it is in
+     * flight. A handler that detaches some other way (fss_client::disconnect()
+     * clears its connection pointer, so ~fss_message_cb never reaches
+     * setHandler) is covered by the same wait in disconnect(). */
     fss_message_cb *handler{nullptr};
     std::queue<std::shared_ptr<fss_message>> messages{};
+    /* Delivery bookkeeping (todo/25): processMessage() runs with msg_lock
+     * RELEASED, so a handler may re-enter getMsg()/setHandler()/disconnect()
+     * without deadlocking on it. These members are themselves guarded by
+     * msg_lock and restore the two properties the old lock-held delivery gave
+     * for free:
+     *  - deliveries on one connection stay serialized (a would-be deliverer
+     *    waits for delivery_depth == 0), and
+     *  - setHandler() cannot swap or clear `handler` while a call into it is
+     *    in flight, which is the lifetime proof above.
+     * delivering_thread is the thread inside the current delivery; it is
+     * exempt from the wait so a re-entrant call made by the callback itself
+     * proceeds instead of blocking on itself. Delivery is serialized, so one
+     * id suffices and delivery_depth only exceeds 1 by same-thread nesting. */
+    std::condition_variable delivery_cv{};
+    unsigned int delivery_depth{0};
+    std::thread::id delivering_thread{};
     std::thread recv_thread{};
     std::mutex send_lock{};
     std::mutex msg_lock{};
@@ -309,6 +338,21 @@ class fss_connection {
      * server-accepted socket already had the default applied at accept and
      * is not affected by this member. */
     unsigned int tcp_user_timeout_ms{default_tcp_user_timeout_ms};
+    /* Blocks until no delivery is in flight. Precondition: t_lock owns
+     * msg_lock. The calling thread is exempt when it is the one delivering, so
+     * a handler re-entering setHandler()/disconnect() does not wait on itself. */
+    void waitForDeliveryIdle(std::unique_lock<std::mutex> &t_lock);
+    /* Invokes handler->processMessage(msg) with msg_lock RELEASED, then
+     * reacquires it. Preconditions: t_lock owns msg_lock, handler != nullptr,
+     * and delivery is idle or already nested on this thread. When t_guard is
+     * non-null the call is made through it (exceptions logged and swallowed);
+     * when null the handler's exception propagates to the caller, with the
+     * delivery bookkeeping unwound first. */
+    void deliverUnlocked(std::unique_lock<std::mutex> &t_lock, const std::shared_ptr<fss_message> &msg,
+                         flight_safety_system::exception_guard *t_guard);
+    /* Ends one delivery started by deliverUnlocked() and wakes anyone waiting
+     * for idle. Precondition: msg_lock held, delivery_depth > 0. */
+    void endDeliveryLocked();
 protected:
     auto recvMsg() -> std::shared_ptr<fss_message>;
     auto getMessageId() -> uint64_t;
