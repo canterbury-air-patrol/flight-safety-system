@@ -48,6 +48,7 @@ all_test_SOURCES = main.cpp messages.cpp connection.cpp client.cpp \
 	server_clients_test.cpp \
 	server_failsafe_test.cpp \
 	exception_isolation_test.cpp \
+	handler_reentry_test.cpp \
 	../src/client_session.cpp \
 	../src/db-write-queue.cpp \
 	../src/server-clients.cpp \

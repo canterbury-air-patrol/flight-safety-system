@@ -155,3 +155,69 @@ TEST_CASE("tsan: concurrent setConnection/clearConnection and sendMsg/getConnect
     writer.join();
     reader.join();
 }
+
+/* todo/25: processMessage() now runs with msg_lock released, so the delivery
+ * bookkeeping (delivery_depth/delivering_thread/delivery_cv) is what serializes
+ * deliveries and keeps setHandler() from swapping the handler mid-call. One
+ * thread churns setHandler(cb)/setHandler(nullptr) while the recv thread is
+ * delivering a steady stream of real messages: TSan must see no race on the
+ * handler pointer or the queue, and no delivery may land after a detach
+ * returns. */
+TEST_CASE("tsan: setHandler churn racing live recv-thread deliveries")
+{
+    int fds[2];
+    REQUIRE(::socketpair(AF_UNIX, SOCK_STREAM, 0, fds) == 0);
+    auto sender = fss_connection::create(fds[0]);
+    auto receiver = fss_connection::create(fds[1]);
+    REQUIRE(sender != nullptr);
+    REQUIRE(receiver != nullptr);
+
+    /* Counts deliveries and asserts none arrives while detached. attached is
+     * only written by the churning thread, and only while no delivery can be in
+     * flight — setHandler() waits for delivery-idle on both sides of the swap. */
+    struct counting_cb : fss_message_cb {
+        explicit counting_cb(std::shared_ptr<fss_connection> t_conn) : fss_message_cb(std::move(t_conn)) {}
+        std::atomic<bool> attached{false};
+        std::atomic<int> delivered{0};
+        std::atomic<int> while_detached{0};
+        void processMessage(std::shared_ptr<flight_safety_system::transport::fss_message>) override
+        {
+            if (!this->attached.load())
+            {
+                ++this->while_detached;
+            }
+            ++this->delivered;
+        }
+    };
+    auto cb = std::make_shared<counting_cb>(receiver);
+
+    constexpr int iterations = 500;
+    std::atomic<bool> stop{false};
+
+    std::thread feeder([&]() {
+        while (!stop.load())
+        {
+            sender->sendMsg(std::make_shared<fss_message_identity>("tsan-churn"));
+        }
+    });
+
+    for (int i = 0; i < iterations; ++i)
+    {
+        cb->attached.store(true);
+        receiver->setHandler(cb.get());
+        receiver->setHandler(nullptr);
+        cb->attached.store(false);
+        /* Keep the queue from growing without bound while detached. */
+        while (receiver->getMsg() != nullptr)
+        {
+        }
+    }
+
+    stop.store(true);
+    feeder.join();
+
+    REQUIRE(cb->while_detached.load() == 0);
+
+    cb->disconnect();
+    receiver->disconnect();
+}
