@@ -80,10 +80,21 @@ struct asset_command_row_s {
  * was truncated -- are simply absent from the result (same per-row drop as the
  * single-row read). error_out (may be NULL) is set to 1 on a mid-cursor read
  * error, mirroring db_active_fss_servers_get; the accumulated rows are then a
- * partial set. Returns NULL only on allocation failure. Free with
- * db_free_asset_commands. count == 0 returns an empty list without querying. */
+ * partial set. Returns NULL only on allocation failure. count == 0 returns an
+ * empty list without querying.
+ *
+ * Mapping: rows are NOT positionally aligned with asset_ids -- the result is
+ * ordered by asset_id and omits assets with no command, so a caller must key on
+ * each row's own asset_id field, never on the input index.
+ *
+ * Ownership: the caller owns each row and its command string. Free every
+ * commands[i]->command and every commands[i], then pass the array to
+ * db_free_asset_commands, which frees only the array itself (not the rows) --
+ * the same split ownership db_active_fss_servers_get / db_free_fss_servers use. */
 struct asset_command_row_s **db_asset_commands_get(const char *conn, const unsigned long long *asset_ids, size_t count,
                                                    int *error_out);
+/* Frees the array returned by db_asset_commands_get. Frees ONLY the array, not
+ * the rows or their command strings -- free those first (see Ownership above). */
 void db_free_asset_commands(struct asset_command_row_s **commands);
 
 struct smm_settings_s {
