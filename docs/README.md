@@ -33,7 +33,9 @@ several `todo/` items is filed under all of them (`34-45-47-…`).
 
 | Decision | Subject |
 |---|---|
+| [23 — supported scale: tens of aircraft](decisions/23-supported-scale-assumption.md) | Standing assumption |
 | [24 — database reads report failure by status, never throw](decisions/24-database-read-error-control-flow.md) | Database seam |
+| [25 — transport callbacks run without the connection's lock](decisions/25-transport-callback-reentrancy.md) | Standing assumption |
 | [26 — client send timeouts use `TCP_USER_TIMEOUT`, not `SO_SNDTIMEO`](decisions/26-client-send-timeout.md) | Transport |
 | [31 — duplicate asset identity rejects the newcomer](decisions/31-duplicate-identity-policy.md) | Server policy |
 | [34/45/47 — the database fail-safe is one latched degraded state](decisions/34-45-47-db-failsafe-latch.md) | Safety behaviour |

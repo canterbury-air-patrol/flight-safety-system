@@ -57,7 +57,7 @@ fss-server server.json
 
 #### Supported scale
 
-The server is sized for RPAS fleets of tens of aircraft against a single local PostgreSQL+PostGIS database. Command dispatch runs from in-memory caches on the main loop; the poller performs one batched database read per tick for the newest pending command across all connected aircraft, so the steady-state command-read rate is a constant (~10 queries/second) rather than growing with the number of aircraft. Each connection uses a small, fixed number of threads. Deployments approaching hundreds of concurrent aircraft should re-evaluate the single read-connection and per-connection thread model first.
+The server is sized for RPAS fleets of tens of aircraft against a single local PostgreSQL+PostGIS database. Command dispatch runs from in-memory caches on the main loop; the poller performs one batched database read per tick for the newest pending command across all connected aircraft, so the steady-state command-read rate is a constant (~10 queries/second) rather than growing with the number of aircraft. Each connection uses a small, fixed number of threads. Deployments approaching hundreds of concurrent aircraft should re-evaluate the single read-connection and per-connection thread model first; see [docs/decisions/23](docs/decisions/23-supported-scale-assumption.md) for what sets the ceiling and the order in which to raise it.
 
 ### Client
 
