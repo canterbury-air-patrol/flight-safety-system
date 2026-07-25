@@ -33,8 +33,12 @@ several `todo/` items is filed under all of them (`34-45-47-…`).
 
 | Decision | Subject |
 |---|---|
+| [24 — database reads report failure by status, never throw](decisions/24-database-read-error-control-flow.md) | Database seam |
 | [26 — client send timeouts use `TCP_USER_TIMEOUT`, not `SO_SNDTIMEO`](decisions/26-client-send-timeout.md) | Transport |
+| [31 — duplicate asset identity rejects the newcomer](decisions/31-duplicate-identity-policy.md) | Server policy |
+| [34/45/47 — the database fail-safe is one latched degraded state](decisions/34-45-47-db-failsafe-latch.md) | Safety behaviour |
 | [43 — `secure_string` scope](decisions/43-secure-string-scope.md) | Security boundary |
+| [46 — no `statement_timeout`; DB stalls are bounded at the socket](decisions/46-no-statement-timeout.md) | Database seam |
 | [48 — a terminal command ack is final for its dispatch](decisions/48-command-ack-terminal-finality.md) | Protocol / audit |
 | [49 — the FMU command identifier is per-server](decisions/49-server-command-id-semantics.md) | Protocol |
 | [51 — optional trailing wire fields are prefix-closed](decisions/51-optional-trailing-field-rule.md) | Protocol |
