@@ -577,14 +577,47 @@ auto flight_safety_system::transport::fss_connection::sendMsg(const std::shared_
     return true;
 }
 
+void flight_safety_system::transport::fss_connection::detachHandler() noexcept
+{
+    try
+    {
+        std::unique_lock lock_holder(this->msg_lock);
+        /* Nothing may be in flight into the outgoing handler when we clear it:
+         * this wait is what makes detaching a barrier proving the handler
+         * outlives every call the transport makes into it (todo/25). A handler
+         * that detaches from inside its own processMessage() is exempt and does
+         * not self-block. */
+        this->waitForDeliveryIdle(lock_holder);
+        this->handler = nullptr;
+        /* Deliberately no backlog flush: with no handler there is nobody to
+         * flush to. That is what makes this path callback-free and therefore
+         * safe to call from a destructor. */
+    }
+    catch (const std::exception &e)
+    {
+        /* Only the lock/wait can throw here (std::system_error), and only in a
+         * degenerate state. Log rather than propagate: the sole callers are a
+         * destructor and a noexcept-by-contract detach. */
+        FSS_LOG_ERROR("transport", "Exception detaching message handler: " << e.what());
+    }
+    catch (...)
+    {
+        FSS_LOG_ERROR("transport", "Unknown exception detaching message handler");
+    }
+}
+
 void flight_safety_system::transport::fss_connection::setHandler(fss_message_cb *cb)
 {
+    if (cb == nullptr)
+    {
+        /* One implementation of detach, so the "clearing never runs a callback"
+         * property cannot drift between the two entry points. */
+        this->detachHandler();
+        return;
+    }
     std::unique_lock lock_holder(this->msg_lock);
-    /* Nothing may be in flight into the outgoing handler when we swap it out:
-     * this wait is what makes setHandler(nullptr) — in particular the one in
-     * ~fss_message_cb — a barrier proving the handler outlives every call the
-     * transport makes into it (todo/25). A handler that calls setHandler()
-     * from inside its own processMessage() is exempt and does not self-block. */
+    /* No call into the outgoing handler may be in flight when we swap it out —
+     * same barrier as detachHandler(), and likewise re-entrant-safe. */
     this->waitForDeliveryIdle(lock_holder);
     this->handler = cb;
     /* Re-read this->handler each iteration rather than trusting cb: a flushed
@@ -988,23 +1021,11 @@ flight_safety_system::transport::fss_message_cb::~fss_message_cb()
     // this object, so conn cannot be concurrently read or written here.
     if (this->conn != nullptr)
     {
-        /* setHandler() propagates exceptions thrown by a handler it flushes the
-         * backlog into, and a destructor must not. Detaching (cb == nullptr)
-         * never flushes anything, so this cannot fire — but the compiler and
-         * cppcheck only see a potentially-throwing call in a noexcept function,
-         * and a stray throw here would be std::terminate rather than a leak. */
-        try
-        {
-            this->conn->setHandler(nullptr);
-        }
-        catch (const std::exception &e)
-        {
-            FSS_LOG_ERROR("transport", "Exception detaching handler in ~fss_message_cb: " << e.what());
-        }
-        catch (...)
-        {
-            FSS_LOG_ERROR("transport", "Unknown exception detaching handler in ~fss_message_cb");
-        }
+        /* detachHandler() rather than setHandler(nullptr): installing a handler
+         * can propagate an exception from the backlog it flushes, and a
+         * destructor must not. The detach path runs no callbacks at all and
+         * says so in its signature, so this needs no catch of its own. */
+        this->conn->detachHandler();
         this->conn.reset();
     }
 }
