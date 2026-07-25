@@ -287,12 +287,13 @@ class fss_connection {
     std::atomic<uint64_t> last_msg_id{0};
     /* Non-owning back-pointer to the installed handler, guarded by msg_lock.
      * Lifetime (todo/25): it is only dereferenced with delivery_depth
-     * incremented, and setHandler() — the sole mutator, including the
-     * setHandler(nullptr) in ~fss_message_cb — waits for delivery-idle before
-     * touching it, so a handler cannot be destroyed while a call into it is in
-     * flight. A handler that detaches some other way (fss_client::disconnect()
-     * clears its connection pointer, so ~fss_message_cb never reaches
-     * setHandler) is covered by the same wait in disconnect(). */
+     * incremented, and its only mutators — setHandler() and detachHandler(),
+     * the latter being what ~fss_message_cb uses — wait for delivery-idle
+     * before touching it, so a handler cannot be destroyed while a call into it
+     * is in flight. A handler that detaches some other way
+     * (fss_client::disconnect() clears its connection pointer, so
+     * ~fss_message_cb never reaches either) is covered by the same wait in
+     * disconnect(). */
     fss_message_cb *handler{nullptr};
     std::queue<std::shared_ptr<fss_message>> messages{};
     /* Delivery bookkeeping (todo/25): processMessage() runs with msg_lock
@@ -302,8 +303,8 @@ class fss_connection {
      * for free:
      *  - deliveries on one connection stay serialized (a would-be deliverer
      *    waits for delivery_depth == 0), and
-     *  - setHandler() cannot swap or clear `handler` while a call into it is
-     *    in flight, which is the lifetime proof above.
+     *  - setHandler()/detachHandler() cannot swap or clear `handler` while a
+     *    call into it is in flight, which is the lifetime proof above.
      * delivering_thread is the thread inside the current delivery; it is
      * exempt from the wait so a re-entrant call made by the callback itself
      * proceeds instead of blocking on itself. Delivery is serialized, so one
@@ -377,6 +378,19 @@ public:
     auto operator=(fss_connection &&) -> fss_connection & = delete;
     virtual ~fss_connection();
     void setHandler(fss_message_cb *cb);
+    /* Clears the installed handler; queued and later messages go back to the
+     * getMsg() queue. Equivalent to setHandler(nullptr), which delegates here.
+     *
+     * Exists as its own entry point because installing a handler flushes the
+     * backlog into it and so can propagate an exception the handler threw,
+     * while detaching runs no callback at all and therefore cannot. That
+     * distinction is what lets ~fss_message_cb detach without a try/catch, and
+     * stating it in a signature rather than a comment keeps a later change to
+     * the flush semantics from silently making the destructor a throwing path.
+     *
+     * Blocks until any in-flight processMessage() returns (the todo/25
+     * lifetime barrier), except when called from inside that callback. */
+    void detachHandler() noexcept;
     /* Request a tighter (or looser) TCP_USER_TIMEOUT than the 30 s default
      * for this connection (todo/26): the bound on how long a blocking send()
      * can stall into a half-dead peer before the kernel errors the connection
