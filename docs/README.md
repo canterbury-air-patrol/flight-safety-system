@@ -33,6 +33,11 @@ several `todo/` items is filed under all of them (`34-45-47-…`).
 
 | Decision | Subject |
 |---|---|
+| [26 — client send timeouts use `TCP_USER_TIMEOUT`, not `SO_SNDTIMEO`](decisions/26-client-send-timeout.md) | Transport |
+| [43 — `secure_string` scope](decisions/43-secure-string-scope.md) | Security boundary |
+| [48 — a terminal command ack is final for its dispatch](decisions/48-command-ack-terminal-finality.md) | Protocol / audit |
+| [49 — the FMU command identifier is per-server](decisions/49-server-command-id-semantics.md) | Protocol |
+| [51 — optional trailing wire fields are prefix-closed](decisions/51-optional-trailing-field-rule.md) | Protocol |
 
 ## Citing a decision
 
