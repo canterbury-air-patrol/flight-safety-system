@@ -6,24 +6,25 @@
 namespace flight_safety_system {
 namespace server {
 
-/* Unified DB fail-safe monitor for the main loop's per-second tick (todo/34,
- * todo/45, todo/47). Watches the db_write_queue's failure counters and owns
- * the decision to degrade:
+/* Unified DB fail-safe monitor for the main loop's per-second tick. The
+ * rationale, and the two architectures rejected in favour of this one, are in
+ * docs/decisions/34-45-47-db-failsafe-latch.md. Watches the db_write_queue's
+ * failure counters and owns the decision to degrade:
  *
- * - A *sustained* write-failure incident (todo/34): failures recurring within
+ * - A *sustained* write-failure incident: failures recurring within
  *   recovery_grace_secs of each other form one incident; the trip requires a
  *   new failure arriving once the incident is at least disconnect_age_secs
  *   old, i.e. failures genuinely spanning the window. A single transient
- *   failure ages out quietly and never trips (the pre-todo/47 tracker let a
+ *   failure ages out quietly and never trips (the tracker this replaced let a
  *   lone failure trip at the age threshold purely by staying "active" through
  *   the grace period, despite documenting the opposite).
  *
- * - Any command dispatch/ack drop (todo/45): trips immediately on the first
+ * - Any command dispatch/ack drop: trips immediately on the first
  *   counter increase. A dropped command write is known-destroyed audit state
  *   (the command/ack link, or the aircraft's reported outcome), so there is
  *   no threshold to age through.
  *
- * A trip latches the degraded state (todo/47): the caller severs every client
+ * A trip latches the degraded state: the caller severs every client
  * *and* gates new admissions (server_clients::setDegraded) so aircraft get one
  * clean comms-loss event instead of a disconnect/reconnect flap into the same
  * unhealthy server. Recovery requires the write queue fully drained AND more

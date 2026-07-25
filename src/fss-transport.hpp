@@ -87,10 +87,11 @@ inline auto negotiateFeatureFlags(uint32_t peer_flags) -> uint32_t
  * X-unaware peer; the 0-filled scid decodes to its existing "not reported"
  * sentinel, which every consumer already handles. Emitting X alone with scid
  * omitted would be indistinguishable by length from today's one-field
- * dialect — hence the rule. (todo/51; the two fields it already governs are
- * todo/17 item 3 and todo/49.) If a protocol v3 ever happens, fold these
- * optional tails into an explicit presence mechanism (bitmap/TLV) and retire
- * this rule. */
+ * dialect — hence the rule. (docs/decisions/51-optional-trailing-field-rule.md;
+ * the two fields it already governs are todo/17 item 3 and
+ * docs/decisions/49-server-command-id-semantics.md.) If a protocol v3 ever
+ * happens, fold these optional tails into an explicit presence mechanism
+ * (bitmap/TLV) and retire this rule. */
 
 /* Maximum payload length accepted from the wire. Anything larger is rejected
  * before allocation to prevent memory exhaustion attacks. Sized well above the
@@ -103,7 +104,8 @@ static constexpr uint16_t FSS_MAX_MESSAGE_BYTES = 8192;
  * peer. 30 s matches the server's application-layer liveness timeout
  * (default client_timeout) and is the right bound for the server; a
  * flight-safety *client* (e.g. cap-fmu's FSS send worker) can request a
- * tighter bound per connection via setTcpUserTimeoutMs (todo/26). */
+ * tighter bound per connection via setTcpUserTimeoutMs
+ * (docs/decisions/26-client-send-timeout.md). */
 static constexpr unsigned int default_tcp_user_timeout_ms = 30000;
 
 class fss_connection;
@@ -286,7 +288,8 @@ class fss_connection {
     std::atomic<int> pending_close_fd{-1};
     std::atomic<uint64_t> last_msg_id{0};
     /* Non-owning back-pointer to the installed handler, guarded by msg_lock.
-     * Lifetime (todo/25): it is only dereferenced with delivery_depth
+     * Lifetime (docs/decisions/25-transport-callback-reentrancy.md): it is
+     * only dereferenced with delivery_depth
      * incremented, and its only mutators — setHandler() and detachHandler(),
      * the latter being what ~fss_message_cb uses — wait for delivery-idle
      * before touching it, so a handler cannot be destroyed while a call into it
@@ -296,7 +299,8 @@ class fss_connection {
      * disconnect(). */
     fss_message_cb *handler{nullptr};
     std::queue<std::shared_ptr<fss_message>> messages{};
-    /* Delivery bookkeeping (todo/25): processMessage() runs with msg_lock
+    /* Delivery bookkeeping (docs/decisions/25-transport-callback-reentrancy.md):
+     * processMessage() runs with msg_lock
      * RELEASED, so a handler may re-enter getMsg()/setHandler()/disconnect()
      * without deadlocking on it. These members are themselves guarded by
      * msg_lock and restore the two properties the old lock-held delivery gave
@@ -388,11 +392,13 @@ public:
      * stating it in a signature rather than a comment keeps a later change to
      * the flush semantics from silently making the destructor a throwing path.
      *
-     * Blocks until any in-flight processMessage() returns (the todo/25
-     * lifetime barrier), except when called from inside that callback. */
+     * Blocks until any in-flight processMessage() returns (the lifetime
+     * barrier in docs/decisions/25-transport-callback-reentrancy.md), except
+     * when called from inside that callback. */
     void detachHandler() noexcept;
     /* Request a tighter (or looser) TCP_USER_TIMEOUT than the 30 s default
-     * for this connection (todo/26): the bound on how long a blocking send()
+     * for this connection (docs/decisions/26-client-send-timeout.md): the
+     * bound on how long a blocking send()
      * can stall into a half-dead peer before the kernel errors the connection
      * out. Must be called BEFORE connectTo() — it is applied to the socket at
      * connect time and has no effect afterwards, nor on a server-accepted
@@ -606,7 +612,8 @@ private:
      * frozen 1970 clock has no usable offset to feed it anyway.
      *
      * This is the first of the two optional trailing fields the
-     * prefix-closed extension rule above (todo/51) governs — read that
+     * prefix-closed extension rule above
+     * (docs/decisions/51-optional-trailing-field-rule.md) governs — read that
      * before adding a second optional field to this message. */
     uint64_t client_timestamp{0};
 protected:
@@ -701,7 +708,9 @@ private:
     uint32_t altitude;
     uint64_t timestamp;
     /* The dispatching server's identifier for the operator action this command
-     * carries — its command DB row id (todo/49). Contract the receiver may
+     * carries — its command DB row id
+     * (docs/decisions/49-server-command-id-semantics.md). Contract the
+     * receiver may
      * rely on:
      *   - Within one connection, this id identifies the operator action: the
      *     same id means the same action (a redelivery — resend window,
@@ -723,8 +732,9 @@ private:
      * and survives reconnects.
      *
      * The other of the two optional trailing fields the prefix-closed
-     * extension rule above (todo/51) governs — read that before adding a
-     * second optional field to this message. */
+     * extension rule above (docs/decisions/51-optional-trailing-field-rule.md)
+     * governs — read that before adding a second optional field to this
+     * message. */
     uint64_t server_command_id{0};
 protected:
     void unpackData(const std::shared_ptr<buf_len> &bl);

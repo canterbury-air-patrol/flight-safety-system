@@ -292,11 +292,12 @@ auto server_clients::disconnectRevokedClients(const std::string &crl_file) -> st
     return disconnected_count;
 }
 
-/* todo/34: unconditional version of disconnectRevokedClients above, for
- * the main loop's sustained-DB-write-failure guard — every currently
- * live session gets severed (Tier-3 Path M m05 expects this to trigger
- * aircraft comms-loss RTL) rather than the server silently continuing
- * to accept telemetry it cannot store.
+/* docs/decisions/34-45-47-db-failsafe-latch.md: unconditional version of
+ * disconnectRevokedClients above, for the main loop's sustained-DB-write-
+ * failure guard — every currently live session gets severed (CAP/test-plan's
+ * Tier-3 Path M step m05, the integration test that expects a severed session
+ * to trigger aircraft comms-loss RTL) rather than the server silently
+ * continuing to accept telemetry it cannot store.
  *
  * Same disconnect()+clientDisconnected() pattern as
  * disconnectRevokedClients() above, so it is safe by the same reasoning:
