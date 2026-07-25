@@ -1,7 +1,7 @@
 AUTOMAKE_OPTIONS = foreign
 ACLOCAL_AMFLAGS = -I m4
 SUBDIRS = src examples tests
-EXTRA_DIST = debian e2e .clang-format certs LICENSE.md CHANGELOG.md
+EXTRA_DIST = debian e2e .clang-format certs LICENSE.md CHANGELOG.md docs
 
 # `make distcheck` must build everything the release ships — the server,
 # the tests, and the example client — so a header missing from the tarball
