@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- A tracked design record under `docs/` (todo/54). The project's settled design
+  decisions previously lived only in the gitignored `todo/` directory, which
+  code comments, changelog entries and commit messages all cite by number — so
+  every one of those citations was a dangling pointer in any other clone, and
+  the only copy of the decision history was one developer's working tree.
+  `docs/decisions/` now holds one file per settled decision, keeping the `todo`
+  numbering so existing citations stay resolvable (`todo/49` is
+  `docs/decisions/49-server-command-id-semantics.md`), and each records the
+  alternatives that were rejected along with the evidence — the part that cannot
+  be recovered from the code. `docs/release-checklist.md` is new, and carries
+  the ABI check (`abidiff` the installed headers and libraries against the last
+  tag, *before* choosing the version number) that todo/61 left outstanding after
+  an ABI break reached a tag unbumped. Open work items stay in `todo/`.
+  Citations in the public headers and the fail-safe monitor now point at the
+  tracked documents; the rest are retargeted as those files are next touched.
+
 ### Changed
 - `fss_connection` now invokes `fss_message_cb::processMessage()` with its
   internal `msg_lock` released, instead of holding it across the callback

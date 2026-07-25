@@ -35,7 +35,8 @@ private:
      * needing root/faketime. Positive = client clock ahead of real time. */
     int64_t clock_offset_ms{0};
     /* TCP_USER_TIMEOUT requested for every server connection this client
-     * makes (todo/26): the bound on how long a blocking send() can stall
+     * makes (docs/decisions/26-client-send-timeout.md): the bound on how
+     * long a blocking send() can stall
      * into a half-dead server before the kernel errors the connection out.
      * A flight-safety client (e.g. cap-fmu) can set this well below the
      * 30 s default so a wedged send worker recovers on its own clock.
@@ -117,7 +118,8 @@ public:
      * already been sent by the transport handler, so an override observes
      * rather than answers. Exists so a test client can surface the server's
      * liveness tick externally — e2e's DB black-hole test asserts these keep
-     * arriving while both DB connections are wedged (todo/46). */
+     * arriving while both DB connections are wedged
+     * (docs/decisions/46-no-statement-timeout.md). */
     virtual void handleRTTRequest(const std::shared_ptr<flight_safety_system::transport::fss_message_rtt_request> &msg
                                   __attribute__((unused)));
 };

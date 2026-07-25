@@ -7,7 +7,8 @@
 
 namespace flight_safety_system {
 
-/* Scope decision (todo/43, 2026-07-10): secure_string's goal is limiting
+/* Scope decision (docs/decisions/43-secure-string-scope.md, 2026-07-10):
+ * secure_string's goal is limiting
  * *long-lived resident copies* of credentials — cache/member fields such as
  * smm_settings' username/password and db_connection::pass_ — not eliminating
  * every transient copy a credential passes through on its way there. Wire
