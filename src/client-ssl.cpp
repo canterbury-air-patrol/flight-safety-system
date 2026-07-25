@@ -246,16 +246,37 @@ void flight_safety_system::client_ssl::fss_client::attemptReconnect()
 void flight_safety_system::client_ssl::fss_client::sendMsgAll(
     const std::shared_ptr<flight_safety_system::transport::fss_message> &msg)
 {
+    if (msg == nullptr)
+    {
+        return;
+    }
     /* Copy the list under the lock so that concurrent serverRequiresReconnect
-     * calls cannot invalidate the iterator mid-send. */
+     * calls cannot invalidate the iterator mid-fan-out. */
     std::list<std::shared_ptr<fss_server>> snapshot;
     {
         std::scoped_lock lock(this->servers_lock);
         snapshot = this->servers;
     }
+    if (snapshot.empty())
+    {
+        return;
+    }
+    /* Pack ONCE, then hand the same read-only frame to every server's outbound
+     * worker (docs/decisions/66-67-client-outbound-fanout.md). This replaced a
+     * serial loop of blocking server->sendMsg() calls, in which one server that
+     * completed TLS and then stopped reading held up every healthy server
+     * behind it for a whole TCP_USER_TIMEOUT.
+     *
+     * The sends are now concurrent, so the todo/12 C8 invariant (one
+     * fss_message instance must not be sent on two connections at once — the
+     * id stamp would race) can no longer hold for free. It is re-established
+     * exactly as todo/55 did for server-side broadcasts: `packed` is shared as
+     * const and never mutated, and each connection copies it and stamps only
+     * its own id (fss_connection::sendPacked). */
+    std::shared_ptr<const flight_safety_system::transport::buf_len> packed = msg->getPacked();
     for (auto const &server : snapshot)
     {
-        server->sendMsg(msg);
+        server->queueSend(packed);
     }
 }
 
@@ -420,7 +441,179 @@ flight_safety_system::client_ssl::fss_server::fss_server(flight_safety_system::c
 {
 }
 
-flight_safety_system::client_ssl::fss_server::~fss_server() = default;
+flight_safety_system::client_ssl::fss_server::~fss_server()
+{
+    /* Single teardown entry point: disconnect() stops the outbound worker
+     * (shutting the socket down first so a blocked send returns) and clears the
+     * connection. It is idempotent, so this is safe whether or not disconnect()
+     * was already called. */
+    fss_server::disconnect();
+}
+
+void flight_safety_system::client_ssl::fss_server::startOutboundWorkerLocked()
+{
+    if (this->outbound_stopping || this->outbound_worker.joinable())
+    {
+        return;
+    }
+    this->outbound_worker = std::thread(&fss_server::outboundWorkerRun, this);
+}
+
+auto flight_safety_system::client_ssl::fss_server::waitForOutboundWork()
+    -> flight_safety_system::client_ssl::fss_server::outbound_work
+{
+    std::unique_lock<std::mutex> lock(this->outbound_lock);
+    this->outbound_cv.wait(lock, [this]() -> bool { return this->outbound_stopping || !this->pending_sends.empty(); });
+    outbound_work work;
+    if (this->outbound_stopping)
+    {
+        work.stop = true;
+        return work;
+    }
+    work.sends.assign(std::make_move_iterator(this->pending_sends.begin()),
+                      std::make_move_iterator(this->pending_sends.end()));
+    this->pending_sends.clear();
+    return work;
+}
+
+void flight_safety_system::client_ssl::fss_server::outboundWorkerRun()
+{
+    for (;;)
+    {
+        auto work = this->waitForOutboundWork();
+        /* Queued telemetry is best-effort: a disconnecting client has nothing
+         * left to say, and anything unsent is superseded by the next report.
+         * Exit promptly on stop so a join never waits on a send. */
+        if (work.stop)
+        {
+            return;
+        }
+        for (const auto &packed : work.sends)
+        {
+            /* Re-read the connection each time rather than caching it: a
+             * reconnect can swap it underneath us, and a cleared one must send
+             * nothing rather than fault. sendPacked copies the shared frame and
+             * stamps this connection's own id into the copy (todo/55). */
+            auto active_conn = this->getConnection();
+            if (active_conn == nullptr)
+            {
+                continue;
+            }
+            active_conn->sendPacked(packed);
+        }
+    }
+}
+
+void flight_safety_system::client_ssl::fss_server::queueSend(
+    const std::shared_ptr<const flight_safety_system::transport::buf_len> &packed)
+{
+    if (packed == nullptr)
+    {
+        return;
+    }
+    bool report_drop = false;
+    {
+        std::scoped_lock guard(this->outbound_lock);
+        if (this->outbound_stopping)
+        {
+            return;
+        }
+        /* Drop-oldest, not drop-newest: telemetry only gets less useful with
+         * age, so a backlogged server should shed its stalest report and keep
+         * the freshest one. */
+        while (this->pending_sends.size() >= max_pending_sends)
+        {
+            this->pending_sends.pop_front();
+            this->sends_dropped++;
+            /* One line per backlog episode, not per dropped frame: a wedged
+             * server drops continuously, and the running total is available
+             * from getDroppedSends(). Re-armed by reconnect(), so a server that
+             * wedges again after coming back says so again. */
+            if (!this->sends_drop_logged)
+            {
+                this->sends_drop_logged = true;
+                report_drop = true;
+            }
+        }
+        this->pending_sends.push_back(packed);
+        this->startOutboundWorkerLocked();
+    }
+    if (report_drop)
+    {
+        FSS_LOG_WARN("client", "Outbound queue full for " << this->address << ":" << this->port
+                                                          << ", dropping oldest telemetry for this server");
+    }
+    this->outbound_cv.notify_one();
+}
+
+auto flight_safety_system::client_ssl::fss_server::getDroppedSends() -> uint64_t
+{
+    std::scoped_lock guard(this->outbound_lock);
+    return this->sends_dropped;
+}
+
+void flight_safety_system::client_ssl::fss_server::requestOutboundStop()
+{
+    {
+        std::scoped_lock guard(this->outbound_lock);
+        if (this->outbound_stopping)
+        {
+            return;
+        }
+        this->outbound_stopping = true;
+    }
+    this->outbound_cv.notify_all();
+}
+
+void flight_safety_system::client_ssl::fss_server::stopOutboundWorker()
+{
+    this->requestOutboundStop();
+    if (!this->outbound_worker.joinable())
+    {
+        return;
+    }
+    if (this->outbound_worker.get_id() == std::this_thread::get_id())
+    {
+        /* The worker must never join itself; detach so it can finish. Mirrors
+         * the recv-thread guard in fss_connection::disconnect(). */
+        this->outbound_worker.detach();
+        this->outbound_worker = std::thread();
+        return;
+    }
+    try
+    {
+        this->outbound_worker.join();
+    }
+    catch (const std::system_error &e)
+    {
+        FSS_LOG_ERROR("client", "outbound_worker.join() failed, detaching: " << e.what());
+        this->outbound_worker.detach();
+        this->outbound_worker = std::thread();
+    }
+}
+
+void flight_safety_system::client_ssl::fss_server::disconnect()
+{
+    /* Order matters (todo/21, todo/52): signal the worker to stop, then shut
+     * the socket down -- not close it -- so a worker blocked in send() returns
+     * while the descriptor number stays reserved, then join the worker, and
+     * only then run the connection's disconnect(), which joins the recv thread
+     * and performs the deferred close. Closing any earlier would free the fd
+     * number for reuse while the worker may still be about to pass its stale
+     * value to send() -- I/O into an unrelated session (todo/52). */
+    this->requestOutboundStop();
+    auto active_conn = this->getConnection();
+    if (active_conn != nullptr)
+    {
+        active_conn->shutdownSocket(); // unblocks a stalled worker send and the recv thread
+    }
+    this->stopOutboundWorker();
+    if (active_conn != nullptr)
+    {
+        active_conn->disconnect(); // joins the recv thread, then closes the fd
+    }
+    flight_safety_system::transport::fss_message_cb::disconnect(); // a second disconnect() here is a safe no-op
+}
 
 auto flight_safety_system::client_ssl::fss_server::getAddress() -> std::string
 {
@@ -558,6 +751,19 @@ auto flight_safety_system::client_ssl::fss_server::reconnect() -> bool
              * Store before setHandler() so a message delivered immediately
              * cannot have its arming overwritten by this reset. */
             this->liveness_active.store(false, std::memory_order_relaxed);
+            /* Re-arm the outbound worker. Unlike the server-side fss_client,
+             * an fss_server outlives its connections: disconnect() stops the
+             * worker, but this object can come back up on a new connection and
+             * must be able to send again. Safe here because reconnect() and
+             * disconnect() both belong to the reconnect-driving thread and are
+             * never concurrent (see the ownership note in the header); the
+             * previous worker has already been joined by stopOutboundWorker().
+             * The worker itself is started lazily by the first queueSend(). */
+            {
+                std::scoped_lock guard(this->outbound_lock);
+                this->outbound_stopping = false;
+                this->sends_drop_logged = false;
+            }
             this->getConnection()->setHandler(this);
             /* Protocol version handshake must be the first message
              * exchanged after TLS connect, before identity. */

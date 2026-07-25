@@ -2,11 +2,15 @@
 #include <fss.hpp>
 
 #include <atomic>
+#include <condition_variable>
 #include <cstdint>
+#include <deque>
 #include <list>
 #include <memory>
 #include <mutex>
 #include <random>
+#include <thread>
+#include <vector>
 
 namespace flight_safety_system {
 namespace client_ssl {
@@ -80,6 +84,19 @@ public:
     virtual void connectTo(const std::string &t_address, uint16_t t_port, bool connect);
     virtual void attemptReconnect();
     virtual void disconnect();
+    /* Fan a message out to every currently connected server. NON-BLOCKING
+     * (docs/decisions/66-67-client-outbound-fanout.md): the frame is packed
+     * once here and handed to each server's own outbound worker, which
+     * performs the blocking write. A server that completes TLS and then stops
+     * reading can therefore only stall its own telemetry, never the fan-out to
+     * the healthy ones. Loss-tolerant by design: each worker's queue is
+     * bounded and drops the OLDEST frame under sustained backlog (see
+     * fss_server::getDroppedSends()), so a wedged server sheds stale telemetry
+     * rather than growing without bound.
+     * Packing once is also what keeps the todo/12 C8 invariant intact now that
+     * the sends are concurrent: the packed frame is shared read-only and each
+     * connection stamps its own sequence id into its own copy
+     * (fss_connection::sendPacked), so no fss_message instance is shared. */
     virtual void sendMsgAll(const std::shared_ptr<flight_safety_system::transport::fss_message> &msg);
     virtual auto getAssetName() -> std::string;
     virtual auto isNonAircraft() const -> bool { return this->non_aircraft; }
@@ -151,6 +168,59 @@ private:
     std::atomic<bool> liveness_active{false};
     std::atomic<uint64_t> last_message_received_time{0};
     uint64_t server_timeout_ms{30000};
+    /* Per-server outbound writer
+     * (docs/decisions/66-67-client-outbound-fanout.md). The caller's thread
+     * schedules *what* to send; this worker performs the blocking socket
+     * write, so one black-holed server can only stall its own telemetry, never
+     * the fan-out to every other server. The aircraft-side mirror of the
+     * server's per-client worker (todo/21 + todo/36). Every member below is
+     * guarded by outbound_lock. */
+    std::mutex outbound_lock{};
+    std::condition_variable outbound_cv{};
+    bool outbound_stopping{false};
+    /* Bounded, drop-oldest: telemetry is loss-tolerant, so under sustained
+     * backlog into a half-dead server the OLDEST queued frame is dropped
+     * rather than the queue growing without bound — the same policy and
+     * reasoning as the server side's pending_position_relay. */
+    static constexpr size_t max_pending_sends = 8;
+    std::deque<std::shared_ptr<const flight_safety_system::transport::buf_len>> pending_sends{};
+    /* Cumulative frames dropped by the cap above (never reset). Exposed so the
+     * loss is observable rather than silent, mirroring
+     * fss_connection::getDroppedMessages() for the inbound queue. */
+    uint64_t sends_dropped{0};
+    /* True once the WARN for the current backlog episode has been emitted, so a
+     * continuously wedged server produces one line rather than one per frame.
+     * Cleared by reconnect(). */
+    bool sends_drop_logged{false};
+    std::thread outbound_worker{};
+    /* What the worker should do this wake-up. Returned by waitForOutboundWork()
+     * so the worker performs the (blocking) sends with no lock held. */
+    struct outbound_work {
+        bool stop{false};
+        std::vector<std::shared_ptr<const flight_safety_system::transport::buf_len>> sends{};
+    };
+    /* Block until there is work or a stop request, then atomically take and
+     * clear the pending work. */
+    auto waitForOutboundWork() -> outbound_work;
+    /* The worker loop: waits for work, then performs the blocking send(s) off
+     * the caller's thread. */
+    void outboundWorkerRun();
+    /* Idempotent: set the stop flag and wake the worker. The single place that
+     * owns the stop signal, so disconnect() and stopOutboundWorker() cannot
+     * drift apart. */
+    void requestOutboundStop();
+    /* Idempotent: request the stop (above) and join the worker. Safe to call
+     * more than once and from any thread other than the worker itself. The
+     * caller must have already shut the connection's socket down if the worker
+     * might be blocked in a send, otherwise the join waits for the send
+     * timeout. */
+    void stopOutboundWorker();
+    /* Start the worker if it is not already running and no stop has been
+     * requested. Precondition: outbound_lock held. Started lazily rather than
+     * in the constructor so an fss_server that never sends costs no thread,
+     * and so the worker can never call a virtual (reconnect_to) before a
+     * subclass constructor has finished. */
+    void startOutboundWorkerLocked();
 protected:
     virtual auto reconnect_to() -> bool;
 public:
@@ -162,6 +232,23 @@ public:
     auto operator=(fss_server &&) -> fss_server & = delete;
     ~fss_server() override;
     void processMessage(std::shared_ptr<flight_safety_system::transport::fss_message> message) override;
+    /* Queue a pre-packed frame for this server's outbound worker instead of
+     * sending it inline (docs/decisions/66-67-client-outbound-fanout.md).
+     * Returns immediately; the worker copies the shared frame and stamps this
+     * connection's own sequence id into the copy (fss_connection::sendPacked),
+     * which is what lets one frame be fanned out concurrently without
+     * violating the todo/12 C8 invariant. Drops the oldest queued frame if the
+     * queue is already full. Per-connection sends that must mutate the message
+     * -- sendIdentify(), sendVersion(), the RTT reply -- deliberately keep
+     * using the inline fss_message_cb::sendMsg() on the recv thread, where a
+     * stall can only affect the one connection it belongs to. */
+    void queueSend(const std::shared_ptr<const flight_safety_system::transport::buf_len> &packed);
+    /* Cumulative frames this server's bounded outbound queue has dropped. */
+    auto getDroppedSends() -> uint64_t;
+    /* Stops this server's outbound worker and then the connection. Overrides
+     * fss_message_cb::disconnect so a stalled writer is unblocked and joined
+     * before the connection is torn down (the todo/21 + todo/52 order). */
+    void disconnect() override;
     virtual auto getAddress() -> std::string;
     virtual auto getPort() -> uint16_t;
     virtual auto reconnect() -> bool;
