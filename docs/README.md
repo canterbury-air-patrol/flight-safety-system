@@ -33,6 +33,7 @@ several `todo/` items is filed under all of them (`34-45-47-…`).
 
 | Decision | Subject |
 |---|---|
+| [16 — `-fanalyzer` evaluated and not adopted](decisions/16-gcc-fanalyzer-not-adopted.md) | Static-analysis tooling |
 | [23 — supported scale: tens of aircraft](decisions/23-supported-scale-assumption.md) | Standing assumption |
 | [24 — database reads report failure by status, never throw](decisions/24-database-read-error-control-flow.md) | Database seam |
 | [25 — transport callbacks run without the connection's lock](decisions/25-transport-callback-reentrancy.md) | Standing assumption |
