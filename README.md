@@ -119,6 +119,13 @@ Primarily flight-safety-system is designed to run alongside [Search Management M
 
 There is an [ADS-B Integration](https://github.com/canterbury-air-patrol/fss-adsb/) that allows position reports from ADS-B Out aircraft to be relayed to FSS clients.
 
+## Design record
+
+Settled design decisions — including the alternatives that were considered and
+rejected, and the evidence behind each rejection — are recorded in
+[docs/](docs/README.md). Start there before changing protocol semantics, the
+database seam, or the fail-safe behaviour.
+
 ## Release strategy
 
 Stable releases are cut from long-lived `release/X.Y` branches. The `develop` branch carries ongoing work and merges into a `release/X.Y` branch when a release is prepared. Bug fixes are applied to `develop` first and then cherry-picked to the relevant `release/X.Y` branch, resulting in patch releases (`X.Y.1`, `X.Y.2`, etc.). The `master` branch always points to the latest stable release.
