@@ -464,9 +464,9 @@ auto flight_safety_system::client_ssl::fss_client::getLearnedServerCount() const
 void flight_safety_system::client_ssl::fss_client::updateServers(
     const std::shared_ptr<flight_safety_system::transport::fss_message_server_list> &msg)
 {
-    /* Before docs/decisions/66-67-client-outbound-fanout.md
-     * this method only ever ADDED: there was no removal path
-     * anywhere in the file, so a server deactivated in config_serverconfig
+    /* Before docs/decisions/66-67-client-outbound-fanout.md this method only
+     * ever ADDED: there was no removal path anywhere in the file, so a server
+     * deactivated in config_serverconfig
      * dropped out of the broadcast list but every client that had ever seen it
      * kept it forever — and kept paying a blocking connect attempt for it every
      * backoff interval, silently. The list is now maintained: an entry present
