@@ -256,6 +256,20 @@ private:
      * attemptReconnect() cannot pile attempts up behind a 10 s handshake. */
     bool out_reconnect_pending{false};
     bool reconnect_busy{false};
+    /* Snapshot of the fss_client configuration the (re)connect path needs,
+     * refreshed on the application's own thread (fss_client::connectTo(), and
+     * every queueReconnect()). The outbound worker must NOT reach back through
+     * `client`: an fss_client subclass is destroyed derived-part-first, so a
+     * virtual call arriving from a worker during teardown races the vptr
+     * rewrite. That is not theoretical — ThreadSanitizer reports it as a data
+     * race in ~fss_client(), and it is undefined behaviour whichever vtable the
+     * call happens to land in. Keeping the worker's reads inside its own object
+     * removes the cross-object access rather than trying to time it, which is
+     * the only version that stays correct for a subclass this library has never
+     * seen. Guarded by outbound_lock. */
+    unsigned int client_tcp_user_timeout_ms{flight_safety_system::transport::default_tcp_user_timeout_ms};
+    bool client_non_aircraft{false};
+    std::string client_asset_name{};
     /* Set by the worker only AFTER reconnect() has returned true — i.e. after
      * the version + identity handshake has been sent — and consumed by
      * fss_client::attemptReconnect(). Harvesting on connected() instead would
@@ -335,6 +349,12 @@ public:
      * backoff throttle still lives in reconnect() itself, so a queued attempt
      * inside the retry window costs a worker wake-up and nothing else. */
     void queueReconnect();
+    /* Re-read the owning client's configuration into this server's snapshot
+     * (see the snapshot members). Must be called on a thread where the client
+     * is known alive and fully constructed; queueReconnect() and
+     * fss_client::connectTo() both already do, so a consumer only needs this
+     * after changing client configuration on an already-registered server. */
+    void refreshClientConfig();
     /* Consume the "the queued reconnect succeeded" signal (clearing it).
      * fss_client::attemptReconnect() polls this to move the server from
      * reconnect_servers to servers, which keeps every list mutation on the

@@ -205,6 +205,14 @@ void flight_safety_system::client_ssl::fss_client::connectTo(const std::string &
         this, t_address, t_port, this->ca_file, this->private_key_file, this->public_key_file);
     if (t_connect)
     {
+        /* This dial is synchronous, on the caller's thread, so it is the one
+         * (re)connect that no queueReconnect() has seeded the client snapshot
+         * for. Seed it here rather than from the fss_server constructor: the
+         * file constructor builds servers while the fss_client is itself still
+         * under construction, and reading a virtual off an object under
+         * construction would both miss a subclass override and be exactly the
+         * ctor-side twin of the teardown race the snapshot exists to remove. */
+        server->refreshClientConfig();
         server->reconnect();
     }
     this->addServer(server);
@@ -768,6 +776,11 @@ void flight_safety_system::client_ssl::fss_server::queueSend(
 
 void flight_safety_system::client_ssl::fss_server::queueReconnect()
 {
+    /* Refresh the client snapshot here, on the caller's thread, so the worker
+     * never has to touch the client (see the snapshot members in the header).
+     * Doing it per attempt is also what keeps a configuration change picked up
+     * as promptly as reading the client live used to. */
+    this->refreshClientConfig();
     {
         std::scoped_lock guard(this->outbound_lock);
         if (this->outbound_stopping || this->reconnect_busy)
@@ -879,7 +892,16 @@ auto flight_safety_system::client_ssl::fss_server::getClient() -> fss_client *
 
 void flight_safety_system::client_ssl::fss_server::sendIdentify()
 {
-    if (this->client->isNonAircraft())
+    /* From the snapshot, not from the client: reconnect() calls this on the
+     * outbound worker (see the snapshot members in the header). */
+    bool non_aircraft = false;
+    std::string asset_name;
+    {
+        std::scoped_lock guard(this->outbound_lock);
+        non_aircraft = this->client_non_aircraft;
+        asset_name = this->client_asset_name;
+    }
+    if (non_aircraft)
     {
         /* The server derives the identity from the peer cert's CN on this
          * path (todo/28), not from a message field. */
@@ -887,9 +909,26 @@ void flight_safety_system::client_ssl::fss_server::sendIdentify()
             std::make_shared<flight_safety_system::transport::fss_message_identity_non_aircraft>());
         return;
     }
-    auto ident_msg =
-        std::make_shared<flight_safety_system::transport::fss_message_identity>(this->client->getAssetName());
+    auto ident_msg = std::make_shared<flight_safety_system::transport::fss_message_identity>(asset_name);
     this->getConnection()->sendMsg(ident_msg);
+}
+
+void flight_safety_system::client_ssl::fss_server::refreshClientConfig()
+{
+    if (this->client == nullptr)
+    {
+        return;
+    }
+    /* Read the client OUTSIDE outbound_lock: these are virtual calls into
+     * consumer code, and holding a lock the worker also takes across arbitrary
+     * user code would be a hazard of its own. */
+    auto timeout_ms = this->client->getTcpUserTimeoutMs();
+    bool non_aircraft = this->client->isNonAircraft();
+    auto asset_name = this->client->getAssetName();
+    std::scoped_lock guard(this->outbound_lock);
+    this->client_tcp_user_timeout_ms = timeout_ms;
+    this->client_non_aircraft = non_aircraft;
+    this->client_asset_name = std::move(asset_name);
 }
 
 void flight_safety_system::client_ssl::fss_server::sendVersion()
@@ -900,12 +939,18 @@ void flight_safety_system::client_ssl::fss_server::sendVersion()
 
 auto flight_safety_system::client_ssl::fss_server::reconnect_to() -> bool
 {
-    /* Read the client's requested send bound at every (re)connect rather
-     * than capturing it at construction, so it uniformly covers config-file
-     * servers, programmatic connectTo, and servers learned from a
-     * server-list update (todo/26). Null client (some tests): default. */
-    auto timeout_ms = this->client != nullptr ? this->client->getTcpUserTimeoutMs()
-                                              : flight_safety_system::transport::default_tcp_user_timeout_ms;
+    /* The client's requested send bound, taken from the snapshot rather than
+     * read live: this runs on the outbound worker, which must not reach into
+     * the client (see the snapshot members in the header). The snapshot is
+     * refreshed at every queueReconnect(), so the bound still tracks a
+     * configuration change per attempt, and still covers config-file servers,
+     * programmatic connectTo, and servers learned from a server-list update
+     * uniformly (todo/26). */
+    unsigned int timeout_ms = 0;
+    {
+        std::scoped_lock guard(this->outbound_lock);
+        timeout_ms = this->client_tcp_user_timeout_ms;
+    }
     auto new_conn = flight_safety_system::transport_ssl::fss_connection_client::create(
         this->ca_file, this->private_key_file, this->public_key_file, this->getAddress(), this->getPort(), timeout_ms);
     if (new_conn == nullptr)
