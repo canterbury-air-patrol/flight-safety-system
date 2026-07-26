@@ -44,6 +44,14 @@ flight_safety_system::client_ssl::fss_client::fss_client(const std::string &t_fi
         {
             this->setTcpUserTimeoutMs(config["tcp_user_timeout_ms"].asUInt());
         }
+        if (config.isMember("learned_server_expiry_ms"))
+        {
+            this->setLearnedServerExpiryMs(config["learned_server_expiry_ms"].asUInt64());
+        }
+        if (config.isMember("max_learned_servers"))
+        {
+            this->setMaxLearnedServers(config["max_learned_servers"].asUInt());
+        }
 
         this->ca_file = config["ssl"]["ca_public_key"].asString();
         this->private_key_file = config["ssl"]["client_private_key"].asString();
@@ -90,6 +98,9 @@ flight_safety_system::client_ssl::fss_client::~fss_client()
         std::scoped_lock lock(this->servers_lock);
         all.splice(all.end(), this->servers);
         all.splice(all.end(), this->reconnect_servers);
+        /* Anything expired but not yet drained by attemptReconnect() (todo/67)
+         * still owns a worker thread and possibly a connection. */
+        all.splice(all.end(), this->expired_servers);
     }
     for (const auto &server : all)
     {
@@ -154,6 +165,29 @@ void flight_safety_system::client_ssl::fss_client::setTcpUserTimeoutMs(unsigned 
      * reads it at every (re)connect, so it also applies to servers learned
      * later from a server-list update, not just config-file entries. */
     this->tcp_user_timeout_ms = t_timeout_ms;
+}
+
+void flight_safety_system::client_ssl::fss_client::setLearnedServerExpiryMs(uint64_t t_expiry_ms)
+{
+    /* Set once during configuration, before concurrent use (same as
+     * setAssetName above) -- no lock needed. */
+    this->learned_server_expiry_ms = t_expiry_ms;
+}
+
+void flight_safety_system::client_ssl::fss_client::setMaxLearnedServers(size_t t_max)
+{
+    /* Set once during configuration, before concurrent use (same as
+     * setAssetName above) -- no lock needed. */
+    this->max_learned_servers = t_max;
+}
+
+void flight_safety_system::client_ssl::fss_client::setClock(std::shared_ptr<flight_safety_system::IClock> t_clock)
+{
+    if (t_clock == nullptr)
+    {
+        return;
+    }
+    this->clock = std::move(t_clock);
 }
 
 auto flight_safety_system::client_ssl::fss_client::getSkewedTimestamp() const -> uint64_t
@@ -250,9 +284,25 @@ void flight_safety_system::client_ssl::fss_client::attemptReconnect()
         }
     }
 
-    /* Phase (e): notify outside the lock — connectionStatusChange() is a
+    /* Phase (e): tear down anything updateServers() expired (todo/67). It
+     * removed them from both lists but could not disconnect them: it runs on a
+     * recv thread, and the expiring server can be the one the list arrived on,
+     * so the join would be a self-join. Here we are on the thread that already
+     * owns connection lifecycle, and the shared_ptr keeps each object alive
+     * until we are done with it. */
+    std::list<std::shared_ptr<fss_server>> expired;
+    {
+        std::scoped_lock lock(this->servers_lock);
+        expired.splice(expired.end(), this->expired_servers);
+    }
+    for (auto const &server : expired)
+    {
+        server->disconnect();
+    }
+
+    /* Phase (f): notify outside the lock — connectionStatusChange() is a
      * virtual user callback that may re-enter the client. */
-    if (any_connected)
+    if (any_connected || !expired.empty())
     {
         this->notifyConnectionStatus();
     }
@@ -306,6 +356,12 @@ auto flight_safety_system::client_ssl::fss_client::isConfigured() const -> bool
     return this->configured;
 }
 
+auto flight_safety_system::client_ssl::fss_client::getServerCount() const -> size_t
+{
+    std::scoped_lock lock(this->servers_lock);
+    return this->servers.size() + this->reconnect_servers.size();
+}
+
 void flight_safety_system::client_ssl::fss_client::addServer(
     const std::shared_ptr<flight_safety_system::client_ssl::fss_server> &server)
 {
@@ -329,38 +385,151 @@ void flight_safety_system::client_ssl::fss_client::addServer(
     this->updateConfigured();
 }
 
-static auto server_list_matches(const std::list<std::shared_ptr<flight_safety_system::client_ssl::fss_server>> &servers,
-                                const std::string &address, uint16_t port) -> bool
+void flight_safety_system::client_ssl::fss_client::addLearnedServer(const std::string &t_address, uint16_t t_port)
 {
-    return std::any_of(servers.begin(), servers.end(), [&address, &port](const auto &n) -> auto {
+    auto server = std::make_shared<flight_safety_system::client_ssl::fss_server>(
+        this, t_address, t_port, this->ca_file, this->private_key_file, this->public_key_file);
+    /* Set before addServer() publishes it into a list: from that moment on
+     * these fields belong to servers_lock. */
+    server->setLearned(true);
+    server->setLastSeenMs(this->clock->now_ms());
+    this->addServer(server);
+}
+
+static auto find_server(const std::list<std::shared_ptr<flight_safety_system::client_ssl::fss_server>> &servers,
+                        const std::string &address, uint16_t port)
+    -> std::shared_ptr<flight_safety_system::client_ssl::fss_server>
+{
+    auto found = std::find_if(servers.begin(), servers.end(), [&address, &port](const auto &n) -> bool {
         return (n->getAddress().compare(address) == 0 && n->getPort() == port);
     });
+    return found != servers.end() ? *found : nullptr;
+}
+
+/* Remove every learned server last seen before `cutoff_ms` from `from` and
+ * return them. Precondition: servers_lock held. */
+static auto take_stale_servers(std::list<std::shared_ptr<flight_safety_system::client_ssl::fss_server>> &from,
+                               uint64_t cutoff_ms)
+    -> std::list<std::shared_ptr<flight_safety_system::client_ssl::fss_server>>
+{
+    std::list<std::shared_ptr<flight_safety_system::client_ssl::fss_server>> stale;
+    for (auto it = from.begin(); it != from.end();)
+    {
+        if ((*it)->isLearned() && (*it)->getLastSeenMs() < cutoff_ms)
+        {
+            stale.push_back(std::move(*it));
+            it = from.erase(it);
+        }
+        else
+        {
+            ++it;
+        }
+    }
+    return stale;
+}
+
+/* Count of learned entries in a list. Precondition: servers_lock held. */
+static auto count_learned(const std::list<std::shared_ptr<flight_safety_system::client_ssl::fss_server>> &servers)
+    -> size_t
+{
+    return static_cast<size_t>(
+        std::count_if(servers.begin(), servers.end(), [](const auto &n) -> bool { return n->isLearned(); }));
+}
+
+auto flight_safety_system::client_ssl::fss_client::getLearnedServerCount() const -> size_t
+{
+    std::scoped_lock lock(this->servers_lock);
+    return count_learned(this->servers) + count_learned(this->reconnect_servers);
 }
 
 void flight_safety_system::client_ssl::fss_client::updateServers(
     const std::shared_ptr<flight_safety_system::transport::fss_message_server_list> &msg)
 {
-    /* Snapshot both lists under the lock so that the existence checks below
-     * see a consistent view.  connectTo() -> addServer() will re-acquire
-     * servers_lock for the push_back, so we must not hold it here. */
-    std::list<std::shared_ptr<fss_server>> servers_snap;
-    std::list<std::shared_ptr<fss_server>> reconnect_snap;
+    /* Before todo/67 this method only ever ADDED: there was no removal path
+     * anywhere in the file, so a server deactivated in config_serverconfig
+     * dropped out of the broadcast list but every client that had ever seen it
+     * kept it forever — and kept paying a blocking connect attempt for it every
+     * backoff interval, silently. The list is now maintained: an entry present
+     * in the broadcast refreshes its last-seen time, an entry absent for the
+     * whole expiry window is dropped, and the number that can be learned is
+     * capped. Servers from the config file are never expired (see the
+     * fss_server::learned member). */
+    uint64_t now = this->clock->now_ms();
+    std::list<std::pair<std::string, uint16_t>> to_learn;
+    size_t learned_count = 0;
+    size_t expired_count = 0;
     {
         std::scoped_lock lock(this->servers_lock);
-        servers_snap = this->servers;
-        reconnect_snap = this->reconnect_servers;
+        for (auto const &server_entry : msg->getServers())
+        {
+            auto known = find_server(this->servers, server_entry.first, server_entry.second);
+            if (known == nullptr)
+            {
+                known = find_server(this->reconnect_servers, server_entry.first, server_entry.second);
+            }
+            if (known != nullptr)
+            {
+                known->setLastSeenMs(now);
+            }
+            else
+            {
+                to_learn.push_back(server_entry);
+            }
+        }
+        /* An expiry window of 0 disables expiry entirely, keeping the old
+         * never-drop behaviour for anyone who wants it. */
+        if (this->learned_server_expiry_ms > 0)
+        {
+            /* Clamped rather than computed as (now - last_seen) > window so the
+             * subtraction cannot wrap on a clock whose epoch is inside the
+             * window (a fake clock starting at 0, or a freshly booted host):
+             * before the window has elapsed at all, nothing is expirable. */
+            uint64_t cutoff = now > this->learned_server_expiry_ms ? now - this->learned_server_expiry_ms : 0;
+            std::list<std::shared_ptr<fss_server>> doomed = take_stale_servers(this->servers, cutoff);
+            doomed.splice(doomed.end(), take_stale_servers(this->reconnect_servers, cutoff));
+            expired_count = doomed.size();
+            for (auto const &server : doomed)
+            {
+                FSS_LOG_WARN("client", "Server " << server->getAddress() << ":" << server->getPort()
+                                                 << " absent from server lists for " << this->learned_server_expiry_ms
+                                                 << "ms, dropping it");
+            }
+            /* Teardown is deferred to attemptReconnect(): see expired_servers
+             * in the header — this runs on a recv thread, possibly the one
+             * belonging to the server being expired. */
+            this->expired_servers.splice(this->expired_servers.end(), doomed);
+        }
+        learned_count = count_learned(this->servers) + count_learned(this->reconnect_servers);
     }
-    for (auto const &server_entry : msg->getServers())
+    /* Learn outside the lock: addServer() re-acquires it. */
+    bool cap_reached = false;
+    for (auto const &server_entry : to_learn)
     {
-        bool exists = server_list_matches(servers_snap, server_entry.first, server_entry.second);
-        if (!exists)
+        if (learned_count >= this->max_learned_servers)
         {
-            exists = server_list_matches(reconnect_snap, server_entry.first, server_entry.second);
+            cap_reached = true;
+            break;
         }
-        if (!exists)
+        this->addLearnedServer(server_entry.first, server_entry.second);
+        learned_count++;
+    }
+    if (cap_reached)
+    {
+        bool report = false;
         {
-            this->connectTo(server_entry.first, server_entry.second, false);
+            std::scoped_lock lock(this->servers_lock);
+            report = !this->learned_cap_logged;
+            this->learned_cap_logged = true;
         }
+        if (report)
+        {
+            FSS_LOG_WARN("client",
+                         "Refusing to learn more than " << this->max_learned_servers << " servers from server lists");
+        }
+    }
+    if (expired_count > 0)
+    {
+        this->updateConfigured();
     }
 }
 
