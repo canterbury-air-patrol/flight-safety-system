@@ -16,7 +16,14 @@ cppcheck --enable=warning,performance,portability,style --error-exitcode=1 \
 	--suppress=knownConditionTrueFalse:src/transport-ssl.cpp src/*.cpp
 
 run-clang-tidy -p . 'src/(?!server-db).*\.cpp$' 2>&1 | tee clang-tidy.log
-! grep -q "warning:" clang-tidy.log
+# NOT `! grep -q ...`: set -e deliberately does not apply to a command whose
+# status is inverted with `!`, so that form ran the grep and then carried on
+# regardless — the clang-tidy gate was inert and warnings reached commits.
+if grep -q "warning:" clang-tidy.log; then
+	echo "ERROR: clang-tidy reported warnings (see clang-tidy.log)" >&2
+	grep "warning:" clang-tidy.log >&2
+	exit 1
+fi
 
 # Lint the e2e Python harness. ruff's rule set is version-dependent, so CI pins
 # the exact version in a venv and points RUFF at it (see e2e/requirements-dev.txt).
