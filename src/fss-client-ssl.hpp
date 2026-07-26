@@ -150,17 +150,22 @@ private:
     std::string private_key_file{""};
     std::string public_key_file{""};
     /* Backoff bookkeeping (last_tried, retry_count, retry_delay,
-     * effective_delay, rng) is touched only from the application thread that
-     * drives reconnection — the caller of attemptReconnect() / reconnect()
-     * and connectTo(..., true). The recv thread must NOT write these
-     * directly: when a connection closes it requests a reset via the atomic
-     * backoff_reset_requested flag, which reconnect() consumes. */
+     * effective_delay, rng) is touched only from the single thread that runs
+     * reconnect(): this server's outbound worker when the reconnection was
+     * scheduled by attemptReconnect() (the normal path), or the caller's own
+     * thread on the configuration-time connectTo(..., true). Those two never
+     * overlap — connectTo builds a server that is not yet in any list, so
+     * nothing can have queued a reconnect for it. The recv thread must NOT
+     * write these directly: when a connection closes it requests a reset via
+     * the atomic backoff_reset_requested flag, which reconnect() consumes.
+     * effective_delay is the exception: getEffectiveDelay() is a public read
+     * from other threads, so it is atomic. */
     uint64_t last_tried{0};
     uint64_t retry_count{0};
     static constexpr uint64_t retry_delay_start = 1000;
     static constexpr uint64_t retry_delay_cap = 30000;
     uint64_t retry_delay{retry_delay_start};
-    uint64_t effective_delay{retry_delay_start};
+    std::atomic<uint64_t> effective_delay{retry_delay_start};
     std::mt19937 rng{std::random_device{}()};
     std::atomic<bool> backoff_reset_requested{false};
     void resetBackoff();
@@ -178,6 +183,22 @@ private:
     std::mutex outbound_lock{};
     std::condition_variable outbound_cv{};
     bool outbound_stopping{false};
+    /* Reconnection is dispatched onto the same worker (todo/66): reconnect()
+     * blocks for a connect() plus a TLS handshake, and doing that serially for
+     * every entry on the caller's thread delayed reconnection to a healthy
+     * server by the sum of every unreachable one's timeout.
+     * out_reconnect_pending is the queued flag; reconnect_busy stays set from
+     * the moment one is queued until the worker has finished it, so a 1 Hz
+     * attemptReconnect() cannot pile attempts up behind a 10 s handshake. */
+    bool out_reconnect_pending{false};
+    bool reconnect_busy{false};
+    /* Set by the worker only AFTER reconnect() has returned true — i.e. after
+     * the version + identity handshake has been sent — and consumed by
+     * fss_client::attemptReconnect(). Harvesting on connected() instead would
+     * expose the window inside reconnect() between installing the connection
+     * and sending the handshake, during which sendMsgAll() could put telemetry
+     * ahead of the mandatory version message. */
+    std::atomic<bool> reconnect_succeeded{false};
     /* Bounded, drop-oldest: telemetry is loss-tolerant, so under sustained
      * backlog into a half-dead server the OLDEST queued frame is dropped
      * rather than the queue growing without bound — the same policy and
@@ -197,6 +218,7 @@ private:
      * so the worker performs the (blocking) sends with no lock held. */
     struct outbound_work {
         bool stop{false};
+        bool reconnect{false};
         std::vector<std::shared_ptr<const flight_safety_system::transport::buf_len>> sends{};
     };
     /* Block until there is work or a stop request, then atomically take and
@@ -243,6 +265,17 @@ public:
      * using the inline fss_message_cb::sendMsg() on the recv thread, where a
      * stall can only affect the one connection it belongs to. */
     void queueSend(const std::shared_ptr<const flight_safety_system::transport::buf_len> &packed);
+    /* Schedule a reconnect on this server's outbound worker instead of dialling
+     * inline (todo/66). Returns immediately, and is a no-op while an attempt is
+     * already queued or in flight, so calling it every tick is safe. The
+     * backoff throttle still lives in reconnect() itself, so a queued attempt
+     * inside the retry window costs a worker wake-up and nothing else. */
+    void queueReconnect();
+    /* Consume the "the queued reconnect succeeded" signal (clearing it).
+     * fss_client::attemptReconnect() polls this to move the server from
+     * reconnect_servers to servers, which keeps every list mutation on the
+     * thread that owns servers_lock and out of the worker. */
+    auto takeReconnectSucceeded() -> bool;
     /* Cumulative frames this server's bounded outbound queue has dropped. */
     auto getDroppedSends() -> uint64_t;
     /* Stops this server's outbound worker and then the connection. Overrides

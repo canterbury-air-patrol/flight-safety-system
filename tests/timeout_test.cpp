@@ -10,6 +10,7 @@
 #error No catch header
 #endif
 
+#include <atomic>
 #include <memory>
 
 #include "fss-transport.hpp"
@@ -17,6 +18,7 @@
 #include "fss-client-ssl.hpp"
 #include "mock_database.hpp"
 #include "db-write-queue.hpp"
+#include "test_helpers.hpp"
 
 namespace fss = flight_safety_system;
 
@@ -244,7 +246,9 @@ public:
     auto operator=(ReconnectingServer &&) -> ReconnectingServer & = delete;
     ~ReconnectingServer() override = default;
     auto connected() -> bool override { return true; }
-    int reconnects{0};
+    /* Incremented on the outbound worker thread and read by the test thread
+     * since todo/66 moved the dial off the caller's thread. */
+    std::atomic<int> reconnects{0};
 protected:
     auto reconnect_to() -> bool override
     {
@@ -355,8 +359,12 @@ TEST_CASE("timeout: successful reconnect restores cold-start liveness")
     clock->advance(30001);
     REQUIRE(server->isServerTimedOut());
 
+    /* attemptReconnect() schedules the dial on the server's outbound worker
+     * rather than blocking on it (todo/66), so the redial lands asynchronously
+     * and the following pass is the one that harvests it into the live list. */
     client->attemptReconnect();
-    REQUIRE(server->reconnects == 1);
+    REQUIRE(fss_test::wait_for([&]() -> bool { return server->reconnects.load() == 1; }));
+    client->attemptReconnect();
     REQUIRE(client->last_status == fss::client_ssl::CLIENT_CONNECTION_STATUS_CONNECTED_1_SERVER);
 
     /* Nothing has been received on the new connection: however long it stays
