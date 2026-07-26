@@ -245,10 +245,9 @@ private:
     std::atomic<uint64_t> last_message_received_time{0};
     uint64_t server_timeout_ms{30000};
     /* Learned-server bookkeeping
-     * (docs/decisions/66-67-client-outbound-fanout.md). Owned by the
-     * fss_client, not by
-     * this object: both are read and written only under fss_client's
-     * servers_lock, or before the server has been published into either list.
+     * (docs/decisions/66-67-client-outbound-fanout.md). Owned by the fss_client
+     * rather than by this object: both are read and written only under
+     * fss_client's servers_lock, or before the server has been published.
      * `learned` is true only for a server discovered from a server-list
      * broadcast — a config-file or programmatic entry stays false and is
      * therefore never expired. */
@@ -264,10 +263,10 @@ private:
     std::mutex outbound_lock{};
     std::condition_variable outbound_cv{};
     bool outbound_stopping{false};
-    /* Reconnection is dispatched onto the same worker: reconnect()
-     * blocks for a connect() plus a TLS handshake, and doing that serially for
-     * every entry on the caller's thread delayed reconnection to a healthy
-     * server by the sum of every unreachable one's timeout.
+    /* Reconnection is dispatched onto the same worker: reconnect() blocks for a
+     * connect() plus a TLS handshake, and doing that serially for every entry
+     * on the caller's thread delayed reconnection to a healthy server by the
+     * sum of every unreachable one's timeout.
      * out_reconnect_pending is the queued flag; reconnect_busy stays set from
      * the moment one is queued until the worker has finished it, so a 1 Hz
      * attemptReconnect() cannot pile attempts up behind a 10 s handshake. */
