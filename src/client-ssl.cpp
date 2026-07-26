@@ -250,7 +250,8 @@ void flight_safety_system::client_ssl::fss_client::attemptReconnect()
      * harvest the servers whose queued reconnect has since succeeded and
      * schedule an attempt for the rest.
      *
-     * The dial itself runs on each server's own outbound worker (docs/decisions/66-67-client-outbound-fanout.md).
+     * The dial itself runs on each server's own outbound worker
+     * (docs/decisions/66-67-client-outbound-fanout.md).
      * Calling the blocking reconnect() here — a connect() plus a TLS
      * handshake, ~7 s for a host that drops SYNs and up to 10 s for one that
      * stalls the handshake — made this loop cost the SUM of every unreachable
@@ -301,8 +302,9 @@ void flight_safety_system::client_ssl::fss_client::attemptReconnect()
         }
     }
 
-    /* Phase (e): tear down anything updateServers() expired (docs/decisions/66-67-client-outbound-fanout.md). It
-     * removed them from both lists but could not disconnect them: it runs on a
+    /* Phase (e): tear down anything updateServers() expired
+     * (docs/decisions/66-67-client-outbound-fanout.md). It removed them from
+     * both lists but could not disconnect them: it runs on a
      * recv thread, and the expiring server can be the one the list arrived on,
      * so the join would be a self-join. Here we are on the thread that already
      * owns connection lifecycle, and the shared_ptr keeps each object alive
