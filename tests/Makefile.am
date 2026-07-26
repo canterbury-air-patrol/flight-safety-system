@@ -34,6 +34,7 @@ all_test_SOURCES = main.cpp messages.cpp connection.cpp client.cpp \
 	coordinate_precision_test.cpp \
 	queue_test.cpp \
 	reconnect_test.cpp \
+	client_server_list_test.cpp \
 	client_fanout_test.cpp \
 	connection_negative_test.cpp \
 	oversized_message_test.cpp \

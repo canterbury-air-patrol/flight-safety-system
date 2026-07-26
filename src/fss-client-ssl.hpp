@@ -18,6 +18,22 @@ namespace client_ssl {
 class fss_client;
 class fss_server;
 
+/* How long a server learned from a server-list broadcast may go unmentioned
+ * before the client drops it (docs/decisions/66-67-client-outbound-fanout.md).
+ * Servers broadcast their list every 15 s, so the default is four rounds: long
+ * enough that a missed or delayed broadcast expires nothing, short enough that
+ * a decommissioned server stops costing reconnect attempts within a minute.
+ * Config field "learned_server_expiry_ms". */
+constexpr uint64_t default_learned_server_expiry_ms = 60000;
+/* Ceiling on how many servers a client will learn from broadcasts. The list is
+ * authenticated (it arrives over mTLS from a server that chained to our CA), so
+ * this is not an unauthenticated attack surface — it bounds what a trusted but
+ * misconfigured server can grow the connection set to. Config field
+ * "max_learned_servers". Servers from the config file do not count against it
+ * and are never expired: they are the operator's declared intent and must
+ * survive an outage that empties every broadcast list. */
+constexpr size_t default_max_learned_servers = 16;
+
 enum connection_status {
     CLIENT_CONNECTION_STATUS_UNKNOWN,
     CLIENT_CONNECTION_STATUS_CONNECTED_1_SERVER,
@@ -51,12 +67,29 @@ private:
     std::string public_key_file{""};
     std::list<std::shared_ptr<flight_safety_system::client_ssl::fss_server>> servers{};
     std::list<std::shared_ptr<flight_safety_system::client_ssl::fss_server>> reconnect_servers{};
+    /* Servers removed from both lists by expiry (todo/67) and awaiting
+     * teardown. updateServers() runs on a recv thread and the server it expires
+     * can be the very one the list arrived on, so disconnecting there would
+     * have that thread join itself; attemptReconnect() — which already owns
+     * connection lifecycle — drains this instead. Guarded by servers_lock. */
+    std::list<std::shared_ptr<flight_safety_system::client_ssl::fss_server>> expired_servers{};
     /* servers_lock guards the server lists and the derived `configured` flag.
      * It does NOT guard asset_name, which is configuration state set before the
      * client is used concurrently (mutable so the const isConfigured() can lock
      * it to read the flag). */
     mutable std::mutex servers_lock{};
     bool configured{false}; // guarded by servers_lock
+    /* Expiry window and cap for servers learned from broadcasts (todo/67); see
+     * the constants above. Configuration state, set before concurrent use. */
+    uint64_t learned_server_expiry_ms{default_learned_server_expiry_ms};
+    size_t max_learned_servers{default_max_learned_servers};
+    /* One WARN per process when the cap first refuses an advertised server —
+     * the silence was half the problem this fixed. Guarded by servers_lock. */
+    bool learned_cap_logged{false};
+    /* Drives learned-server expiry. Injectable so the timing is testable, and a
+     * clock rather than a tick count deliberately (todo/70): this is the only
+     * new timekeeping in the client and it should not repeat that pattern. */
+    std::shared_ptr<flight_safety_system::IClock> clock{std::make_shared<flight_safety_system::MonotonicClock>()};
     /* Recompute `configured` from the current asset name + server lists. Called
      * from every path that sets the name or adds a server so isConfigured()
      * stays accurate however the client was built, not just the file ctor.
@@ -71,7 +104,16 @@ protected:
     /* Call before connecting (configuration state, like the setters above);
      * an already-established connection keeps the bound it connected with. */
     void setTcpUserTimeoutMs(unsigned int t_timeout_ms);
+    /* Configuration state, like the setters above. 0 disables expiry, keeping
+     * the pre-todo/67 behaviour of never dropping a learned server. */
+    void setLearnedServerExpiryMs(uint64_t t_expiry_ms);
+    void setMaxLearnedServers(size_t t_max);
     void addServer(const std::shared_ptr<fss_server> &server);
+    /* Add a server learned from a server-list broadcast, as distinct from one
+     * the operator configured: only these are subject to the expiry window and
+     * the cap. Separate entry point rather than an extra parameter on
+     * connectTo() so existing overriders of that virtual are unaffected. */
+    void addLearnedServer(const std::string &t_address, uint16_t t_port);
 public:
     explicit fss_client(const std::string &config_file);
     explicit fss_client();
@@ -102,6 +144,20 @@ public:
     virtual auto isNonAircraft() const -> bool { return this->non_aircraft; }
     virtual auto getClockOffsetMs() const -> int64_t { return this->clock_offset_ms; }
     virtual auto getTcpUserTimeoutMs() const -> unsigned int { return this->tcp_user_timeout_ms; }
+    virtual auto getLearnedServerExpiryMs() const -> uint64_t { return this->learned_server_expiry_ms; }
+    virtual auto getMaxLearnedServers() const -> size_t { return this->max_learned_servers; }
+    /* How many servers this client currently knows of — live plus pending
+     * reconnect — and how many of those it learned from a broadcast rather than
+     * being configured with. Exposed because the todo/67 failure was invisible:
+     * connectionStatusChange() reports only the count of LIVE servers, so a
+     * client quietly carrying eleven decommissioned ones, and paying a connect
+     * attempt for each every backoff interval, looked identical to a healthy
+     * one. */
+    auto getServerCount() const -> size_t;
+    auto getLearnedServerCount() const -> size_t;
+    /* Replace the clock driving learned-server expiry. Call before concurrent
+     * use; a null clock is ignored (matching fss_server::setClock). */
+    void setClock(std::shared_ptr<flight_safety_system::IClock> t_clock);
     /* fss_current_timestamp() + clock_offset_ms (todo/33): the single
      * source of truth for "what time does this client think it is", used
      * both for the RTT response's reported client clock and for any
@@ -173,6 +229,14 @@ private:
     std::atomic<bool> liveness_active{false};
     std::atomic<uint64_t> last_message_received_time{0};
     uint64_t server_timeout_ms{30000};
+    /* Learned-server bookkeeping (todo/67). Owned by the fss_client, not by
+     * this object: both are read and written only under fss_client's
+     * servers_lock, or before the server has been published into either list.
+     * `learned` is true only for a server discovered from a server-list
+     * broadcast — a config-file or programmatic entry stays false and is
+     * therefore never expired. */
+    bool learned{false};
+    uint64_t last_seen_ms{0};
     /* Per-server outbound writer
      * (docs/decisions/66-67-client-outbound-fanout.md). The caller's thread
      * schedules *what* to send; this worker performs the blocking socket
@@ -289,6 +353,13 @@ public:
     virtual void sendIdentify();
     virtual void sendVersion();
     void setClock(std::shared_ptr<flight_safety_system::IClock> t_clock);
+    /* Learned-server accessors (todo/67). See the members: the caller must hold
+     * fss_client::servers_lock, or be working on a server not yet published
+     * into either list. */
+    auto isLearned() const -> bool { return this->learned; }
+    void setLearned(bool t_learned) { this->learned = t_learned; }
+    auto getLastSeenMs() const -> uint64_t { return this->last_seen_ms; }
+    void setLastSeenMs(uint64_t t_now_ms) { this->last_seen_ms = t_now_ms; }
     void setServerTimeoutMs(uint64_t ms) { this->server_timeout_ms = ms; }
     auto isServerTimedOut() -> bool;
     auto getEffectiveDelay() const -> uint64_t { return this->effective_delay; }
