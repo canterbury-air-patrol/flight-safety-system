@@ -192,11 +192,13 @@ TEST_CASE("reconnect: attemptReconnect is throttled within the retry window")
     client->connectTo("127.0.0.1", closed_port, /*connect*/ true);
 
     /* Rapid-fire attemptReconnect: within the 1s retry window none of
-     * these should produce an outbound connect. We can't observe that
-     * directly here, but we can observe wall-clock cost — 100 calls in
-     * <100ms is well under one per ms, which is only possible if each
-     * call is a no-op (actual connect() attempts to a closed port take
-     * a kernel round-trip each). */
+     * these should produce an outbound connect. Since todo/66 the dial runs
+     * on the server's own worker, so the caller's thread is cheap by
+     * construction and this only holds the *caller* side to being a no-op —
+     * that the dialling itself stays throttled is asserted directly by the
+     * fake-clock case below (which counts reconnect_to calls) and by
+     * "repeated attemptReconnect does not pile up dials on a stalled server"
+     * in client_fanout_test.cpp (which counts queued attempts). */
     auto start = std::chrono::steady_clock::now();
     for (int i = 0; i < 100; ++i)
     {
