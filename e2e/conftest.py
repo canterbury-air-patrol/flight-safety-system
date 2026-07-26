@@ -314,6 +314,14 @@ def certs_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return target
 
 
+# The fss_client library default for learned_server_expiry_ms
+# (default_learned_server_expiry_ms in src/fss-client-ssl.hpp). client.json.tmpl
+# and client-non-aircraft.json.tmpl require the substitution, so every caller
+# that renders one directly rather than through the fake_client fixture passes
+# this unless it is deliberately exercising expiry.
+DEFAULT_LEARNED_EXPIRY_MS = 60000
+
+
 def _render_template(template_path: Path, out_path: Path, **subs: object) -> None:
     tmpl = string.Template(template_path.read_text())
     out_path.write_text(tmpl.substitute(**subs))
@@ -421,6 +429,7 @@ def fake_client(
         client_id: str | None = None,
         non_aircraft: bool = False,
         extra_args: list[str] | None = None,
+        learned_expiry_ms: int = 60000,
     ) -> dict[str, object]:
         # client_id labels this launch's config/log file paths; defaults to
         # `name` (existing behaviour for every caller with one client per
@@ -432,12 +441,17 @@ def fake_client(
         config_path = tmp_path / f"client-{label}.json"
         log_path = tmp_path / f"client-{label}.log"
         template = "client-non-aircraft.json.tmpl" if non_aircraft else "client.json.tmpl"
+        # learned_expiry_ms is how long a server learned from a server_list
+        # broadcast may go unmentioned before the client drops it (todo/67).
+        # The library default is 60 s; a test exercising the removal direction
+        # lowers it so it does not have to wait four broadcast rounds.
         _render_template(
             E2E_ROOT / "fixtures" / template,
             config_path,
             CLIENT_NAME=name,
             CERTS_DIR=str(ca_override if ca_override else certs_dir),
             SERVER_PORT=str(server_proc["port"]),
+            LEARNED_EXPIRY_MS=str(learned_expiry_ms),
         )
         env = os.environ.copy()
         env["LD_LIBRARY_PATH"] = str(REPO_ROOT / "src" / ".libs")

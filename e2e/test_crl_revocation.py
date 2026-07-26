@@ -27,6 +27,7 @@ import pytest
 
 from conftest import (
     CERT_SCRIPTS,
+    DEFAULT_LEARNED_EXPIRY_MS,
     E2E_ROOT,
     FAKE_CLIENT_BIN,
     REPO_ROOT,
@@ -156,6 +157,7 @@ def test_revocation_disconnects_and_blocks_reconnect_but_not_others(
             CLIENT_NAME=name,
             CERTS_DIR=str(crl_certs_dir),
             SERVER_PORT=str(port),
+            LEARNED_EXPIRY_MS=str(DEFAULT_LEARNED_EXPIRY_MS),
         )
         fp = client_log.open("wb")
         # sourcery skip: dangerous-subprocess-use-audit

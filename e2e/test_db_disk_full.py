@@ -57,6 +57,7 @@ import psycopg2
 import pytest
 
 from conftest import (
+    DEFAULT_LEARNED_EXPIRY_MS,
     E2E_ROOT,
     FAKE_CLIENT_BIN,
     POSTGIS_IMAGE,
@@ -181,6 +182,7 @@ def _spawn_client(server: dict[str, object], certs_dir: Path, tmp_path: Path, na
         CLIENT_NAME="test1",
         CERTS_DIR=str(certs_dir),
         SERVER_PORT=str(server["port"]),
+        LEARNED_EXPIRY_MS=str(DEFAULT_LEARNED_EXPIRY_MS),
     )
     log_fp = client_log.open("wb")
     # sourcery skip: dangerous-subprocess-use-audit

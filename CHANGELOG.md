@@ -25,6 +25,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tracked documents; the rest are retargeted as those files are next touched.
 
 ### Changed
+- **ABI break:** all four library sonames bump `.so.3` → `.so.4`
+  (`-version-info 4:0:0` for `libfss`, `libfss-transport`,
+  `libfss-transport-ssl`, `libfss-client-ssl`). Two independent layout changes
+  land in this release and one bump covers both, since `.so.4` has not been
+  released: the installed `fss-transport.hpp` changed object layout since
+  1.2.1, where `fss_connection` gained the todo/25 delivery members and the
+  todo/52 deferred-close descriptor; and the installed `fss-client-ssl.hpp`
+  added data members and a virtual to `client_ssl::fss_server` and
+  `client_ssl::fss_client`. A same-soname mix of an old library with the new
+  header (or vice versa) would silently corrupt derived-class layouts rather
+  than fail to link, so consumers must rebuild. See
+  `docs/release-checklist.md`.
+- `client_ssl::fss_client::sendMsgAll()` and `attemptReconnect()` are now
+  **non-blocking**: each `fss_server` owns an outbound worker thread that
+  performs its own blocking I/O
+  (`docs/decisions/66-67-client-outbound-fanout.md`, todo/66). Both were serial
+  loops of blocking calls on the caller's thread, so a server that completed TLS
+  and then stopped reading held telemetry to every healthy server behind it for
+  a whole `TCP_USER_TIMEOUT` (30 s by default), and a reconnection pass cost the
+  sum of every unreachable server's connect and handshake timeouts. The shipped
+  example drives both from one thread and the README names it as the starting
+  point for a real client, so the aircraft's telemetry cadence and reconnect
+  latency were set by the slowest server rather than the fastest. This is the
+  aircraft-side counterpart of the hardening todo/21 + todo/36 did on the
+  server. `sendMsgAll()` packs the message once and shares the frame read-only
+  across the workers, each stamping its own sequence id via
+  `fss_connection::sendPacked()` — which is what keeps the todo/12 C8 invariant
+  intact now that the sends are concurrent. Per-server queues are bounded and
+  drop the OLDEST frame under backlog (telemetry is loss-tolerant); the loss is
+  reported by the new `fss_server::getDroppedSends()`.
+- A `client_ssl::fss_client` now expires servers it learned from a server-list
+  broadcast (todo/67). `updateServers()` only ever added — there was no removal
+  path in the client at all — so a server deactivated in `config_serverconfig`
+  was carried by every client that had ever seen it for the process lifetime,
+  costing a blocking connect attempt per backoff interval, and silently: nothing
+  logged it. A learned server absent from every list for
+  `learned_server_expiry_ms` (new client config field, default 60 s = four 15 s
+  broadcast rounds; 0 disables) is now dropped with a WARN naming it, and no
+  more than `max_learned_servers` (new, default 16) are ever learned. Servers
+  from the config file are exempt from both — they are the operator's declared
+  intent and must survive an outage that empties every broadcast list. New
+  `getServerCount()` / `getLearnedServerCount()` make what a client is carrying
+  visible.
 - `fss_connection` now invokes `fss_message_cb::processMessage()` with its
   internal `msg_lock` released, instead of holding it across the callback
   (todo/25). Holding a transport mutex across arbitrary user code meant any
@@ -46,13 +89,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a running callback, so the existing "call `activate()`/`reconnect()` outside
   our own lock" rules in `server-clients.cpp` and `client-ssl.cpp` remain
   load-bearing. No behaviour change for existing handlers.
-- ABI: all four library sonames bump `.so.3` → `.so.4` (`-version-info 4:0:0`
-  for `libfss`, `libfss-transport`, `libfss-transport-ssl`,
-  `libfss-client-ssl`). The installed `fss-transport.hpp` changed object layout
-  since 1.2.1: `fss_connection` gained the todo/25 delivery members above and
-  the todo/52 deferred-close descriptor. A same-soname mix of an old library
-  with the new header (or vice versa) would silently corrupt derived-class
-  layouts rather than fail to link, so consumers must rebuild.
 - Broadcast relays now pack the source message once and share that frame,
   read-only, across every recipient instead of decoding a fresh clone per
   recipient (todo/55). Previously each relayed position report to N connected

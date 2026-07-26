@@ -45,6 +45,7 @@ several `todo/` items is filed under all of them (`34-45-47-…`).
 | [48 — a terminal command ack is final for its dispatch](decisions/48-command-ack-terminal-finality.md) | Protocol / audit |
 | [49 — the FMU command identifier is per-server](decisions/49-server-command-id-semantics.md) | Protocol |
 | [51 — optional trailing wire fields are prefix-closed](decisions/51-optional-trailing-field-rule.md) | Protocol |
+| [66/67 — the client fans out through per-server workers, and prunes what it learns](decisions/66-67-client-outbound-fanout.md) | Client library |
 
 ## Citing a decision
 

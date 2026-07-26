@@ -67,7 +67,7 @@ private:
     std::string public_key_file{""};
     std::list<std::shared_ptr<flight_safety_system::client_ssl::fss_server>> servers{};
     std::list<std::shared_ptr<flight_safety_system::client_ssl::fss_server>> reconnect_servers{};
-    /* Servers removed from both lists by expiry (todo/67) and awaiting
+    /* Servers removed from both lists by expiry and awaiting
      * teardown. updateServers() runs on a recv thread and the server it expires
      * can be the very one the list arrived on, so disconnecting there would
      * have that thread join itself; attemptReconnect() — which already owns
@@ -79,7 +79,7 @@ private:
      * it to read the flag). */
     mutable std::mutex servers_lock{};
     bool configured{false}; // guarded by servers_lock
-    /* Expiry window and cap for servers learned from broadcasts (todo/67); see
+    /* Expiry window and cap for servers learned from broadcasts; see
      * the constants above. Configuration state, set before concurrent use. */
     uint64_t learned_server_expiry_ms{default_learned_server_expiry_ms};
     size_t max_learned_servers{default_max_learned_servers};
@@ -105,7 +105,7 @@ protected:
      * an already-established connection keeps the bound it connected with. */
     void setTcpUserTimeoutMs(unsigned int t_timeout_ms);
     /* Configuration state, like the setters above. 0 disables expiry, keeping
-     * the pre-todo/67 behaviour of never dropping a learned server. */
+     * the previous behaviour of never dropping a learned server. */
     void setLearnedServerExpiryMs(uint64_t t_expiry_ms);
     void setMaxLearnedServers(size_t t_max);
     void addServer(const std::shared_ptr<fss_server> &server);
@@ -148,7 +148,8 @@ public:
     virtual auto getMaxLearnedServers() const -> size_t { return this->max_learned_servers; }
     /* How many servers this client currently knows of — live plus pending
      * reconnect — and how many of those it learned from a broadcast rather than
-     * being configured with. Exposed because the todo/67 failure was invisible:
+     * being configured with. Exposed because the failure this fixed was
+     * invisible:
      * connectionStatusChange() reports only the count of LIVE servers, so a
      * client quietly carrying eleven decommissioned ones, and paying a connect
      * attempt for each every backoff interval, looked identical to a healthy
@@ -229,7 +230,9 @@ private:
     std::atomic<bool> liveness_active{false};
     std::atomic<uint64_t> last_message_received_time{0};
     uint64_t server_timeout_ms{30000};
-    /* Learned-server bookkeeping (todo/67). Owned by the fss_client, not by
+    /* Learned-server bookkeeping
+     * (docs/decisions/66-67-client-outbound-fanout.md). Owned by the
+     * fss_client, not by
      * this object: both are read and written only under fss_client's
      * servers_lock, or before the server has been published into either list.
      * `learned` is true only for a server discovered from a server-list
@@ -247,7 +250,7 @@ private:
     std::mutex outbound_lock{};
     std::condition_variable outbound_cv{};
     bool outbound_stopping{false};
-    /* Reconnection is dispatched onto the same worker (todo/66): reconnect()
+    /* Reconnection is dispatched onto the same worker: reconnect()
      * blocks for a connect() plus a TLS handshake, and doing that serially for
      * every entry on the caller's thread delayed reconnection to a healthy
      * server by the sum of every unreachable one's timeout.
@@ -344,7 +347,8 @@ public:
      * stall can only affect the one connection it belongs to. */
     void queueSend(const std::shared_ptr<const flight_safety_system::transport::buf_len> &packed);
     /* Schedule a reconnect on this server's outbound worker instead of dialling
-     * inline (todo/66). Returns immediately, and is a no-op while an attempt is
+     * inline (see the outbound-worker block above). Returns immediately, and
+     * is a no-op while an attempt is
      * already queued or in flight, so calling it every tick is safe. The
      * backoff throttle still lives in reconnect() itself, so a queued attempt
      * inside the retry window costs a worker wake-up and nothing else. */
@@ -373,7 +377,7 @@ public:
     virtual void sendIdentify();
     virtual void sendVersion();
     void setClock(std::shared_ptr<flight_safety_system::IClock> t_clock);
-    /* Learned-server accessors (todo/67). See the members: the caller must hold
+    /* Learned-server accessors. See the members: the caller must hold
      * fss_client::servers_lock, or be working on a server not yet published
      * into either list. */
     auto isLearned() const -> bool { return this->learned; }
