@@ -122,7 +122,22 @@ public:
     auto operator=(fss_client &) -> fss_client & = delete;
     auto operator=(fss_client &&) -> fss_client & = delete;
     virtual ~fss_client();
+    /* Register a server the operator configured, optionally dialling it now.
+     * The dial on this path IS synchronous — it is configuration-time, on the
+     * caller's own thread — unlike the ones attemptReconnect() schedules. A
+     * server added here is never expired
+     * (docs/decisions/66-67-client-outbound-fanout.md). */
     virtual void connectTo(const std::string &t_address, uint16_t t_port, bool connect);
+    /* One pass of connection maintenance; call it periodically (the shipped
+     * example does so at 1 Hz). NON-BLOCKING
+     * (docs/decisions/66-67-client-outbound-fanout.md): it schedules a dial on
+     * each pending server's own worker and promotes the ones whose dial has
+     * since succeeded, so a pass no longer costs the sum of every unreachable
+     * server's connect and handshake timeouts. Consequently a server does not
+     * become live within the same call that first schedules it — the following
+     * pass is the one that promotes it. Also the point at which servers dropped
+     * by server-list expiry are torn down, so it must keep being called for
+     * that to happen. */
     virtual void attemptReconnect();
     virtual void disconnect();
     /* Fan a message out to every currently connected server. NON-BLOCKING
