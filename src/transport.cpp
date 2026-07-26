@@ -157,7 +157,27 @@ void flight_safety_system::transport::fss_connection::disconnect()
      * NUMBER for reuse, so it must wait until no thread that could still pass
      * the old number to a syscall is unjoined — a setup worker accepting a
      * new client can be handed the same number back, turning a late
-     * recv()/send() into I/O on an unrelated session. */
+     * recv()/send() into I/O on an unrelated session.
+     *
+     * The dispatch must stay virtual: an override is how a subclass whose
+     * blocking I/O is not fd-mediated releases it (see shutdownSocket()'s
+     * declaration), and that is the whole reason disconnect() can unblock a
+     * stalled sender before joining it.
+     *
+     * clang-analyzer is right that the two destructors reaching here —
+     * ~fss_connection, and ~fss_listen via fss_listen::disconnect() — get the
+     * base version rather than an override, because the derived part is
+     * already gone by then. That is the intended behaviour on those paths, not
+     * a defect: destruction has nothing left to unblock that the owner should
+     * not already have unblocked. The rule it implies for subclasses is the
+     * part worth stating — a subclass whose shutdownSocket() override releases
+     * something must ALSO release it in its own destructor, because this call
+     * will not reach the override. The in-tree test doubles that override it
+     * do exactly that. Suppressed rather than restructured because the only
+     * restructuring that removes the virtual call from both destructor paths
+     * would have to duplicate this function's tail for the destructor case,
+     * in the most safety-critical file in the tree, to change nothing. */
+    // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
     this->shutdownSocket();
     bool recv_thread_quiesced = true;
     if (this->recv_thread.joinable())
