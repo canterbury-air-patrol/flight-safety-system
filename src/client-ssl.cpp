@@ -281,14 +281,22 @@ void flight_safety_system::client_ssl::fss_client::attemptReconnect()
     }
 
     /* Phase (d): move the newly connected servers from reconnect_servers to
-     * servers under the lock. */
+     * servers under the lock. Promote only entries still *in* that list: the
+     * snapshot above was taken with the lock released, so updateServers() can
+     * have expired one in between, and blindly pushing would resurrect a
+     * server that phase (e) is about to disconnect. */
     {
         std::scoped_lock lock(this->servers_lock);
         while (!reconnected.empty())
         {
             auto server = reconnected.front();
             reconnected.pop_front();
-            this->reconnect_servers.remove(server);
+            auto found = std::find(this->reconnect_servers.begin(), this->reconnect_servers.end(), server);
+            if (found == this->reconnect_servers.end())
+            {
+                continue;
+            }
+            this->reconnect_servers.erase(found);
             this->servers.push_back(server);
         }
     }
