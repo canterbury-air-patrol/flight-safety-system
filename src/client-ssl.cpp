@@ -98,8 +98,9 @@ flight_safety_system::client_ssl::fss_client::~fss_client()
         std::scoped_lock lock(this->servers_lock);
         all.splice(all.end(), this->servers);
         all.splice(all.end(), this->reconnect_servers);
-        /* Anything expired but not yet drained by attemptReconnect() (todo/67)
-         * still owns a worker thread and possibly a connection. */
+        /* Anything expired but not yet drained by attemptReconnect()
+         * (docs/decisions/66-67-client-outbound-fanout.md) still owns a worker
+         * thread and possibly a connection. */
         all.splice(all.end(), this->expired_servers);
     }
     for (const auto &server : all)
@@ -249,7 +250,7 @@ void flight_safety_system::client_ssl::fss_client::attemptReconnect()
      * harvest the servers whose queued reconnect has since succeeded and
      * schedule an attempt for the rest.
      *
-     * The dial itself runs on each server's own outbound worker (todo/66).
+     * The dial itself runs on each server's own outbound worker (docs/decisions/66-67-client-outbound-fanout.md).
      * Calling the blocking reconnect() here — a connect() plus a TLS
      * handshake, ~7 s for a host that drops SYNs and up to 10 s for one that
      * stalls the handshake — made this loop cost the SUM of every unreachable
@@ -292,7 +293,7 @@ void flight_safety_system::client_ssl::fss_client::attemptReconnect()
         }
     }
 
-    /* Phase (e): tear down anything updateServers() expired (todo/67). It
+    /* Phase (e): tear down anything updateServers() expired (docs/decisions/66-67-client-outbound-fanout.md). It
      * removed them from both lists but could not disconnect them: it runs on a
      * recv thread, and the expiring server can be the one the list arrived on,
      * so the join would be a self-join. Here we are on the thread that already
@@ -453,7 +454,8 @@ auto flight_safety_system::client_ssl::fss_client::getLearnedServerCount() const
 void flight_safety_system::client_ssl::fss_client::updateServers(
     const std::shared_ptr<flight_safety_system::transport::fss_message_server_list> &msg)
 {
-    /* Before todo/67 this method only ever ADDED: there was no removal path
+    /* Before docs/decisions/66-67-client-outbound-fanout.md
+     * this method only ever ADDED: there was no removal path
      * anywhere in the file, so a server deactivated in config_serverconfig
      * dropped out of the broadcast list but every client that had ever seen it
      * kept it forever — and kept paying a blocking connect attempt for it every
@@ -579,7 +581,8 @@ void flight_safety_system::client_ssl::fss_client::serverRequiresReconnect(
     {
         /* Not in the live list, so this is a connection that died in the window
          * between its worker finishing a reconnect and attemptReconnect()
-         * harvesting the result (todo/66). Discard the stale success: promoting
+         * harvesting the result (see the decision file above). Discard the
+         * stale success: promoting
          * it would move an already-dead connection into `servers`, where
          * nothing would flag it — a fresh connection starts with liveness
          * disarmed, so isServerTimedOut() would never fire. Dropping the flag

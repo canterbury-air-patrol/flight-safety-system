@@ -16,6 +16,7 @@ import psycopg2
 import pytest
 
 from conftest import (
+    DEFAULT_LEARNED_EXPIRY_MS,
     E2E_ROOT,
     REPO_ROOT,
     SERVER_BIN,
@@ -126,6 +127,7 @@ def test_client_reconnects_after_server_bounce(
         CLIENT_NAME="test1",
         CERTS_DIR=str(certs_dir),
         SERVER_PORT=str(port),
+        LEARNED_EXPIRY_MS=str(DEFAULT_LEARNED_EXPIRY_MS),
     )
     client_log = tmp_path / "client-test1.log"
     client_fp = client_log.open("wb")
