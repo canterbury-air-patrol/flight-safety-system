@@ -105,6 +105,40 @@ the harvest, and promoting it would park a dead connection where nothing would
 flag it — a fresh connection starts with liveness disarmed, so
 `isServerTimedOut()` would never fire.
 
+## Why the worker never touches the `fss_client`
+
+`fss_server` holds a raw back-pointer to its owning `fss_client`, and the
+(re)connect path needs three things from it: the requested `TCP_USER_TIMEOUT`,
+whether this is a non-aircraft client, and the asset name. Reading them live
+from the worker is wrong, and ThreadSanitizer says so — **a data race on the
+vptr between `~fss_client()` and the worker**.
+
+The mechanism is worth stating, because it is not obvious and it is not
+fixable by ordering. An `fss_client` subclass is destroyed derived-part-first;
+by the time the base destructor runs — which is where the workers are joined —
+the derived part is already gone and the vptr has been rewritten. A virtual call
+arriving from a worker in that window is undefined behaviour whichever vtable it
+lands in. There is no join the base class can perform early enough, because the
+base class does not get control until the derived destructor has finished.
+
+The window is reachable in an ordinary shutdown, not just in principle: a server
+sitting in `reconnect_servers` is not covered by `fss_client::disconnect()`, so
+its worker is joined only by the destructor.
+
+So `fss_server` keeps its own snapshot of those three values, refreshed on the
+application's thread — at construction, and at every `queueReconnect()`, which
+is what keeps a configuration change picked up per attempt. The worker reads
+only its own object. That removes the cross-object access rather than trying to
+time it, which is the only version that stays correct for a subclass the library
+has never seen. `refreshClientConfig()` reads the client *outside*
+`outbound_lock`, because those are virtual calls into consumer code and holding
+a lock the worker also takes across arbitrary user code would be its own hazard.
+
+The same shape still exists on the recv thread, which calls
+`handleCommandFrom()`/`handlePositionReport()`/`handleSMMSettings()` on the
+client — but that predates this work and those calls are the client's own API
+surface rather than incidental configuration reads. It is not addressed here.
+
 ## Why expiry is time-based, and driven from `attemptReconnect()`
 
 **Time, not rounds.** The obvious implementation is a per-server counter of
@@ -178,3 +212,8 @@ config servers exempt, a refreshed sighting resets the window, one empty round
 expires nothing, expiry disabled by 0, the cap, and the config keys.
 `e2e/test_server_list.py` covers the removal direction end to end against a real
 server and database — the suite previously only covered learning a server.
+
+The whole unit suite was also run under ThreadSanitizer (`--enable-tsan`), which
+is what found the vptr race above; it is clean as shipped. That build is not
+part of `make check` by default, so a future change to this machinery should be
+re-checked under it deliberately.
