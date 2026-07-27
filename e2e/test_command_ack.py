@@ -42,8 +42,42 @@ SENTINEL_SUPERSEDE_REASON = SUPERSEDE_NEWER_COMMAND
 # of intervening once-a-second traffic.
 COLLISION_BAND = 20
 
+# Nothing retires a command row, so the newest row for an asset stays pending
+# and sendCommand() re-dispatches it every 10 s (client_session.cpp's
+# `timeout_time`, the resend window). Every redelivery enqueues a
+# command_dispatch_write, and db_command_set_dispatch_id nulls ack_state,
+# ack_timestamp and ack_superseded_by before the fresh ack re-populates them —
+# so each redelivery opens a brief window in which the ack columns read NULL
+# for a command that was acked (todo/68).
+#
+# Polling with a deadline of exactly the resend window puts every poll on that
+# boundary: a poll that starts just after one redelivery expires just as the
+# next one lands, and can time out inside the null gap, reporting "never acked".
+# Poll for longer than two resend windows instead, so a single null gap can
+# never consume a whole deadline, and pick a value that is not a multiple of the
+# window so the two cadences do not stay phase-locked across a run.
+#
+# This is a harness-side mitigation, not a fix: the churn itself is todo/68
+# proper. Keep this off the boundary if the resend window ever changes.
+RESEND_WINDOW = 10.0
+ACK_POLL_TIMEOUT = 2.5 * RESEND_WINDOW
 
-def _wait_for_client_ready(server_proc, name: str, timeout: float = 15.0) -> None:
+# How long _wait_for_client_ready is given, repeated here so the per-test budget
+# below can be derived rather than guessed.
+CLIENT_READY_TIMEOUT = 15.0
+
+# pytest.ini caps every test at 60 s, which is the reason the poll deadline used
+# to be exactly the resend window: the two dispatch_id-collision tests make four
+# sequential polls, and 15 + 4x10 = 55 s just fit under the cap. Raising the
+# polls off the boundary breaks that fit, and a pytest-timeout kill is a strictly
+# worse failure than a poll timeout — it loses the assertion messages, which
+# carry the server log. So give those tests a budget derived from the polls they
+# actually make. Only the worst case is longer; the happy path is unchanged,
+# since every poll returns as soon as its condition holds.
+COLLISION_TEST_TIMEOUT = CLIENT_READY_TIMEOUT + 4 * ACK_POLL_TIMEOUT + 30.0
+
+
+def _wait_for_client_ready(server_proc, name: str, timeout: float = CLIENT_READY_TIMEOUT) -> None:
     """Block until the server reports that the aircraft client `name` identified.
 
     The fake client connects, runs the protocol-version handshake (which is when
@@ -176,7 +210,7 @@ def test_command_ack_is_stored(db_conn, fake_client, server_proc):
         new_dbid = cur.fetchone()[0]
     db_conn.commit()
 
-    row = _poll_row(db_conn, new_dbid, timeout=10.0)
+    row = _poll_row(db_conn, new_dbid, timeout=ACK_POLL_TIMEOUT)
     assert row is not None, (
         f"command dbid={new_dbid} never got an ack stored; server log:\n"
         + server_proc["log"].read_text(errors="replace")
@@ -209,6 +243,7 @@ def _dispatch_rtl(db_conn, asset_id: int) -> int:
 
 @pytest.mark.satisfies("TC-SRV-004")
 @pytest.mark.requires_docker
+@pytest.mark.timeout(COLLISION_TEST_TIMEOUT)
 def test_ack_does_not_cross_assets_on_dispatch_id_collision(
     db_conn, fake_client, server_proc
 ):
@@ -248,13 +283,13 @@ def test_ack_does_not_cross_assets_on_dispatch_id_collision(
 
     # First dispatch to B: learn the dispatch_id its connection is currently at.
     b_first = _dispatch_rtl(db_conn, asset_b)
-    b_first_dispatch = _poll_field(db_conn, b_first, "dispatch_id", timeout=10.0)
+    b_first_dispatch = _poll_field(db_conn, b_first, "dispatch_id", timeout=ACK_POLL_TIMEOUT)
     assert b_first_dispatch is not None, (
         f"B's first command dbid={b_first} never recorded a dispatch_id; server log:\n"
         + server_proc["log"].read_text(errors="replace")
     )
     # Let B's own ack for this first command settle so it can't interfere later.
-    _poll_field(db_conn, b_first, "ack_state", timeout=10.0)
+    _poll_field(db_conn, b_first, "ack_state", timeout=ACK_POLL_TIMEOUT)
 
     # Pre-seed asset A with a band of database-only rows spanning the
     # dispatch_ids B's next command might use, each with a terminal superseded
@@ -282,8 +317,8 @@ def test_ack_does_not_cross_assets_on_dispatch_id_collision(
 
     # Second dispatch to B: lands on one dispatch_id in the band and is acked.
     b_second = _dispatch_rtl(db_conn, asset_b)
-    b_second_dispatch = _poll_field(db_conn, b_second, "dispatch_id", timeout=10.0)
-    b_second_state = _poll_ack_state(db_conn, b_second, ACK_STATE_ACTIONED, timeout=10.0)
+    b_second_dispatch = _poll_field(db_conn, b_second, "dispatch_id", timeout=ACK_POLL_TIMEOUT)
+    b_second_state = _poll_ack_state(db_conn, b_second, ACK_STATE_ACTIONED, timeout=ACK_POLL_TIMEOUT)
 
     # Guard the construction itself: if B's command did not collide with a seeded
     # row the test proves nothing, so fail loudly rather than pass vacuously.
@@ -320,6 +355,7 @@ def test_ack_does_not_cross_assets_on_dispatch_id_collision(
 
 @pytest.mark.satisfies("TC-SRV-004")
 @pytest.mark.requires_docker
+@pytest.mark.timeout(COLLISION_TEST_TIMEOUT)
 def test_ack_updates_only_the_latest_row_on_cross_session_dispatch_id_reuse(
     db_conn, fake_client, server_proc
 ):
@@ -349,12 +385,12 @@ def test_ack_updates_only_the_latest_row_on_cross_session_dispatch_id_reuse(
 
     # First dispatch: learn the connection's current dispatch_id.
     first = _dispatch_rtl(db_conn, asset)
-    first_dispatch = _poll_field(db_conn, first, "dispatch_id", timeout=10.0)
+    first_dispatch = _poll_field(db_conn, first, "dispatch_id", timeout=ACK_POLL_TIMEOUT)
     assert first_dispatch is not None, (
         f"first command dbid={first} never recorded a dispatch_id; server log:\n"
         + server_proc["log"].read_text(errors="replace")
     )
-    _poll_field(db_conn, first, "ack_state", timeout=10.0)
+    _poll_field(db_conn, first, "ack_state", timeout=ACK_POLL_TIMEOUT)
 
     # Seed OLD already-acked rows for the SAME asset across the band of
     # dispatch_ids the next live command might land on — the connection's
@@ -380,8 +416,8 @@ def test_ack_updates_only_the_latest_row_on_cross_session_dispatch_id_reuse(
 
     # New dispatch: lands on one dispatch_id in the band with a fresh timestamp.
     new_dbid = _dispatch_rtl(db_conn, asset)
-    new_dispatch = _poll_field(db_conn, new_dbid, "dispatch_id", timeout=10.0)
-    new_state = _poll_ack_state(db_conn, new_dbid, ACK_STATE_ACTIONED, timeout=10.0)
+    new_dispatch = _poll_field(db_conn, new_dbid, "dispatch_id", timeout=ACK_POLL_TIMEOUT)
+    new_state = _poll_ack_state(db_conn, new_dbid, ACK_STATE_ACTIONED, timeout=ACK_POLL_TIMEOUT)
 
     assert new_dispatch in collision_band, (
         f"setup failed to reuse dispatch_id: the new command got dispatch_id="
