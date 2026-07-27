@@ -690,8 +690,16 @@ auto flight_safety_system::client_ssl::fss_server::waitForOutboundWork()
     }
     work.reconnect = this->out_reconnect_pending;
     this->out_reconnect_pending = false;
-    work.sends.assign(std::make_move_iterator(this->pending_sends.begin()),
-                      std::make_move_iterator(this->pending_sends.end()));
+    /* Hand the whole queue over rather than moving element by element: this is
+     * a pointer swap, it cannot throw, and it leaves nothing to copy under the
+     * lock. The clear() is still required — a moved-from container is valid but
+     * unspecified, and pending_sends must be empty for the wait predicate.
+     *
+     * Element-wise (vector::assign over move_iterators) also tripped a GCC 14
+     * -Wnull-dereference false positive on the inlined shared_ptr swap chain,
+     * which is -Werror on Debian trixie. Not the reason for the change, but it
+     * is the reason not to quietly revert it. */
+    work.sends = std::move(this->pending_sends);
     this->pending_sends.clear();
     return work;
 }
