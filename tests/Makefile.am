@@ -2,10 +2,27 @@ AUTOMAKE_OPTIONS = subdir-objects
 ACLOCAL_AMFLAGS = $(ACLOCAL_FLAGS)
 AM_CXXFLAGS = -pthread -fPIC -std=c++17 -I. -Werror -Wall -Wshadow -Wunused -Wnull-dereference -Wformat=2 -pedantic -Wnon-virtual-dtor -Woverloaded-virtual -Wpedantic -Weffc++ -I$(top_srcdir)/src -include config.h $(CODE_COVERAGE_CXXFLAGS)
 
+# The C leg, for the one C source in the test binary (../src/server-db.c).
+# all_test_CFLAGS below must expand this rather than replace it, or that
+# translation unit is compiled uninstrumented and produces no .gcda — which is
+# what happened until todo/72.
+AM_CFLAGS = $(CODE_COVERAGE_CFLAGS)
+
+# --coverage must reach the *link* as well as the compile: it is what pulls in
+# libgcov. It already does so today via AM_CXXFLAGS, which automake's C++ link
+# rule passes to the linker as well as the compiler — so this line changes
+# nothing about the current build. It is here because that route is incidental:
+# a per-target all_test_CXXFLAGS that did not expand $(AM_CXXFLAGS) would
+# silently drop coverage from both the compile and the link at once (the
+# pattern concurrency_tsan_test_CXXFLAGS below already uses). AM_LDFLAGS is an
+# independent channel, and mirrors src/Makefile.am: assign coverage, then
+# append TSan.
+AM_LDFLAGS = $(CODE_COVERAGE_LDFLAGS)
+
 # Whole-tree ThreadSanitizer (empty unless --enable-tsan): instrument the test
 # objects and link all_test against the (also-instrumented) libraries with TSan.
 AM_CXXFLAGS += $(TSAN_CXXFLAGS)
-AM_LDFLAGS = $(TSAN_LDFLAGS)
+AM_LDFLAGS += $(TSAN_LDFLAGS)
 
 # EXTRA_DIST must stay outside every conditional: automake only distributes
 # conditional EXTRA_DIST entries when the condition was true in the tree that
@@ -62,7 +79,7 @@ nodist_all_test_SOURCES = ../src/server-db.c
 # Header search path belongs at the preprocessor layer so it applies to both
 # the C (server-db.c) and C++ sources, independent of CFLAGS/CXXFLAGS.
 all_test_CPPFLAGS = -I$(top_srcdir)/src
-all_test_CFLAGS = $(ECPG_CFLAGS)
+all_test_CFLAGS = $(AM_CFLAGS) $(ECPG_CFLAGS)
 all_test_LDADD = ../src/libfss-transport.la ../src/libfss-client-ssl.la ../src/libfss.la $(JSONCPP_LIBS) $(ECPG_LIBS)
 
 all_test_SOURCES += connection-ssl.cpp

@@ -2,10 +2,16 @@ AUTOMAKE_OPTIONS = subdir-objects
 ACLOCAL_AMFLAGS = $(ACLOCAL_FLAGS)
 AM_CXXFLAGS = -pthread -fPIC -std=c++17 -I. -Werror -Wall -Wshadow -Wunused -Wnull-dereference -Wformat=2 -pedantic -Wnon-virtual-dtor -Woverloaded-virtual -Wpedantic -Weffc++ -I$(top_srcdir)/src -include config.h
 
+# Nothing in examples/ is measured (AM_CXXFLAGS above carries no coverage
+# flags), so this is inert today. It is kept in step with tests/ and src/ so
+# that instrumenting examples/ later is a one-line change to AM_CXXFLAGS rather
+# than a two-line change someone half-makes.
+AM_LDFLAGS = $(CODE_COVERAGE_LDFLAGS)
+
 # Whole-tree ThreadSanitizer (empty unless --enable-tsan): the example binaries
 # link the instrumented libraries, so they must be built/linked with TSan too.
 AM_CXXFLAGS += $(TSAN_CXXFLAGS)
-AM_LDFLAGS = $(TSAN_LDFLAGS)
+AM_LDFLAGS += $(TSAN_LDFLAGS)
 
 bin_PROGRAMS =
 
