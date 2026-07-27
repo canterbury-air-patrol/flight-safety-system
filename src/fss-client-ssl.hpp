@@ -10,7 +10,6 @@
 #include <mutex>
 #include <random>
 #include <thread>
-#include <vector>
 
 namespace flight_safety_system {
 namespace client_ssl {
@@ -300,7 +299,11 @@ private:
     struct outbound_work {
         bool stop{false};
         bool reconnect{false};
-        std::vector<std::shared_ptr<const flight_safety_system::transport::buf_len>> sends{};
+        /* Same container type as pending_sends so waitForOutboundWork() can
+         * hand the queue over with a whole-container move rather than copying
+         * element by element. It is only ever iterated once, in order, so a
+         * deque costs the consumer nothing over a vector. */
+        std::deque<std::shared_ptr<const flight_safety_system::transport::buf_len>> sends{};
     };
     /* Block until there is work or a stop request, then atomically take and
      * clear the pending work. */
