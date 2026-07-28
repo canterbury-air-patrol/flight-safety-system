@@ -82,6 +82,61 @@ void flight_safety_system::server::db_connection::tryReconnectIfNeeded()
     }
 }
 
+auto flight_safety_system::server::db_connection::verifySchema() -> bool
+{
+    int check_error = 0;
+    struct schema_problem_s **problems = nullptr;
+    {
+        std::scoped_lock guard(this->read_lock);
+        problems = db_schema_check(read_conn_name, &check_error);
+    }
+
+    bool fatal = false;
+    if (problems != nullptr)
+    {
+        for (size_t i = 0; problems[i] != nullptr; i++)
+        {
+            const struct schema_problem_s *p = problems[i];
+            if (p->reason == SCHEMA_PROBLEM_MISSING)
+            {
+                /* Name every missing column before returning, so one restart
+                 * tells the operator the whole gap rather than the first of
+                 * several. */
+                FSS_LOG_ERROR("db", "Required database column " << p->table << "." << p->column << " is missing");
+                fatal = true;
+            }
+            else if (p->reason == SCHEMA_PROBLEM_MISSING_EXTENSION)
+            {
+                FSS_LOG_ERROR("db", "Required database extension " << p->column << " is not installed");
+                fatal = true;
+            }
+            else
+            {
+                /* Not fatal: a column widened past our buffer only bites once
+                 * something actually stores an over-long value, at which point
+                 * the truncation guards in server-db.pgc drop the row. Refusing
+                 * to start over it would turn a benign fss-web migration into a
+                 * fleet-wide outage — the failure this check exists to prevent. */
+                FSS_LOG_WARN("db", "Database column "
+                                       << p->table << "." << p->column << " holds up to " << p->actual_len
+                                       << " characters, which does not fit the server's " << (p->buffer_len - 1)
+                                       << "-character buffer; over-long values will be dropped");
+            }
+        }
+    }
+    db_free_schema_problems(problems);
+
+    if (check_error != 0)
+    {
+        /* The check could not be completed, so its result says nothing. A
+         * database that has just connected but cannot be introspected is a
+         * broken deployment; refuse and let the supervisor retry. */
+        FSS_LOG_ERROR("db", "Could not verify the database schema");
+        return false;
+    }
+    return !fatal;
+}
+
 flight_safety_system::server::db_connection::~db_connection()
 {
     {

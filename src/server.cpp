@@ -325,6 +325,17 @@ auto main(int argc, char *argv[]) -> int
         return 1;
     }
 
+    /* Before anything is allocated and long before the listener binds: a
+     * database missing a column we write is not a degraded server, it is a
+     * fleet-wide sever waiting for the first command dispatch to trip the
+     * fail-safe. Refuse here, where it costs one restart
+     * (docs/decisions/73-startup-schema-verification.md). */
+    if (!dbc->verifySchema())
+    {
+        FSS_LOG_ERROR("server", "Database schema check failed; aborting");
+        return 1;
+    }
+
     flight_safety_system::server::db_write_sink sink =
         [dbc](const flight_safety_system::server::db_write_task &task) -> void {
         std::visit(

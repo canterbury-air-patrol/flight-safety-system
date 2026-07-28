@@ -700,6 +700,301 @@ int db_ping(const char *conn_arg)
     return (sqlca.sqlcode >= 0) ? 1 : 0;
 }
 
+/* Postgres caps identifiers at 63 characters; every name in required_columns
+ * below is far shorter, and the rows fetched by db_schema_check come back from
+ * a VALUES list built out of that same array, so a fetch into these buffers
+ * cannot truncate. */
+#define SCHEMA_IDENT_LEN 64
+
+struct required_column_s {
+    const char *table;
+    const char *column;
+    int buffer_len;
+};
+
+/* Every column the statements in this file read or write. THIS LIST IS PART OF
+ * THE STATEMENTS ABOVE: add a column to a query, add it here. db_schema_check()
+ * is what stops the server booting against a database that cannot serve it, and
+ * it knows only what this table tells it.
+ *
+ * The tables belong to fss-web, a separate repository, and are created by its
+ * Django migrations -- so this list is also the machine-readable statement of
+ * what FSS requires of a deployment (see docs/decisions/73-startup-schema-
+ * verification.md). The command-ack columns on assets_assetcommand are the ones
+ * that actually bite: they arrived with fss-web's assets migration 0008, and a
+ * deployment missing it severs the whole fleet on the first command.
+ *
+ * buffer_len is the sizeof() of the fixed host variable the column is fetched
+ * into, so the widest value that survives is buffer_len - 1: ECPG fills the
+ * buffer to capacity and leaves no room for a terminator, and the truncation
+ * guards above then drop the row. 0 means the column is never fetched into a
+ * fixed buffer, and its declared width is nobody's business here. */
+static const struct required_column_s required_columns[] = {
+    {"assets_asset", "id", 0},
+    {"assets_asset", "name", 0},
+    {"assets_assetposition", "asset_id", 0},
+    {"assets_assetposition", "position", 0},
+    {"assets_assetposition", "altitude", 0},
+    {"assets_assetposition", "timestamp", 0},
+    {"assets_assetrtt", "asset_id", 0},
+    {"assets_assetrtt", "rtt", 0},
+    {"assets_assetrtt", "timestamp", 0},
+    {"assets_assetstatus", "asset_id", 0},
+    {"assets_assetstatus", "bat_percent", 0},
+    {"assets_assetstatus", "bat_used_mah", 0},
+    {"assets_assetstatus", "bat_volt", 0},
+    {"assets_assetstatus", "timestamp", 0},
+    {"assets_assetsearchprogress", "asset_id", 0},
+    {"assets_assetsearchprogress", "search", 0},
+    {"assets_assetsearchprogress", "search_progress", 0},
+    {"assets_assetsearchprogress", "search_progress_of", 0},
+    {"assets_assetsearchprogress", "timestamp", 0},
+    {"assets_assetcommand", "id", 0},
+    {"assets_assetcommand", "asset_id", 0},
+    {"assets_assetcommand", "command", COMMAND_LEN},
+    {"assets_assetcommand", "position", 0},
+    {"assets_assetcommand", "altitude", 0},
+    {"assets_assetcommand", "timestamp", 0},
+    {"assets_assetcommand", "dispatch_id", 0},
+    {"assets_assetcommand", "ack_state", 0},
+    {"assets_assetcommand", "ack_timestamp", 0},
+    {"assets_assetcommand", "ack_superseded_by", 0},
+    {"config_smmconfig", "id", 0},
+    {"config_smmconfig", "address", SMM_SERVER_LEN},
+    {"config_smmconfig", "port", 0},
+    {"config_smmconfig", "https", 0},
+    {"config_assetconfig", "asset_id", 0},
+    {"config_assetconfig", "smm_id", 0},
+    {"config_assetconfig", "smm_login", SMM_LOGIN_LEN},
+    {"config_assetconfig", "smm_password", SMM_PASSWORD_LEN},
+    {"config_serverconfig", "address", SMM_SERVER_LEN},
+    {"config_serverconfig", "client_port", 0},
+    {"config_serverconfig", "active", 0},
+};
+
+/* Appends one problem to the NULL-terminated array, returning the (possibly
+ * reallocated) array. Returns NULL if the entry could not be allocated, leaving
+ * the caller's array untouched and valid -- the caller turns that into a check
+ * failure rather than dropping the problem, because a dropped MISSING entry
+ * would let the server start against a schema that cannot serve it. */
+static struct schema_problem_s **
+schema_problem_append(struct schema_problem_s **problems, size_t *len, const char *table, const char *column,
+                      int reason, int actual_len, int buffer_len)
+{
+    struct schema_problem_s *p = (struct schema_problem_s *)malloc(sizeof(struct schema_problem_s));
+    if (p == NULL)
+    {
+        return NULL;
+    }
+    p->table = strdup(table);
+    p->column = strdup(column);
+    if (p->table == NULL || p->column == NULL)
+    {
+        free(p->table);
+        free(p->column);
+        free(p);
+        return NULL;
+    }
+    p->reason = reason;
+    p->actual_len = actual_len;
+    p->buffer_len = buffer_len;
+
+    /* Grow first and only publish a fully-built entry: a NULL written into the
+     * middle of the array would act as a premature terminator for the caller,
+     * the same hazard db_asset_commands_get guards against. realloc leaves the
+     * original block valid on failure, so the caller's array survives. */
+    struct schema_problem_s **grown =
+        (struct schema_problem_s **)realloc(problems, sizeof(struct schema_problem_s *) * (*len + 2));
+    if (grown == NULL)
+    {
+        free(p->table);
+        free(p->column);
+        free(p);
+        return NULL;
+    }
+    grown[*len] = p;
+    (*len)++;
+    grown[*len] = NULL;
+    return grown;
+}
+
+struct schema_problem_s **db_schema_check(const char *conn_arg, int *error_out)
+{
+    if (error_out != NULL)
+    {
+        *error_out = 0;
+    }
+
+    size_t len = 0;
+    struct schema_problem_s **res = (struct schema_problem_s **)malloc(sizeof(struct schema_problem_s *));
+    if (res == NULL)
+    {
+        if (error_out != NULL)
+        {
+            *error_out = 1;
+        }
+        return NULL;
+    }
+    res[0] = NULL;
+
+    /* Build "... FROM (VALUES ('table','column','16'),...) AS r(tbl,col,buflen)"
+     * from required_columns. Every value concatenated in is a compile-time
+     * string constant or a small integer from that same array -- none of it is
+     * reachable from a client -- so this cannot inject SQL, the same argument
+     * db_asset_commands_get makes for its id list. All three columns are emitted
+     * as quoted literals (they resolve to text) and buflen is cast where it is
+     * used, which keeps the row format uniform. */
+    static const char *sql_prefix =
+        "SELECT r.tbl, r.col, r.buflen::int, "
+        "CASE WHEN c.column_name IS NULL THEN 0 ELSE 1 END, "
+        "COALESCE(c.character_maximum_length, 0) "
+        "FROM (VALUES ";
+    static const char *sql_suffix =
+        ") AS r(tbl, col, buflen) "
+        "LEFT JOIN information_schema.columns c "
+        "ON c.table_name::text = r.tbl AND c.column_name::text = r.col "
+        "AND c.table_schema::text = ANY (current_schemas(false)::text[]) "
+        "WHERE c.column_name IS NULL "
+        "OR (r.buflen::int > 0 AND c.character_maximum_length >= r.buflen::int) "
+        "ORDER BY r.tbl, r.col";
+    const size_t required_count = sizeof(required_columns) / sizeof(required_columns[0]);
+    /* Per row: two quoted identifiers of at most SCHEMA_IDENT_LEN, a quoted
+     * integer, and the punctuation around them. */
+    const size_t row_max = (2 * SCHEMA_IDENT_LEN) + 32;
+    size_t buf_size = strlen(sql_prefix) + strlen(sql_suffix) + (required_count * row_max) + 1;
+    char *query_buf = (char *)malloc(buf_size);
+    if (query_buf == NULL)
+    {
+        if (error_out != NULL)
+        {
+            *error_out = 1;
+        }
+        return res;
+    }
+    int written = snprintf(query_buf, buf_size, "%s", sql_prefix);
+    size_t off = (written < 0) ? 0 : (size_t)written;
+    for (size_t i = 0; i < required_count; i++)
+    {
+        written = snprintf(query_buf + off, buf_size - off, "%s('%s','%s','%d')", (i == 0) ? "" : ",",
+                           required_columns[i].table, required_columns[i].column, required_columns[i].buffer_len);
+        off += (written < 0) ? 0 : (size_t)written;
+    }
+    snprintf(query_buf + off, buf_size - off, "%s", sql_suffix);
+
+    EXEC SQL BEGIN DECLARE SECTION;
+    const char *conn = conn_arg;
+    const char *query = query_buf;
+    char r_table[SCHEMA_IDENT_LEN];
+    char r_column[SCHEMA_IDENT_LEN];
+    int r_buflen = 0;
+    int r_present = 0;
+    int r_actual = 0;
+    int postgis_present = 0;
+    EXEC SQL END DECLARE SECTION;
+
+    /* Every position read and write goes through ST_MakePoint / ST_X / ST_Y, so
+     * a database without PostGIS fails exactly as a database without the ack
+     * columns does -- late, and as a write failure feeding the fail-safe. Report
+     * it in the same list rather than leaving it to be discovered in flight. */
+    EXEC SQL AT :conn SELECT COUNT(*) INTO :postgis_present FROM pg_extension WHERE extname = 'postgis';
+    if (sqlca.sqlcode < 0)
+    {
+        sqlprint();
+        if (error_out != NULL)
+        {
+            *error_out = 1;
+        }
+        free(query_buf);
+        return res;
+    }
+    if (postgis_present == 0)
+    {
+        struct schema_problem_s **grown = schema_problem_append(res, &len, "pg_extension", "postgis",
+                                                                SCHEMA_PROBLEM_MISSING_EXTENSION, 0, 0);
+        if (grown == NULL)
+        {
+            if (error_out != NULL)
+            {
+                *error_out = 1;
+            }
+        }
+        else
+        {
+            res = grown;
+        }
+    }
+
+    /* Cursor over a dynamically-prepared statement, the same AUTOCOMMIT OFF /
+     * DECLARE / OPEN / FETCH-loop / CLOSE idiom as db_asset_commands_get. */
+    EXEC SQL AT :conn SET AUTOCOMMIT TO OFF;
+    EXEC SQL AT :conn PREPARE schemastmt FROM :query;
+    EXEC SQL AT :conn DECLARE schemacur CURSOR FOR schemastmt;
+    EXEC SQL AT :conn OPEN schemacur;
+
+    EXEC SQL WHENEVER NOT FOUND DO BREAK;
+    EXEC SQL WHENEVER SQLERROR DO BREAK;
+    while (1)
+    {
+        EXEC SQL AT :conn FETCH FROM schemacur INTO :r_table, :r_column, :r_buflen, :r_present, :r_actual;
+
+        int reason = (r_present == 0) ? SCHEMA_PROBLEM_MISSING : SCHEMA_PROBLEM_TOO_WIDE;
+        struct schema_problem_s **grown = schema_problem_append(res, &len, r_table, r_column, reason,
+                                                                (reason == SCHEMA_PROBLEM_MISSING) ? 0 : r_actual,
+                                                                (reason == SCHEMA_PROBLEM_MISSING) ? 0 : r_buflen);
+        if (grown == NULL)
+        {
+            if (error_out != NULL)
+            {
+                *error_out = 1;
+            }
+        }
+        else
+        {
+            res = grown;
+        }
+    }
+    EXEC SQL WHENEVER NOT FOUND CONTINUE;
+    EXEC SQL WHENEVER SQLERROR CONTINUE;
+
+    /* sqlca still reflects the FETCH that ended the loop. A negative sqlcode is a
+     * mid-cursor error rather than the normal NOT FOUND (100): the list is
+     * partial, and a partial schema check must not read as a clean one. Capture
+     * it before CLOSE / SET AUTOCOMMIT overwrite sqlca. */
+    if (sqlca.sqlcode < 0)
+    {
+        sqlprint();
+        if (error_out != NULL)
+        {
+            *error_out = 1;
+        }
+    }
+
+    EXEC SQL AT :conn CLOSE schemacur;
+    EXEC SQL AT :conn DEALLOCATE PREPARE schemastmt;
+    EXEC SQL AT :conn SET AUTOCOMMIT TO ON;
+
+    free(query_buf);
+    return res;
+}
+
+void db_free_schema_problems(struct schema_problem_s **problems)
+{
+    if (problems == NULL)
+    {
+        return;
+    }
+    /* Frees the entries as well as the array -- unlike db_free_fss_servers and
+     * db_free_asset_commands, whose callers take ownership of individual rows as
+     * they consume them. Nothing here outlives the caller's single pass. */
+    for (size_t i = 0; problems[i] != NULL; i++)
+    {
+        free(problems[i]->table);
+        free(problems[i]->column);
+        free(problems[i]);
+    }
+    free(problems);
+}
+
 void db_free_fss_servers(struct fss_server_s **servers)
 {
     free(servers);
