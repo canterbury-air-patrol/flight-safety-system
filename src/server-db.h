@@ -8,6 +8,42 @@ int db_connect(const char *conn, const char *host, int port, const char *user, c
 void db_disconnect(const char *conn);
 int db_ping(const char *conn);
 
+/* Something this file's statements depend on that the database cannot serve.
+ * SCHEMA_PROBLEM_MISSING (a column) and SCHEMA_PROBLEM_MISSING_EXTENSION are
+ * fatal -- the statements using them can only ever fail.
+ * SCHEMA_PROBLEM_TOO_WIDE means the column is declared wide enough to overflow
+ * the fixed host buffer it is fetched into, so an over-long value would be
+ * truncated and the row silently dropped; actual_len and buffer_len describe
+ * that, and are 0 for the other two. */
+#define SCHEMA_PROBLEM_MISSING 0
+#define SCHEMA_PROBLEM_TOO_WIDE 1
+#define SCHEMA_PROBLEM_MISSING_EXTENSION 2
+
+/* For SCHEMA_PROBLEM_MISSING_EXTENSION, table is the catalogue the extension
+ * would have been found in and column is the extension name. */
+struct schema_problem_s {
+    char *table;
+    char *column;
+    int reason;
+    int actual_len;
+    int buffer_len;
+};
+
+/* Checks the database carries every column the statements in server-db.pgc
+ * read or write, plus the PostGIS extension they all depend on. Returns a
+ * NULL-terminated array of the problems found; an empty (non-NULL) array means
+ * the schema is usable. error_out (may be NULL) is set to 1 if the check itself
+ * could not be completed -- a failed query, or an allocation failure that would
+ * otherwise have dropped a problem from the list -- so an incomplete check is
+ * never mistaken for a clean one.
+ *
+ * Ownership differs from db_free_asset_commands / db_free_fss_servers: the
+ * caller consumes the whole list in one pass rather than taking rows out of it,
+ * so db_free_schema_problems frees the entries and their strings as well as the
+ * array. */
+struct schema_problem_s **db_schema_check(const char *conn, int *error_out);
+void db_free_schema_problems(struct schema_problem_s **problems);
+
 /* error_out (may be NULL) is set to 1 when the query itself failed (e.g. the
  * connection is down), distinct from a 0 return for a genuinely unknown
  * asset name (todo/60) -- mirrors the db_active_fss_servers_get(..., int

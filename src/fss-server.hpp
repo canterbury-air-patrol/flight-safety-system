@@ -193,6 +193,14 @@ public:
     auto getSmmSettings(uint64_t asset_id) -> std::shared_ptr<smm_settings> override;
     auto isConnected() const -> bool override;
     void tryReconnectIfNeeded() override;
+    /* Startup gate: checks the connected database carries every column
+     * server-db.pgc reads or writes, logging each problem it finds. Returns
+     * false if the server must not start — a missing column, or a check that
+     * could not be completed. A column merely wide enough to overflow a host
+     * buffer is logged as a warning and does not stop the server. Deliberately
+     * not on IDatabase: no client handler needs it, and a mock database has no
+     * schema to check. See docs/decisions/73-startup-schema-verification.md. */
+    auto verifySchema() -> bool;
 };
 
 class fss_client_rtt {
