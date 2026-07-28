@@ -8,6 +8,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **The server verifies the database schema at startup and refuses to run
+  without it** (todo/73,
+  `docs/decisions/73-startup-schema-verification.md`). The tables FSS reads and
+  writes belong to `fss-web`, a separate repository, and are created by its
+  Django migrations; nothing checked that the deployed database actually had
+  them. A deployment whose `fss-web` had not applied the migration carrying the
+  command-ack columns started cleanly, accepted every aircraft, and then severed
+  the entire fleet on the first command dispatch — permanently, because the
+  fail-safe cannot clear while the schema is still wrong. The server now
+  anti-joins every column its statements touch against `information_schema`
+  (plus the PostGIS extension) before the listener binds, and refuses to start
+  naming what is missing. A column merely declared wider than the host buffer it
+  is read into warns instead of refusing, so a benign widening migration cannot
+  itself cause an outage. There is no config key to skip the check.
+  **Deployments require `fss-web`'s `assets` migration 0008 or later**
+  (`dispatch_id`, `ack_state`, `ack_timestamp`, `ack_superseded_by` on
+  `assets_assetcommand`); this is now stated in the README and
+  `docs/release-checklist.md`. Provisioning the e2e schema from `fss-web`'s real
+  migrations, which would catch a breaking migration when it lands rather than
+  when it deploys, remains open.
 - A tracked design record under `docs/` (todo/54). The project's settled design
   decisions previously lived only in the gitignored `todo/` directory, which
   code comments, changelog entries and commit messages all cite by number — so

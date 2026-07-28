@@ -53,7 +53,27 @@ Two build traps this step walks straight into:
   into its `.la`, and `make install` then writes to the previous prefix. Remove
   the `.la` files and `make` again before `make install`.
 
-## 2. Version numbers
+## 2. Check what the release requires of fss-web
+
+The database belongs to
+[fss-web](https://github.com/canterbury-air-patrol/flight-safety-system-web/),
+not to this project. A release that reads or writes a column fss-web has not
+migrated is not a degraded deployment — it severs the fleet on the first command
+and cannot recover, because the schema stays wrong
+(see [decision 73](decisions/73-startup-schema-verification.md)).
+
+**As of this release, FSS requires fss-web's `assets` migration 0008 or later**,
+which provides `dispatch_id`, `ack_state`, `ack_timestamp` and
+`ack_superseded_by` on `assets_assetcommand`. The server verifies this at
+startup and refuses to run against a database without them, so the failure is a
+restart rather than an outage — but the requirement still has to reach whoever
+does the deploy, in the release notes, ahead of it.
+
+If this release added or changed any column in `required_columns[]`
+(`src/server-db.pgc`), raise the minimum stated above, here and in the README's
+*Running the Server* section, and say so in `CHANGELOG.md`.
+
+## 3. Version numbers
 
 Bump, in this order, and keep them consistent:
 
@@ -64,7 +84,7 @@ Bump, in this order, and keep them consistent:
   and call out any soname change explicitly under a "consumers must rebuild"
   note
 
-## 3. Verify
+## 4. Verify
 
 - `./check-code.sh` — clean
 - `make check` — the full unit suite
@@ -76,7 +96,7 @@ Bump, in this order, and keep them consistent:
   so a header missing from the tarball fails here rather than at a user's site
 - the e2e suite (`make e2e-test`; requires Docker and Python)
 
-## 4. Tag and publish
+## 5. Tag and publish
 
 Tag on the `release/X.Y` branch. Fast-forward `master` to the tag.
 

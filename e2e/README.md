@@ -54,13 +54,28 @@ make e2e-test
 time. If the server starts referencing a new column, this file needs a
 matching edit.
 
-The plan's **primary schema provisioning path** — running the `fss-web`
-Django container's `manage.py migrate` against the same Postgres — is not
-implemented here because `fss-web` is a separate repo. To switch over:
+**The deploy-time half of this is now covered by the server itself.** It
+verifies the schema at startup against `required_columns[]` in
+`src/server-db.pgc` and refuses to run against a database missing anything it
+needs, so a production deployment against an un-migrated `fss-web` fails
+visibly instead of severing the fleet on the first command
+(`test_schema_check.py`, and
+[docs/decisions/73](../docs/decisions/73-startup-schema-verification.md)).
+
+What remains open is the **test-time** gap: this file is still an unverified
+copy of another repository's migrations, so a breaking fss-web migration is
+caught on the day it is deployed rather than the day it lands. The plan's
+**primary schema provisioning path** — running the `fss-web` Django
+container's `manage.py migrate` against the same Postgres — is not implemented
+here because `fss-web` is a separate repo. To switch over:
 
 1. Add an `fss-web` fixture that runs `docker run --rm -e DB_HOST=... fss-web
    python manage.py migrate --noinput` against `pg_container`.
 2. Remove `schema/001_init.sql` (or keep as a fallback).
+
+That needs fss-web's CI owner; the fallback is a checked-in
+`information_schema` dump from a migrated fss-web database, diffed against the
+live e2e database by a test.
 
 ## Writing new tests
 
