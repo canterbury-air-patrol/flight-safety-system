@@ -247,12 +247,13 @@ TEST_CASE("db_connection: getActiveServers returns pre-configured server")
 }
 
 namespace {
-/* Flip the todo/41 truncation-fixture row's active flag via psql, mirroring
- * docker/db-unit-test-entrypoint.sh's own fixture-seeding approach (no raw
- * SQL capability is exposed through db_connection's public API). The row is
- * seeded inactive by that script so no other getActiveServers() test ever
- * sees it; this helper activates it only for the duration of one test. */
-auto set_truncated_server_active(bool active) -> int
+/* Run one statement against the live test database via psql, mirroring
+ * docker/db-unit-test-entrypoint.sh's own fixture-seeding approach: no raw SQL
+ * capability is exposed through db_connection's public API, and some fixtures
+ * (and every DDL change) cannot be expressed through it. Returns psql's exit
+ * status. `sql` is built from literals in this file, never from anything a
+ * client could reach. */
+auto run_psql(const std::string &sql) -> int
 {
     const char *host = std::getenv("TEST_DB_HOST");
     const char *port = std::getenv("TEST_DB_PORT");
@@ -269,10 +270,21 @@ auto set_truncated_server_active(bool active) -> int
     cmd += (user != nullptr ? user : "postgres");
     cmd += " -d ";
     cmd += (dbname != nullptr ? dbname : "postgres");
-    cmd += " -c \"UPDATE config_serverconfig SET active = ";
-    cmd += (active ? "true" : "false");
-    cmd += " WHERE name = 'test-server-truncated'\" > /dev/null";
+    cmd += " -v ON_ERROR_STOP=1 -c \"";
+    cmd += sql;
+    cmd += "\" > /dev/null";
     return std::system(cmd.c_str());
+}
+
+/* Flip the todo/41 truncation-fixture row's active flag. The row is seeded
+ * inactive by that script so no other getActiveServers() test ever sees it;
+ * this helper activates it only for the duration of one test. */
+auto set_truncated_server_active(bool active) -> int
+{
+    std::string sql = "UPDATE config_serverconfig SET active = ";
+    sql += (active ? "true" : "false");
+    sql += " WHERE name = 'test-server-truncated'";
+    return run_psql(sql);
 }
 
 /* RAII: guarantees the fixture row is deactivated again even if the body of
@@ -601,4 +613,63 @@ TEST_CASE("db_connection: recordCommandDispatch reopens the ack cycle")
     REQUIRE(get_command_column(command_id, "ack_state") == "2");
     REQUIRE(get_command_column(command_id, "ack_timestamp") == "200");
     REQUIRE(get_command_column(command_id, "ack_superseded_by") == "2");
+}
+
+TEST_CASE("db_connection: verifySchema accepts the provisioned schema")
+{
+    /* The negative case below is only meaningful if the positive one holds:
+     * required_columns[] in server-db.pgc must not have drifted ahead of the
+     * schema the suite actually runs against (e2e/schema/001_init.sql, mounted
+     * by docker-compose.db-unit-tests.yaml). A failure here means the list and
+     * the schema disagree -- which is the whole point of the check, fired at
+     * the one moment it is cheap to fix. */
+    LIVE_DB_OR_SKIP(dbc);
+    REQUIRE(dbc->verifySchema());
+}
+
+namespace {
+/* RAII: drops one column for the duration of a test and puts it back. The
+ * restore is unconditional -- the unit suite shares one long-lived database
+ * across every TEST_CASE, so a column left dropped would fail every later test
+ * that touches assets_assetcommand rather than just this one.
+ *
+ * CHECK, not REQUIRE, in the destructor: it is implicitly noexcept, and a
+ * REQUIRE failure throws Catch2's test-failure exception, which would call
+ * std::terminate when thrown while already unwinding from the test body's own
+ * failure (same reasoning as scoped_truncated_server_active above). */
+class scoped_dropped_column {
+private:
+    std::string table_;
+    std::string column_;
+    std::string type_;
+public:
+    scoped_dropped_column(std::string table, std::string column, std::string type)
+        : table_(std::move(table)), column_(std::move(column)), type_(std::move(type))
+    {
+        REQUIRE(run_psql("ALTER TABLE " + table_ + " DROP COLUMN " + column_) == 0);
+    }
+    scoped_dropped_column(const scoped_dropped_column &) = delete;
+    scoped_dropped_column(scoped_dropped_column &&) = delete;
+    auto operator=(const scoped_dropped_column &) -> scoped_dropped_column & = delete;
+    auto operator=(scoped_dropped_column &&) -> scoped_dropped_column & = delete;
+    ~scoped_dropped_column() { CHECK(run_psql("ALTER TABLE " + table_ + " ADD COLUMN " + column_ + " " + type_) == 0); }
+};
+} // namespace
+
+TEST_CASE("db_connection: verifySchema refuses a database missing an ack column (todo/73)")
+{
+    /* The failure this exists to catch: fss-web deployed without the migration
+     * that adds the command-ack columns. Every db_command_set_dispatch_id and
+     * db_command_record_ack would then fail, the write queue would count those
+     * failures, and the fail-safe would sever the whole fleet ~5 s after the
+     * first command -- with no way back, because the schema is still wrong.
+     * Refusing to start is the whole remedy, so assert it at the seam that
+     * decides. The process-level half (exit status, and the log naming the
+     * column) is e2e/test_schema_check.py.
+     *
+     * ack_state is nullable with no default, index or constraint, so dropping
+     * and re-adding it restores the table exactly. */
+    LIVE_DB_OR_SKIP(dbc);
+    scoped_dropped_column guard("assets_assetcommand", "ack_state", "SMALLINT");
+    REQUIRE_FALSE(dbc->verifySchema());
 }
