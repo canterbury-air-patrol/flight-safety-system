@@ -92,7 +92,14 @@ struct asset_command_s {
     int altitude_null;
 };
 
-struct asset_command_s *db_asset_command_get(const char *conn, unsigned long long asset_id_arg);
+/* The asset's newest command row, or NULL when it has none. error_out (may be
+ * NULL) is set to 1 when the read itself failed -- a query error or an
+ * allocation failure -- so a read outage on the path that carries TERM and
+ * DISARM is never returned as "no pending command" (todo/69, the
+ * db_get_asset_id convention above). A row whose command string was truncated
+ * is reported as absent rather than as a failure: it is named on stderr and is
+ * undispatchable either way. */
+struct asset_command_s *db_asset_command_get(const char *conn, unsigned long long asset_id_arg, int *error_out);
 
 /* One newest-command row per asset, as returned by the batched read below.
  * Carries the same fields as asset_command_s plus the asset_id it belongs to,
@@ -139,7 +146,12 @@ struct smm_settings_s {
     char *password;
 };
 
-struct smm_settings_s *db_asset_smm_settings_get(const char *conn, unsigned long long asset_id_arg);
+/* The asset's SMM settings, or NULL when it has none configured. error_out (may
+ * be NULL) is set to 1 when the read itself failed -- a query error or an
+ * allocation failure -- so the caller can keep its cached settings instead of
+ * overwriting them with a failure (todo/69). Truncated credentials are reported
+ * as absent rather than as a failure, as in db_asset_command_get. */
+struct smm_settings_s *db_asset_smm_settings_get(const char *conn, unsigned long long asset_id_arg, int *error_out);
 
 struct fss_server_s {
     char *address;

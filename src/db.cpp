@@ -235,6 +235,7 @@ void flight_safety_system::server::db_connection::recordPosition(uint64_t asset_
 auto flight_safety_system::server::db_connection::getCommand(uint64_t asset_id) -> std::shared_ptr<asset_command>
 {
     std::shared_ptr<asset_command> res = nullptr;
+    int fetch_error = 0;
     {
         std::scoped_lock guard(this->read_lock);
         // Own the malloc'd C struct via RAII so it is freed on every exit
@@ -247,13 +248,20 @@ auto flight_safety_system::server::db_connection::getCommand(uint64_t asset_id) 
             }
         };
         std::unique_ptr<struct asset_command_s, decltype(cmd_deleter)> command(
-            db_asset_command_get(read_conn_name, asset_id), cmd_deleter);
+            db_asset_command_get(read_conn_name, asset_id, &fetch_error), cmd_deleter);
         if (command)
         {
             res = std::make_shared<asset_command>(command->dbid, command->timestamp, std::string(command->command),
                                                   command->latitude, command->longitude, command->altitude,
                                                   command->altitude_null == 0);
         }
+    }
+    /* Logged rather than returned for now: the caller still cannot tell this
+     * from "no pending command" until getCommand reports failure by status
+     * (todo/69). Called once per identify, so no throttling is needed. */
+    if (fetch_error != 0)
+    {
+        FSS_LOG_ERROR("db", "pending-command read failed for asset " << asset_id);
     }
     return res;
 }
@@ -308,6 +316,7 @@ auto flight_safety_system::server::db_connection::getCommands(const std::vector<
 auto flight_safety_system::server::db_connection::getSmmSettings(uint64_t asset_id) -> std::shared_ptr<smm_settings>
 {
     std::shared_ptr<smm_settings> res = nullptr;
+    int fetch_error = 0;
     {
         std::scoped_lock guard(this->read_lock);
         // Own the malloc'd C struct via RAII so it is freed -- and the
@@ -331,7 +340,7 @@ auto flight_safety_system::server::db_connection::getSmmSettings(uint64_t asset_
             }
         };
         std::unique_ptr<struct smm_settings_s, decltype(settings_deleter)> settings(
-            db_asset_smm_settings_get(read_conn_name, asset_id), settings_deleter);
+            db_asset_smm_settings_get(read_conn_name, asset_id, &fetch_error), settings_deleter);
         if (settings)
         {
             res = std::make_shared<smm_settings>(
@@ -339,6 +348,14 @@ auto flight_safety_system::server::db_connection::getSmmSettings(uint64_t asset_
                 flight_safety_system::secure_string(std::string_view(settings->username)),
                 flight_safety_system::secure_string(std::string_view(settings->password)));
         }
+    }
+    /* Logged rather than returned for now: the caller's interim guard in
+     * refreshSmmSettings() has to hold the cache on any empty result because it
+     * cannot tell this from a deleted settings row (todo/69). Called at
+     * identify and on the 15 s poller refresh, so no throttling is needed. */
+    if (fetch_error != 0)
+    {
+        FSS_LOG_ERROR("db", "SMM settings read failed for asset " << asset_id);
     }
     return res;
 }
