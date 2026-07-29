@@ -273,8 +273,13 @@ int db_command_record_ack(const char *conn_arg, unsigned long long asset_id_arg,
 }
 
 struct asset_command_s *
-db_asset_command_get(const char *conn_arg, unsigned long long asset_id_arg)
+db_asset_command_get(const char *conn_arg, unsigned long long asset_id_arg, int *error_out)
 {
+    if (error_out != NULL)
+    {
+        *error_out = 0;
+    }
+
     EXEC SQL BEGIN DECLARE SECTION;
     const char *conn = conn_arg;
     unsigned long long asset_id = asset_id_arg;
@@ -292,13 +297,33 @@ db_asset_command_get(const char *conn_arg, unsigned long long asset_id_arg)
 
     EXEC SQL AT :conn SELECT 1, AC.id, (extract(epoch from AC.timestamp) * 1000)::bigint, AC.command, ST_Y(AC.position::geometry), ST_X(AC.position::geometry), AC.altitude INTO :success, :id, :ts, :command, :lat :lat_ind, :lng :lng_ind, :alt :alt_ind FROM assets_assetcommand AS AC WHERE AC.asset_id = :asset_id ORDER BY AC.timestamp DESC LIMIT 1;
 
+    if (sqlca.sqlcode < 0)
+    {
+        /* The query itself failed (connection down, etc.). Without error_out
+         * that is indistinguishable from a NOT FOUND -- "this asset has no
+         * pending command" -- on the read that carries TERM and DISARM
+         * (todo/69), the same split db_get_asset_id makes. */
+        sqlprint();
+        if (error_out != NULL)
+        {
+            *error_out = 1;
+        }
+        return NULL;
+    }
+
     if (success == 1 && sqlca.sqlwarn[1] == 'W')
     {
         /* The command host variable was truncated (a DB command string longer
          * than COMMAND_LEN). A truncated command must not be dispatched: it
          * would silently become a different (or unknown) command. Treat the row
          * as absent and say why, mirroring the truncation guard in
-         * db_asset_smm_settings_get. */
+         * db_asset_smm_settings_get.
+         *
+         * Deliberately NOT an error_out failure, unlike the truncation guard in
+         * db_active_fss_servers_get: this is one identified row, named on
+         * stderr, and it is undispatchable whatever we report. Reporting a read
+         * failure would make the batched sibling blind the whole fleet's
+         * command polling on a single bad row until an operator fixed it. */
         fprintf(stderr, "command for asset %llu exceeds buffer size; ignoring row\n", asset_id);
         success = 0;
     }
@@ -307,25 +332,35 @@ db_asset_command_get(const char *conn_arg, unsigned long long asset_id_arg)
     if (success == 1)
     {
         res = malloc(sizeof(struct asset_command_s));
-        if (res != NULL)
+        if (res == NULL)
         {
-            res->command = strdup(command);
-            if (res->command == NULL)
+            /* Out of memory is not "no pending command" either. */
+            if (error_out != NULL)
             {
-                free(res);
-                return NULL;
+                *error_out = 1;
             }
-            res->dbid = id;
-            res->timestamp = ts;
-            /* A NULL position must not decode as (0,0) -- Null Island is a
-             * legal coordinate, so a GOTO built from it would dispatch.  Map
-             * NULL to NaN, which the dispatch layer's coordinate validation
-             * refuses.  Altitude has no NaN, so carry an explicit flag. */
-            res->latitude = (lat_ind < 0) ? NAN : lat;
-            res->longitude = (lng_ind < 0) ? NAN : lng;
-            res->altitude = alt;
-            res->altitude_null = (alt_ind < 0);
+            return NULL;
         }
+        res->command = strdup(command);
+        if (res->command == NULL)
+        {
+            free(res);
+            if (error_out != NULL)
+            {
+                *error_out = 1;
+            }
+            return NULL;
+        }
+        res->dbid = id;
+        res->timestamp = ts;
+        /* A NULL position must not decode as (0,0) -- Null Island is a
+         * legal coordinate, so a GOTO built from it would dispatch.  Map
+         * NULL to NaN, which the dispatch layer's coordinate validation
+         * refuses.  Altitude has no NaN, so carry an explicit flag. */
+        res->latitude = (lat_ind < 0) ? NAN : lat;
+        res->longitude = (lng_ind < 0) ? NAN : lng;
+        res->altitude = alt;
+        res->altitude_null = (alt_ind < 0);
     }
     return res;
 }
@@ -526,8 +561,13 @@ convert_to_http(const char *address, int port, bool https)
 }
 
 struct smm_settings_s *
-db_asset_smm_settings_get(const char *conn_arg, unsigned long long asset_id_arg)
+db_asset_smm_settings_get(const char *conn_arg, unsigned long long asset_id_arg, int *error_out)
 {
+    if (error_out != NULL)
+    {
+        *error_out = 0;
+    }
+
     EXEC SQL BEGIN DECLARE SECTION;
     const char *conn = conn_arg;
     unsigned long long asset_id = asset_id_arg;
@@ -542,11 +582,29 @@ db_asset_smm_settings_get(const char *conn_arg, unsigned long long asset_id_arg)
     EXEC SQL AT :conn SELECT 1, SMM.address, SMM.port, SMM.https, A.smm_login, A.smm_password INTO :success, :server_address, :server_port, :server_https, :smm_login, :smm_password FROM config_assetconfig AS A, config_smmconfig AS SMM WHERE A.asset_id = :asset_id AND A.smm_id = SMM.id;
 
 
-    if (success == 1 && sqlca.sqlwarn[1] == 'W')
+    /* Every exit below falls through to the credential wipe at the tail rather
+     * than returning early, so a failure path never leaves login/password bytes
+     * resident (todo/43). */
+    if (sqlca.sqlcode < 0)
+    {
+        /* The query itself failed. Reported by status because the caller caches
+         * this result: without the split, one transient failure is read as
+         * "this asset has no SMM settings" and overwrites a good cache
+         * (todo/69). */
+        sqlprint();
+        if (error_out != NULL)
+        {
+            *error_out = 1;
+        }
+        success = 0;
+    }
+    else if (success == 1 && sqlca.sqlwarn[1] == 'W')
     {
         /* A host variable was truncated (address/login/password longer than
          * its buffer). Truncated credentials must not be shipped to an
-         * aircraft; treat the row as absent and say why. */
+         * aircraft; treat the row as absent and say why. Not an error_out
+         * failure: the row is identified on stderr and is unusable whatever we
+         * report, matching db_asset_command_get's truncation guard. */
         fprintf(stderr, "smm settings for asset %llu exceed buffer sizes; ignoring row\n", asset_id);
         success = 0;
     }
@@ -555,7 +613,15 @@ db_asset_smm_settings_get(const char *conn_arg, unsigned long long asset_id_arg)
     if (success == 1)
     {
         settings = malloc(sizeof(struct smm_settings_s));
-        if (settings != NULL)
+        if (settings == NULL)
+        {
+            /* Out of memory is not "no settings for this asset" either. */
+            if (error_out != NULL)
+            {
+                *error_out = 1;
+            }
+        }
+        else
         {
             settings->address = convert_to_http(server_address, server_port, server_https);
             settings->username = strdup(smm_login);
@@ -569,6 +635,10 @@ db_asset_smm_settings_get(const char *conn_arg, unsigned long long asset_id_arg)
                 free(settings->password);
                 free(settings);
                 settings = NULL;
+                if (error_out != NULL)
+                {
+                    *error_out = 1;
+                }
             }
         }
     }
