@@ -381,7 +381,8 @@ TEST_CASE("db_connection: getCommand returns non-null for asset with pending com
     LIVE_DB_OR_SKIP(dbc);
     auto asset_id = get_test_asset_id(*dbc);
     auto cmd = dbc->getCommand(asset_id);
-    REQUIRE(cmd != nullptr);
+    REQUIRE(cmd.has_value());
+    REQUIRE(*cmd != nullptr);
 }
 
 namespace {
@@ -481,9 +482,10 @@ TEST_CASE("db_connection: getCommands agrees with getCommand for the same asset"
 
     auto single = dbc->getCommand(asset_id);
     auto batch = dbc->getCommands({asset_id});
-    REQUIRE(single != nullptr);
+    REQUIRE(single.has_value());
+    REQUIRE(*single != nullptr);
     REQUIRE(batch.count(asset_id) == 1);
-    REQUIRE(batch.at(asset_id)->getDBId() == single->getDBId());
+    REQUIRE(batch.at(asset_id)->getDBId() == (*single)->getDBId());
 }
 
 TEST_CASE("db_connection: recordCommandDispatch stores the dispatch id")

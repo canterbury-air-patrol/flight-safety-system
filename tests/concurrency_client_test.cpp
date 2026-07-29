@@ -108,8 +108,9 @@ public:
     void recordSearchStatus(uint64_t, uint64_t, uint64_t, uint64_t) override {}
     void recordCommandDispatch(uint64_t, uint64_t) override {}
     void recordCommandAck(uint64_t, uint64_t, uint8_t, uint64_t, uint8_t) override {}
-    auto getCommand(uint64_t) -> std::shared_ptr<flight_safety_system::server::asset_command> override
+    auto getCommand(uint64_t) -> std::optional<std::shared_ptr<flight_safety_system::server::asset_command>> override
     {
+        /* An engaged null pointer: no pending command, not a failed read. */
         return nullptr;
     }
     auto getCommands(const std::vector<uint64_t> &)

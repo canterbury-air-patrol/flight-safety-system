@@ -232,7 +232,8 @@ void flight_safety_system::server::db_connection::recordPosition(uint64_t asset_
     }
 }
 
-auto flight_safety_system::server::db_connection::getCommand(uint64_t asset_id) -> std::shared_ptr<asset_command>
+auto flight_safety_system::server::db_connection::getCommand(uint64_t asset_id)
+    -> std::optional<std::shared_ptr<asset_command>>
 {
     std::shared_ptr<asset_command> res = nullptr;
     int fetch_error = 0;
@@ -256,12 +257,13 @@ auto flight_safety_system::server::db_connection::getCommand(uint64_t asset_id) 
                                                   command->altitude_null == 0);
         }
     }
-    /* Logged rather than returned for now: the caller still cannot tell this
-     * from "no pending command" until getCommand reports failure by status
-     * (todo/69). Called once per identify, so no throttling is needed. */
+    /* nullopt tells the caller the read failed, so it must not treat this as
+     * "no pending command" and clear one it already holds (todo/69). Called
+     * once per identify, so no throttling is needed. */
     if (fetch_error != 0)
     {
         FSS_LOG_ERROR("db", "pending-command read failed for asset " << asset_id);
+        return std::nullopt;
     }
     return res;
 }

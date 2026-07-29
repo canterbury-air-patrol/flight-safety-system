@@ -38,6 +38,9 @@ public:
      * tests can exercise the todo/69 split from an asset that genuinely has no
      * settings row (which stays a null pointer inside the optional). */
     bool smm_read_fail{false};
+    /* Same, for getCommand and the batched getCommands: nullopt is a failed
+     * read, distinct from an asset with no pending command (todo/69). */
+    bool command_read_fail{false};
 
     struct recorded_rtt {
         uint64_t asset_id;
@@ -160,8 +163,13 @@ public:
         return acks;
     }
 
-    auto getCommand(uint64_t asset_id) -> std::shared_ptr<flight_safety_system::server::asset_command> override
+    auto getCommand(uint64_t asset_id)
+        -> std::optional<std::shared_ptr<flight_safety_system::server::asset_command>> override
     {
+        if (command_read_fail)
+        {
+            return std::nullopt;
+        }
         auto it = commands.find(asset_id);
         if (it == commands.end() || it->second.empty())
         {
@@ -187,9 +195,10 @@ public:
         std::unordered_map<uint64_t, std::shared_ptr<flight_safety_system::server::asset_command>> res;
         for (uint64_t asset_id : ids)
         {
-            if (auto cmd = getCommand(asset_id))
+            auto cmd = getCommand(asset_id);
+            if (cmd.has_value() && *cmd != nullptr)
             {
-                res[asset_id] = std::move(cmd);
+                res[asset_id] = std::move(*cmd);
             }
         }
         return res;
