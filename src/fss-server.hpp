@@ -130,13 +130,17 @@ public:
     virtual auto getCommand(uint64_t asset_id) -> std::optional<std::shared_ptr<asset_command>> = 0;
     /* Batched getCommand: the newest command for each id in asset_ids, keyed by
      * asset_id. Assets with no pending command are simply absent from the map,
-     * so callers treat "absent" exactly as getCommand's nullptr. Lets the
-     * command poller issue one query per tick instead of one per client
-     * (todo/23). A mid-read error yields a partial map — the same envelope as
-     * getCommand returning nullptr per asset when the read connection is down,
-     * since both share the one read connection. */
+     * so callers treat "absent" exactly as getCommand's engaged nullptr. Lets
+     * the command poller issue one query per tick instead of one per client
+     * (todo/23).
+     *
+     * nullopt means the read was cut short, and the partial map is discarded
+     * rather than returned: in a partial map "absent" cannot be told from "not
+     * read", which is precisely the confusion this convention exists to
+     * prevent, so the caller must leave every pending command it holds alone
+     * and wait for the next tick (todo/69). */
     virtual auto getCommands(const std::vector<uint64_t> &asset_ids)
-        -> std::unordered_map<uint64_t, std::shared_ptr<asset_command>> = 0;
+        -> std::optional<std::unordered_map<uint64_t, std::shared_ptr<asset_command>>> = 0;
     /* The complete set of active servers, or nullopt when the read was cut
      * short (mid-cursor error, truncated row) and could only produce a
      * partial, misleading list. nullopt is NOT an empty list: the caller must
@@ -200,7 +204,7 @@ public:
                           uint8_t ack_reason) override;
     auto getCommand(uint64_t asset_id) -> std::optional<std::shared_ptr<asset_command>> override;
     auto getCommands(const std::vector<uint64_t> &asset_ids)
-        -> std::unordered_map<uint64_t, std::shared_ptr<asset_command>> override;
+        -> std::optional<std::unordered_map<uint64_t, std::shared_ptr<asset_command>>> override;
     auto getActiveServers() -> std::optional<std::vector<fss_server_details>> override;
     auto getSmmSettings(uint64_t asset_id) -> std::optional<std::shared_ptr<smm_settings>> override;
     auto isConnected() const -> bool override;

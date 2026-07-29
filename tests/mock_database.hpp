@@ -186,9 +186,13 @@ public:
         return newest;
     }
 
-    auto getCommands(const std::vector<uint64_t> &ids)
-        -> std::unordered_map<uint64_t, std::shared_ptr<flight_safety_system::server::asset_command>> override
+    auto getCommands(const std::vector<uint64_t> &ids) -> std::optional<
+        std::unordered_map<uint64_t, std::shared_ptr<flight_safety_system::server::asset_command>>> override
     {
+        if (command_read_fail)
+        {
+            return std::nullopt;
+        }
         /* Reuse getCommand's newest-by-timestamp selection so batched and
          * single reads can never disagree; assets with no command are omitted,
          * matching the production "absent == nullptr" contract. */
