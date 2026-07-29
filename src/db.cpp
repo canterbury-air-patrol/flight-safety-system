@@ -313,7 +313,8 @@ auto flight_safety_system::server::db_connection::getCommands(const std::vector<
     return res;
 }
 
-auto flight_safety_system::server::db_connection::getSmmSettings(uint64_t asset_id) -> std::shared_ptr<smm_settings>
+auto flight_safety_system::server::db_connection::getSmmSettings(uint64_t asset_id)
+    -> std::optional<std::shared_ptr<smm_settings>>
 {
     std::shared_ptr<smm_settings> res = nullptr;
     int fetch_error = 0;
@@ -349,13 +350,13 @@ auto flight_safety_system::server::db_connection::getSmmSettings(uint64_t asset_
                 flight_safety_system::secure_string(std::string_view(settings->password)));
         }
     }
-    /* Logged rather than returned for now: the caller's interim guard in
-     * refreshSmmSettings() has to hold the cache on any empty result because it
-     * cannot tell this from a deleted settings row (todo/69). Called at
-     * identify and on the 15 s poller refresh, so no throttling is needed. */
+    /* nullopt tells the caller to keep whatever settings it already cached; a
+     * null pointer inside the optional is the genuinely-absent answer and does
+     * clear the cache (todo/69). */
     if (fetch_error != 0)
     {
         FSS_LOG_ERROR("db", "SMM settings read failed for asset " << asset_id);
+        return std::nullopt;
     }
     return res;
 }

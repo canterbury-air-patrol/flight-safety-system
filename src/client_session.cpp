@@ -774,18 +774,18 @@ void fss::server::fss_client::refreshSmmSettings()
         return;
     }
     auto smm = this->dbc->getSmmSettings(asset_id);
-    std::scoped_lock guard(this->client_lock);
-    /* todo/69, interim: getSmmSettings still reports a read failure in-band, as
-     * the same nullptr an asset with no settings row produces, so the only way
-     * to stop a transient failure wiping a good cache is to refuse the
-     * overwrite entirely. That also holds a cache whose row was genuinely
-     * deleted, which is the lesser of the two wrongs until the seam reports
-     * failure by status and this guard becomes precise. */
-    if (smm == nullptr && this->cached_smm_settings != nullptr)
+    /* nullopt is the read failing, not the asset having no settings: keep the
+     * previous good cache rather than wiping an aircraft's settings over a
+     * transient outage, the same discipline the server-list cache follows in
+     * server.cpp (todo/69). An engaged null pointer still clears the cache --
+     * that is a settings row genuinely gone. */
+    if (!smm.has_value())
     {
+        FSS_LOG_WARN("server", "SMM settings read failed for asset " << asset_id << "; keeping the cached settings");
         return;
     }
-    this->cached_smm_settings = std::move(smm);
+    std::scoped_lock guard(this->client_lock);
+    this->cached_smm_settings = std::move(*smm);
 }
 
 void fss::server::fss_client::sendSMMSettings()

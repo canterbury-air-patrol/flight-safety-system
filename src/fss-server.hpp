@@ -138,7 +138,13 @@ public:
      * aircraft as "no servers". An explicit status, not an exception, so the
      * contract is visible at every call site (todo/24). */
     virtual auto getActiveServers() -> std::optional<std::vector<fss_server_details>> = 0;
-    virtual auto getSmmSettings(uint64_t asset_id) -> std::shared_ptr<smm_settings> = 0;
+    /* The asset's SMM settings, or nullopt when the read failed. nullopt is NOT
+     * "no settings": a null pointer inside the optional is the genuinely-absent
+     * answer, and only that one may overwrite a cached copy. Without the split,
+     * one transient failure on the poller thread wipes an aircraft's settings
+     * until a later read succeeds (todo/69, same convention as
+     * getActiveServers above). */
+    virtual auto getSmmSettings(uint64_t asset_id) -> std::optional<std::shared_ptr<smm_settings>> = 0;
     virtual auto isConnected() const -> bool = 0;
     virtual void tryReconnectIfNeeded() = 0;
 };
@@ -149,8 +155,8 @@ private:
      * block a command/config read. Each connection is guarded by its own
      * mutex and therefore only ever used by one thread at a time — the
      * thread-safe usage pattern ECPG documents. read_lock covers getAssetId,
-     * getCommand, getActiveServers and getSmmSettings; write_lock covers the
-     * record* telemetry inserts. */
+     * getCommand, getCommands, getActiveServers and getSmmSettings; write_lock
+     * covers the record* telemetry inserts. */
     std::mutex read_lock;
     std::mutex write_lock;
     /* Read without holding either mutex by isConnected(), and written from
@@ -190,7 +196,7 @@ public:
     auto getCommands(const std::vector<uint64_t> &asset_ids)
         -> std::unordered_map<uint64_t, std::shared_ptr<asset_command>> override;
     auto getActiveServers() -> std::optional<std::vector<fss_server_details>> override;
-    auto getSmmSettings(uint64_t asset_id) -> std::shared_ptr<smm_settings> override;
+    auto getSmmSettings(uint64_t asset_id) -> std::optional<std::shared_ptr<smm_settings>> override;
     auto isConnected() const -> bool override;
     void tryReconnectIfNeeded() override;
     /* Startup gate: checks the connected database carries every column

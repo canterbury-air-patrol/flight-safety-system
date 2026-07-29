@@ -217,16 +217,21 @@ TEST_CASE("db_connection: getSmmSettings returns non-null for configured asset")
     LIVE_DB_OR_SKIP(dbc);
     auto asset_id = get_test_asset_id(*dbc);
     auto settings = dbc->getSmmSettings(asset_id);
-    REQUIRE(settings != nullptr);
-    REQUIRE_FALSE(settings->getAddress().empty());
-    REQUIRE(settings->getUsername() == "testuser");
-    REQUIRE_FALSE(settings->getPassword().empty());
+    REQUIRE(settings.has_value());
+    REQUIRE(*settings != nullptr);
+    REQUIRE_FALSE((*settings)->getAddress().empty());
+    REQUIRE((*settings)->getUsername() == "testuser");
+    REQUIRE_FALSE((*settings)->getPassword().empty());
 }
 
-TEST_CASE("db_connection: getSmmSettings returns null for asset with no config")
+TEST_CASE("db_connection: getSmmSettings returns an engaged null for asset with no config")
 {
+    /* A successful read finding no settings row: engaged, holding nullptr —
+     * distinct from the nullopt a failed read returns (todo/69). */
     LIVE_DB_OR_SKIP(dbc);
-    REQUIRE(dbc->getSmmSettings(uint64_t{999999}) == nullptr);
+    auto settings = dbc->getSmmSettings(uint64_t{999999});
+    REQUIRE(settings.has_value());
+    REQUIRE(*settings == nullptr);
 }
 
 TEST_CASE("db_connection: getActiveServers returns pre-configured server")
