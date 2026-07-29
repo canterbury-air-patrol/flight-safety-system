@@ -1163,3 +1163,44 @@ TEST_CASE("server_clients: pollCommands fans the batched read out to the owning 
     REQUIRE(count_sent<fss::transport::fss_message_asset_command>(conn1->sentSnapshot()) == 1);
     REQUIRE(count_sent<fss::transport::fss_message_asset_command>(conn2->sentSnapshot()) == 0);
 }
+
+TEST_CASE("server_clients: a failed batched read leaves pending commands intact (todo/69)")
+{
+    /* A read that fails reports nullopt, and every asset is then absent from
+     * nothing rather than absent from a partial map. pollCommands must leave
+     * each client's staged command alone and wait for the next tick, instead of
+     * clearing the fleet's pending commands on the strength of a failed read. */
+    server_clients sc;
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft1"] = 1;
+
+    auto conn1 = std::make_shared<FakeConnection>();
+    conn1->cert_names.push_back("craft1");
+    auto client1 = std::make_shared<fss::server::fss_client>(conn1, &mock, make_null_writer(), &sc);
+    client1->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft1"));
+    sc.clientConnected(client1);
+
+    mock.pushCommand(
+        1, std::make_shared<fss::server::asset_command>(uint64_t{100}, uint64_t{1000}, "RTL", 0.0, 0.0, uint32_t{0}));
+
+    /* A good poll stages the command. */
+    sc.pollCommands(&mock);
+
+    /* The read now fails. Before todo/69 this cleared the staged command,
+     * because an asset missing from a partial map was read as "no command". */
+    mock.command_read_fail = true;
+    sc.pollCommands(&mock);
+
+    client1->sendCommand();
+    REQUIRE(count_sent<fss::transport::fss_message_asset_command>(conn1->sentSnapshot()) == 1);
+
+    /* A recovered read that finds the command gone does clear it: an engaged
+     * map with the asset absent is the genuinely-no-command answer, and
+     * sendCommand() then has nothing staged to send. */
+    mock.command_read_fail = false;
+    mock.commands.clear();
+    sc.pollCommands(&mock);
+    const std::size_t sent_before = count_sent<fss::transport::fss_message_asset_command>(conn1->sentSnapshot());
+    client1->sendCommand();
+    REQUIRE(count_sent<fss::transport::fss_message_asset_command>(conn1->sentSnapshot()) == sent_before);
+}

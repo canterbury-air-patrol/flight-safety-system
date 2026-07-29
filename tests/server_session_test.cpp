@@ -495,6 +495,40 @@ TEST_CASE("session: getCommand returns newest-timestamp entry")
     REQUIRE(cmd->getTimeStamp() == 500);
 }
 
+TEST_CASE("session: a failed command read at identify dispatches nothing and keeps the client (todo/69)")
+{
+    /* The identify-time getCommand used to record nullptr — "no command
+     * waiting" — for a read that had actually failed, on the path that carries
+     * TERM and DISARM. A failed read must now dispatch nothing and leave
+     * pending_command untouched for the poller, without failing the identify:
+     * the client stays connected and identified. */
+    fss_test::MockDatabase mock;
+    constexpr uint64_t asset_id = 42;
+    mock.asset_ids["craft"] = asset_id;
+    mock.pushCommand(asset_id,
+                     std::make_shared<fss::server::asset_command>(/*dbid*/ 7, /*ts*/ 100, "RTL", 0.0, 0.0, 0));
+    mock.command_read_fail = true;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+
+    REQUIRE(handler.disconnects == 0);
+    REQUIRE(find_sent<fss::transport::fss_message_asset_command>(conn->sent) == nullptr);
+    REQUIRE(mock.getDispatches().empty());
+
+    /* Nothing was staged, so a later successful read is what delivers it. */
+    mock.command_read_fail = false;
+    session->setPendingCommand(*mock.getCommand(asset_id));
+    session->sendCommand();
+    auto cmd = find_sent<fss::transport::fss_message_asset_command>(conn->sent);
+    REQUIRE(cmd != nullptr);
+    REQUIRE(cmd->getTimeStamp() == 100);
+}
+
 TEST_CASE("session: server list sent on identify contains seeded servers")
 {
     fss_test::MockDatabase mock;

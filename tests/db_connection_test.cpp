@@ -145,6 +145,40 @@ TEST_CASE("db_connection: getAssetId returns nullopt when the read connection is
     REQUIRE_FALSE(dbc->getAssetId("test-asset").has_value());
 }
 
+TEST_CASE("db_connection: getCommand returns nullopt when the read connection is down (todo/69)")
+{
+    /* test-asset has a pending command, so an engaged result here would be a
+     * non-null one. With the read connection forced down the read cannot say
+     * anything: nullopt, never the engaged nullptr that means "nothing
+     * pending" — the caller must not clear a pending command over this. */
+    LIVE_DB_OR_SKIP(dbc);
+    auto asset_id = get_test_asset_id(*dbc);
+    db_disconnect(flight_safety_system::server::db_connection::read_conn_name);
+    REQUIRE_FALSE(dbc->getCommand(asset_id).has_value());
+}
+
+TEST_CASE("db_connection: getSmmSettings returns nullopt when the read connection is down (todo/69)")
+{
+    /* test-asset has SMM settings configured, so this is the case that used to
+     * wipe a good cache: the failure arrived as the same nullptr an asset with
+     * no settings row produces. */
+    LIVE_DB_OR_SKIP(dbc);
+    auto asset_id = get_test_asset_id(*dbc);
+    db_disconnect(flight_safety_system::server::db_connection::read_conn_name);
+    REQUIRE_FALSE(dbc->getSmmSettings(asset_id).has_value());
+}
+
+TEST_CASE("db_connection: getCommands returns nullopt when the read connection is down (todo/69)")
+{
+    /* The batched poll path. A partial map would be indistinguishable from
+     * "these assets have no pending command", so the read reports failure and
+     * the partial is discarded. */
+    LIVE_DB_OR_SKIP(dbc);
+    auto asset_id = get_test_asset_id(*dbc);
+    db_disconnect(flight_safety_system::server::db_connection::read_conn_name);
+    REQUIRE_FALSE(dbc->getCommands({asset_id}).has_value());
+}
+
 TEST_CASE("db_connection: recordRtt writes a row without error")
 {
     LIVE_DB_OR_SKIP(dbc);
