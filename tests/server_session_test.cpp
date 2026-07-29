@@ -2622,15 +2622,15 @@ TEST_CASE("session: sendSMMSettings sends from cache without re-reading the data
     REQUIRE(find_sent<fss::transport::fss_message_smm_settings>(conn->sent) != nullptr);
     REQUIRE(mock.smm_reads == reads_after_identify);
 
-    /* refreshSmmSettings (poller path) re-reads, and the entry is gone.
-     *
-     * todo/69, temporary: this used to assert the cache empties. The interim
-     * guard in refreshSmmSettings() cannot distinguish a deleted row from a
-     * failed read — both arrive as nullptr — so it holds the cache in both
-     * cases. Restored to the empties-the-cache assertion once getSmmSettings
-     * reports failure by status. The read itself must still happen. */
+    /* refreshSmmSettings (poller path) re-reads: the entry is gone, so the
+     * cache empties and nothing further is sent. A successful read returning
+     * no row is distinct from a failed read, which keeps the cache — see
+     * "a failed SMM read leaves the cached settings intact" below (todo/69). */
     session->refreshSmmSettings();
     REQUIRE(mock.smm_reads == reads_after_identify + 1);
+    conn->sent.clear();
+    session->sendSMMSettings();
+    REQUIRE(find_sent<fss::transport::fss_message_smm_settings>(conn->sent) == nullptr);
 }
 
 TEST_CASE("session: a failed SMM read leaves the cached settings intact")

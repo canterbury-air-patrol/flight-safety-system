@@ -122,8 +122,9 @@ public:
         /* An engaged empty vector: no servers configured, not a failed read. */
         return std::vector<flight_safety_system::server::fss_server_details>{};
     }
-    auto getSmmSettings(uint64_t) -> std::shared_ptr<flight_safety_system::server::smm_settings> override
+    auto getSmmSettings(uint64_t) -> std::optional<std::shared_ptr<flight_safety_system::server::smm_settings>> override
     {
+        /* An engaged null pointer: no settings configured, not a failed read. */
         return nullptr;
     }
     auto isConnected() const -> bool override { return true; }

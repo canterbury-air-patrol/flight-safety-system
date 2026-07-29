@@ -34,8 +34,9 @@ public:
      * DB read failure so tests can exercise the todo/60 split from a
      * genuinely unknown asset (which stays a 0 lookup miss). */
     bool asset_id_lookup_fail{false};
-    /* When set, getSmmSettings behaves as a failed read does today: it returns
-     * nullptr, indistinguishable from an asset with no settings row (todo/69). */
+    /* When set, getSmmSettings returns nullopt, simulating a read failure so
+     * tests can exercise the todo/69 split from an asset that genuinely has no
+     * settings row (which stays a null pointer inside the optional). */
     bool smm_read_fail{false};
 
     struct recorded_rtt {
@@ -203,12 +204,13 @@ public:
         return active_servers;
     }
 
-    auto getSmmSettings(uint64_t asset_id) -> std::shared_ptr<flight_safety_system::server::smm_settings> override
+    auto getSmmSettings(uint64_t asset_id)
+        -> std::optional<std::shared_ptr<flight_safety_system::server::smm_settings>> override
     {
         smm_reads++;
         if (smm_read_fail)
         {
-            return nullptr;
+            return std::nullopt;
         }
         auto it = smm.find(asset_id);
         return it == smm.end() ? nullptr : it->second;
