@@ -2631,6 +2631,41 @@ TEST_CASE("session: sendSMMSettings sends from cache without re-reading the data
     REQUIRE(find_sent<fss::transport::fss_message_smm_settings>(conn->sent) == nullptr);
 }
 
+TEST_CASE("session: a failed SMM read leaves the cached settings intact", "[!shouldfail][todo69]")
+{
+    /* Regression test for todo/69-getcommand-getsmm-inband-read-failure.md.
+     * getSmmSettings reports a read failure in-band, as the same nullptr an
+     * asset with no settings row produces, and refreshSmmSettings() writes it
+     * straight over the cache. So one transient failure on the poller thread
+     * wipes an aircraft's SMM settings until a later read succeeds, while the
+     * server-list path two lines away in server.cpp keeps its previous good
+     * cache — the discipline decision 24 exists to enforce.
+     *
+     * This asserts the correct behaviour and therefore fails until the fix
+     * lands; remove the [!shouldfail] tag then. */
+    fss_test::MockDatabase mock;
+    constexpr uint64_t asset_id = 21;
+    mock.asset_ids["craft"] = asset_id;
+    mock.smm[asset_id] = std::make_shared<fss::server::smm_settings>("https://smm.test", fss::secure_string{"u"},
+                                                                     fss::secure_string{"p"});
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+    REQUIRE(mock.smm_reads >= 1); /* identify primed the cache */
+
+    /* The settings row is still there; only the read fails. */
+    mock.smm_read_fail = true;
+    session->refreshSmmSettings();
+
+    conn->sent.clear();
+    session->sendSMMSettings();
+    REQUIRE(find_sent<fss::transport::fss_message_smm_settings>(conn->sent) != nullptr);
+}
+
 TEST_CASE("session: sendRTTRequest skips second request within retry interval")
 {
     /* When two RTT requests are enqueued consecutively (clock not advanced),
