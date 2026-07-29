@@ -775,6 +775,16 @@ void fss::server::fss_client::refreshSmmSettings()
     }
     auto smm = this->dbc->getSmmSettings(asset_id);
     std::scoped_lock guard(this->client_lock);
+    /* todo/69, interim: getSmmSettings still reports a read failure in-band, as
+     * the same nullptr an asset with no settings row produces, so the only way
+     * to stop a transient failure wiping a good cache is to refuse the
+     * overwrite entirely. That also holds a cache whose row was genuinely
+     * deleted, which is the lesser of the two wrongs until the seam reports
+     * failure by status and this guard becomes precise. */
+    if (smm == nullptr && this->cached_smm_settings != nullptr)
+    {
+        return;
+    }
     this->cached_smm_settings = std::move(smm);
 }
 
