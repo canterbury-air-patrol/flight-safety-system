@@ -113,10 +113,11 @@ public:
         /* An engaged null pointer: no pending command, not a failed read. */
         return nullptr;
     }
-    auto getCommands(const std::vector<uint64_t> &)
-        -> std::unordered_map<uint64_t, std::shared_ptr<flight_safety_system::server::asset_command>> override
+    auto getCommands(const std::vector<uint64_t> &) -> std::optional<
+        std::unordered_map<uint64_t, std::shared_ptr<flight_safety_system::server::asset_command>>> override
     {
-        return {};
+        /* An engaged empty map: nobody has a pending command, not a failed read. */
+        return std::unordered_map<uint64_t, std::shared_ptr<flight_safety_system::server::asset_command>>{};
     }
     auto getActiveServers() -> std::optional<std::vector<flight_safety_system::server::fss_server_details>> override
     {

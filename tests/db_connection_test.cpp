@@ -55,7 +55,9 @@ TEST_CASE("db_connection: getCommands short-circuits empty input without a round
      * identified. */
     flight_safety_system::server::db_connection dbc(
         "db.invalid", 5432, "user", flight_safety_system::secure_string(std::string_view{"pass"}), "db");
-    REQUIRE(dbc.getCommands({}).empty());
+    auto commands = dbc.getCommands({});
+    REQUIRE(commands.has_value()); /* engaged and empty, not a failed read */
+    REQUIRE(commands->empty());
 }
 
 namespace {
@@ -466,9 +468,10 @@ TEST_CASE("db_connection: getCommands returns the newest command per asset and o
     constexpr uint64_t absent_asset = 999999999ULL; /* no such asset -> no command */
     auto commands = dbc->getCommands({asset_id, absent_asset});
 
-    REQUIRE(commands.count(asset_id) == 1);
-    REQUIRE(commands.at(asset_id)->getDBId() == newest_id);
-    REQUIRE(commands.count(absent_asset) == 0);
+    REQUIRE(commands.has_value());
+    REQUIRE(commands->count(asset_id) == 1);
+    REQUIRE(commands->at(asset_id)->getDBId() == newest_id);
+    REQUIRE(commands->count(absent_asset) == 0);
 }
 
 TEST_CASE("db_connection: getCommands agrees with getCommand for the same asset")
@@ -484,8 +487,9 @@ TEST_CASE("db_connection: getCommands agrees with getCommand for the same asset"
     auto batch = dbc->getCommands({asset_id});
     REQUIRE(single.has_value());
     REQUIRE(*single != nullptr);
-    REQUIRE(batch.count(asset_id) == 1);
-    REQUIRE(batch.at(asset_id)->getDBId() == (*single)->getDBId());
+    REQUIRE(batch.has_value());
+    REQUIRE(batch->count(asset_id) == 1);
+    REQUIRE(batch->at(asset_id)->getDBId() == (*single)->getDBId());
 }
 
 TEST_CASE("db_connection: recordCommandDispatch stores the dispatch id")

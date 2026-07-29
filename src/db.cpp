@@ -269,7 +269,7 @@ auto flight_safety_system::server::db_connection::getCommand(uint64_t asset_id)
 }
 
 auto flight_safety_system::server::db_connection::getCommands(const std::vector<uint64_t> &asset_ids)
-    -> std::unordered_map<uint64_t, std::shared_ptr<asset_command>>
+    -> std::optional<std::unordered_map<uint64_t, std::shared_ptr<asset_command>>>
 {
     std::unordered_map<uint64_t, std::shared_ptr<asset_command>> res;
     if (asset_ids.empty())
@@ -303,14 +303,15 @@ auto flight_safety_system::server::db_connection::getCommands(const std::vector<
         db_free_asset_commands(rows);
     }
     /* A mid-cursor failure leaves res holding only the assets read before the
-     * error; the rest are absent (treated as "no pending command"). This is the
-     * same outcome the per-asset getCommand path already produces when the read
-     * connection is down — both serialise on the one read connection, so a drop
-     * fails them all — so the poller's next tick simply retries. No discard. */
+     * error. Discard it: in a partial map an absent asset cannot be told from
+     * one that was never read, so a caller acting on it would clear pending
+     * commands it merely failed to read. nullopt tells the poller to leave
+     * every client's pending command alone and retry next tick (todo/69). */
     if (fetch_error != 0)
     {
-        FSS_LOG_ERROR("db",
-                      "batched command read failed mid-cursor; " << res.size() << " asset(s) read before the error");
+        FSS_LOG_ERROR("db", "batched command read failed mid-cursor; partial result discarded ("
+                                << res.size() << " asset(s) read before the error)");
+        return std::nullopt;
     }
     return res;
 }

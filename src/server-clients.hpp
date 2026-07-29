@@ -160,14 +160,22 @@ public:
         /* One query for the whole fleet's newest-command-per-asset instead of a
          * getCommand round-trip per client (todo/23): 10*N reads/sec collapse to
          * 10/sec. An asset absent from the map has no pending command -- the same
-         * as getCommand returning nullptr -- so clear it, preserving the prior
-         * per-client behaviour exactly (the resend-window dedup in sendCommand
-         * still governs what actually reaches the aircraft). */
+         * as getCommand returning an engaged nullptr -- so clear it, preserving
+         * the prior per-client behaviour exactly (the resend-window dedup in
+         * sendCommand still governs what actually reaches the aircraft). */
         auto commands = dbc->getCommands(asset_ids);
+        /* nullopt is the read failing, in which case "absent from the map" means
+         * "not read", not "no command". Leave every client's pending command as
+         * it stands and retry on the next 100 ms tick rather than clearing the
+         * fleet's commands on the strength of a failed read (todo/69). */
+        if (!commands.has_value())
+        {
+            return;
+        }
         for (const auto &[client, asset_id] : identified)
         {
-            auto found = commands.find(asset_id);
-            client->setPendingCommand(found != commands.end() ? found->second : nullptr);
+            auto found = commands->find(asset_id);
+            client->setPendingCommand(found != commands->end() ? found->second : nullptr);
         }
     };
     void sendCommand()
