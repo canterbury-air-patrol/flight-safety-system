@@ -28,6 +28,42 @@ production paths' observable behaviour is unchanged.
 The filing named two callers. There turned out to be three — the poller, identify
 on the recv thread, and both of those via `getServersListMsg`.
 
+## The convention is now universal (todo/69, 2026-07-29)
+
+When this was written it described two of the four reads. `getCommand` and
+`getSmmSettings` still had no `error_out` at all in the ECPG layer, so a failed
+`SELECT` returned `NULL` — the same answer as "no pending command" / "no
+settings configured". `getCommands` had `error_out` and discarded it. All four
+now report by status:
+
+| Read | `nullopt` | Engaged |
+|---|---|---|
+| `getAssetId` | lookup failed | `0` = no such asset |
+| `getCommand` | read failed | `nullptr` = nothing pending |
+| `getCommands` | read cut short, partial discarded | map; absent = nothing pending |
+| `getSmmSettings` | read failed | `nullptr` = no settings row |
+| `getActiveServers` | read cut short | vector; empty = no servers |
+
+And the callers honour it: `refreshSmmSettings()` keeps its cached settings on
+`nullopt` (an engaged `nullptr` still clears them, which is a settings row
+genuinely deleted); the identify path leaves `pending_command` alone and lets
+the 100 ms poller retry; `pollCommands()` returns early rather than clearing the
+fleet's pending commands.
+
+**`getCommands` discards its partial rather than returning it.** In a partial
+map, an absent asset cannot be told from one the cursor never reached — the
+exact confusion this decision exists to prevent, reintroduced one level up. The
+cost is one 100 ms tick for the assets that *were* read.
+
+**Truncation is not a read failure here**, deliberately differing from
+`db_active_fss_servers_get` (see Related below). A truncated command string or
+credential is one identified row, named on stderr, and undispatchable whatever
+we report; a truncated address silently *drops* a server from a list with no
+per-row report, which is why that one fails the read. The asymmetry also
+matters operationally: a permanently-truncated command row that failed the
+batched read would blind fleet-wide command polling until an operator fixed
+that row.
+
 ## `database_error` stays, for writes
 
 The [34/45/47](34-45-47-db-failsafe-latch.md) write wrappers still throw

@@ -148,6 +148,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   where a mismatch falls.
 
 ### Fixed
+- **A database read failure is no longer reported as an empty result on the
+  command and SMM paths** (todo/69, extending
+  `docs/decisions/24-database-read-error-control-flow.md`). Two of the four
+  reads never adopted the convention that a read which could only produce a
+  partial or misleading result reports that by status. `getCommand` returned
+  `nullptr` for a failed `SELECT`, which the interface documents as "no pending
+  command" — on the read that carries `TERM` and `DISARM`, so a read outage
+  presented as "this aircraft has nothing waiting". `getSmmSettings` did the
+  same, and `refreshSmmSettings()` wrote that result straight over its cache, so
+  one transient failure on the poller thread wiped an aircraft's SMM settings
+  until a later read succeeded. `getCommands` (the batched poll) did report the
+  error and then discarded it, and `pollCommands()` cleared `pending_command`
+  for every asset absent from the partial map — including every asset the read
+  never reached. All three now return `std::optional`, where `nullopt` is the
+  read having failed and an engaged empty value is the genuinely-absent answer;
+  the callers keep their cached settings, leave pending commands untouched, and
+  retry on the next tick. A row whose command string or credentials were
+  truncated stays a per-row absence rather than a read failure: it is named on
+  stderr and is unusable either way, and failing the batched read there would
+  blind fleet-wide command polling on one bad row. No read now reports failure
+  in-band.
 - Connection teardown no longer closes the socket before the threads that
   might still use it are joined (todo/52). `disconnect()` used to shutdown
   *and* close the descriptor up front, then join the recv thread — so a
