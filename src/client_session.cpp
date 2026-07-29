@@ -1035,7 +1035,20 @@ void fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss
                     return;
                 }
                 this->cached_asset_id.store(asset_id);
-                this->setPendingCommand(this->dbc->getCommand(asset_id));
+                /* nullopt is the read failing, not the asset having nothing
+                 * pending: leave pending_command alone and let the 100 ms
+                 * poller pick the command up, rather than recording "no
+                 * command waiting" on the strength of a failed read
+                 * (todo/69). */
+                if (auto pending = this->dbc->getCommand(asset_id))
+                {
+                    this->setPendingCommand(*pending);
+                }
+                else
+                {
+                    FSS_LOG_WARN("server", "Pending-command read failed during identify of asset_id "
+                                               << asset_id << "; the command poller will retry");
+                }
                 {
                     std::scoped_lock guard(this->client_lock);
                     this->name = std::move(client_name);

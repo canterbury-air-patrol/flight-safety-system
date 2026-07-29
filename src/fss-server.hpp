@@ -121,7 +121,13 @@ public:
      * fss_command_ack_outcome/fss_command_ack_reason ints. */
     virtual void recordCommandAck(uint64_t asset_id, uint64_t dispatch_id, uint8_t ack_state, uint64_t ack_timestamp,
                                   uint8_t ack_reason) = 0;
-    virtual auto getCommand(uint64_t asset_id) -> std::shared_ptr<asset_command> = 0;
+    /* The asset's newest pending command, or nullopt when the read failed.
+     * nullopt is NOT "no pending command": that is an engaged null pointer.
+     * The distinction matters most on this read — it carries TERM and DISARM,
+     * so a read outage reported as "nothing waiting" is the wrong failure
+     * direction (todo/69). A caller that cannot act on the failure should
+     * leave whatever pending command it already holds untouched. */
+    virtual auto getCommand(uint64_t asset_id) -> std::optional<std::shared_ptr<asset_command>> = 0;
     /* Batched getCommand: the newest command for each id in asset_ids, keyed by
      * asset_id. Assets with no pending command are simply absent from the map,
      * so callers treat "absent" exactly as getCommand's nullptr. Lets the
@@ -192,7 +198,7 @@ public:
     void recordCommandDispatch(uint64_t command_dbid, uint64_t dispatch_id) override;
     void recordCommandAck(uint64_t asset_id, uint64_t dispatch_id, uint8_t ack_state, uint64_t ack_timestamp,
                           uint8_t ack_reason) override;
-    auto getCommand(uint64_t asset_id) -> std::shared_ptr<asset_command> override;
+    auto getCommand(uint64_t asset_id) -> std::optional<std::shared_ptr<asset_command>> override;
     auto getCommands(const std::vector<uint64_t> &asset_ids)
         -> std::unordered_map<uint64_t, std::shared_ptr<asset_command>> override;
     auto getActiveServers() -> std::optional<std::vector<fss_server_details>> override;
