@@ -121,22 +121,52 @@ TEST_CASE("client: malformed JSON config leaves client unconfigured")
 TEST_CASE("client: config file skips server entries with invalid ports")
 {
     const char *tmppath = "/tmp/fss_test_client_bad_port.json";
+
+    /* read_json_tcp_port rejects on two independent grounds and both must skip
+     * the entry rather than coerce it: an out-of-range integer, and a value that
+     * is not an integer at all. The second is the likelier hand-editing mistake
+     * ("port": "9999") and was the untested one; jsoncpp would happily hand back
+     * 0 from asInt() on a string, which is a port the connect path cannot use. */
+    SECTION("port above the 16-bit range")
     {
-        std::ofstream f(tmppath);
-        f << R"({
-            "name": "test-asset",
-            "ssl": {
-                "ca_public_key": "ca.pem",
-                "client_private_key": "client.key",
-                "client_public_key": "client.pem"
-            },
-            "servers": [
-                {"address": "localhost", "port": 70000}
-            ]
-        })";
+        {
+            std::ofstream f(tmppath);
+            f << R"({
+                "name": "test-asset",
+                "ssl": {
+                    "ca_public_key": "ca.pem",
+                    "client_private_key": "client.key",
+                    "client_public_key": "client.pem"
+                },
+                "servers": [
+                    {"address": "localhost", "port": 70000}
+                ]
+            })";
+        }
+        fss::client_ssl::fss_client client(tmppath);
+        REQUIRE_FALSE(client.isConfigured());
     }
-    fss::client_ssl::fss_client client(tmppath);
-    REQUIRE_FALSE(client.isConfigured());
+
+    SECTION("port quoted as a string")
+    {
+        {
+            std::ofstream f(tmppath);
+            f << R"({
+                "name": "test-asset",
+                "ssl": {
+                    "ca_public_key": "ca.pem",
+                    "client_private_key": "client.key",
+                    "client_public_key": "client.pem"
+                },
+                "servers": [
+                    {"address": "localhost", "port": "9999"}
+                ]
+            })";
+        }
+        fss::client_ssl::fss_client client(tmppath);
+        REQUIRE_FALSE(client.isConfigured());
+    }
+
     std::remove(tmppath);
 }
 
@@ -380,6 +410,56 @@ TEST_CASE("client: JSON config tcp_user_timeout_ms sets the per-connection send 
         }
         fss::client_ssl::fss_client client(tmppath);
         REQUIRE(client.getTcpUserTimeoutMs() == fss::transport::default_tcp_user_timeout_ms);
+    }
+
+    std::remove(tmppath);
+}
+
+TEST_CASE("client: JSON config clock_offset_ms is exposed to the RTT reply path (todo/33)")
+{
+    /* The deliberate clock skew the e2e clock-skew harness relies on
+     * (test_clock_skew.py, TC-MAV-017) enters through this config field and
+     * leaves through getClockOffsetMs(), which is what stamps the RTT reply and
+     * every position report. The e2e suite pins the behaviour end to end but
+     * cannot say which of parse or accessor is wrong when it breaks; the accessor
+     * had no unit coverage at all. Negative values matter as much as positive —
+     * a client behind the server is the same defect in the other direction. */
+    const char *tmppath = "/tmp/fss_test_client_clock_offset.json";
+
+    SECTION("a positive offset round-trips")
+    {
+        {
+            std::ofstream f(tmppath);
+            f << R"({"name":"test-asset","clock_offset_ms":300000,)"
+              << R"("ssl":{"ca_public_key":"ca.pem","client_private_key":"key.pem","client_public_key":"cert.pem"},)"
+              << R"("servers":[{"address":"127.0.0.1","port":9999}]})";
+        }
+        fss::client_ssl::fss_client client(tmppath);
+        REQUIRE(client.getClockOffsetMs() == 300000);
+    }
+
+    SECTION("a negative offset round-trips")
+    {
+        {
+            std::ofstream f(tmppath);
+            f << R"({"name":"test-asset","clock_offset_ms":-300000,)"
+              << R"("ssl":{"ca_public_key":"ca.pem","client_private_key":"key.pem","client_public_key":"cert.pem"},)"
+              << R"("servers":[{"address":"127.0.0.1","port":9999}]})";
+        }
+        fss::client_ssl::fss_client client(tmppath);
+        REQUIRE(client.getClockOffsetMs() == -300000);
+    }
+
+    SECTION("absent field means no skew")
+    {
+        {
+            std::ofstream f(tmppath);
+            f << R"({"name":"test-asset",)"
+              << R"("ssl":{"ca_public_key":"ca.pem","client_private_key":"key.pem","client_public_key":"cert.pem"},)"
+              << R"("servers":[{"address":"127.0.0.1","port":9999}]})";
+        }
+        fss::client_ssl::fss_client client(tmppath);
+        REQUIRE(client.getClockOffsetMs() == 0);
     }
 
     std::remove(tmppath);
