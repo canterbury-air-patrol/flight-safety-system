@@ -792,6 +792,49 @@ TEST_CASE("session: queueCommandSend dispatches a command on the outbound worker
     session->disconnect();
 }
 
+TEST_CASE("session: every queue* is a no-op once the writer has stopped")
+{
+    /* All five schedulers are called from threads that do not own the client's
+     * lifetime — the main loop, the command poller, another client's recv thread
+     * — so each races a disconnect by construction. Every one of them documents
+     * itself as a no-op once disconnecting, and each carries its own copy of the
+     * check; a missed one would either resurrect a stopped worker's flags or
+     * queue a frame nothing will ever drain. Pinned together so a sixth
+     * scheduler cannot be added without the guard. */
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 1;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+    session->activate();
+    session->disconnect(); /* stops and joins the outbound worker */
+
+    const auto sent_before = conn->sentSnapshot().size();
+
+    auto packed = std::make_shared<fss::transport::fss_message_rtt_request>();
+    packed->setId(1);
+    auto frame = packed->getPacked();
+    REQUIRE(frame != nullptr);
+
+    session->setPendingCommand(
+        std::make_shared<fss::server::asset_command>(/*dbid*/ 1, /*ts*/ 500, "RTL", 0.0, 0.0, 0));
+    session->queueCommandSend();
+    session->queueRTTRequest();
+    session->queueSMMSettings();
+    session->queueServerListBroadcast(frame);
+    session->queuePositionRelay(frame);
+
+    /* Nothing was sent, and in particular the dropped-relay counter did not
+     * move: a rejected relay is not a dropped one, and conflating them would
+     * make getPositionRelayDropped() report loss that never happened. */
+    REQUIRE(conn->sentSnapshot().size() == sent_before);
+    REQUIRE(session->getPositionRelayDropped() == 0);
+}
+
 TEST_CASE("session: a blocked client's writer does not stall command dispatch for another client")
 {
     /* todo/21 Done-when: a black-holed socket on one client must not delay
