@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "fss-log.hpp"
+#include "fss.hpp"
 #include "test_helpers.hpp"
 
 TEST_CASE("log: level filter suppresses lower-severity lines")
@@ -157,4 +158,47 @@ TEST_CASE("log: level_str returns expected tag for each level")
     REQUIRE(std::string(fss_log::detail::level_str(fss_log::level::Debug)) == "DEBUG");
     /* Unreachable in normal usage but exercises the default return path. */
     REQUIRE(std::string(fss_log::detail::level_str(static_cast<fss_log::level>(999))) == "?????");
+}
+
+TEST_CASE("log: exception_guard isolates a non-std::exception throw")
+{
+    /* The guard exists so one failed unit of work cannot tear down a loop that
+     * must keep running — the recv loop, the command poller, the main loop tick.
+     * Its std::exception arm is exercised by every in-tree thrower, but the
+     * catch-all arm is what stands between a stray `throw 42` (or a foreign
+     * library's own exception type) and a terminate() that takes the server with
+     * it, so it needs its own case. */
+    namespace fss_log = flight_safety_system::log;
+    flight_safety_system::exception_guard guard("test", "non-std throw");
+
+    fss_test::capture_cerr cap;
+    guard.run([]() -> void { throw 42; });
+
+    /* Reported as an exception, with a wording that says the type was unknown
+     * rather than pretending to have a what() string. */
+    auto out = cap.str();
+    REQUIRE(out.find("Exception in non-std throw") != std::string::npos);
+    REQUIRE(out.find("unknown exception") != std::string::npos);
+
+    /* And the guard is reusable afterwards: a later success logs the recovery,
+     * which is only reachable if the throw left the failure counter consistent. */
+    guard.run([]() -> void {});
+    REQUIRE(cap.str().find("recovered after 1 consecutive failure(s)") != std::string::npos);
+}
+
+TEST_CASE("clock: WallClock reports the real time of day")
+{
+    /* Every timekeeping class in the tree takes an injectable IClock, so the
+     * production implementations are the one part the unit suite never touches
+     * by accident. WallClock is what feeds every stored telemetry timestamp;
+     * that it returns a plausible epoch-millisecond value is worth one case. */
+    flight_safety_system::WallClock clock;
+    const uint64_t before = flight_safety_system::fss_current_timestamp();
+    const uint64_t now = clock.now_ms();
+
+    REQUIRE(now >= before);
+    /* Sanity-check the unit rather than the value: seconds would be ~1000x
+     * smaller and microseconds ~1000x larger than this window. */
+    REQUIRE(now > 1'700'000'000'000ULL);
+    REQUIRE(now < 4'000'000'000'000ULL);
 }
