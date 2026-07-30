@@ -84,9 +84,35 @@ jobs:
           .libs/all_test
 
   # ─── 3. Coverage collection and upload ───────────────────────────────────
+  #
+  # This job measures the *combined* number: the unit suite against a live
+  # database plus the e2e suite against the instrumented server. Both are
+  # needed for the figure to mean anything — without a database the 30
+  # live-DB unit cases skip (db.cpp reads 13 % instead of 96 %), and without
+  # e2e nothing exercises server.cpp at all.
+  #
+  # The e2e run is duplicated here rather than instrumenting job 5: that job
+  # is the gate, and gcov-instrumented binaries change the timing its resend
+  # windows and 120 s cap depend on. It is `continue-on-error` here for the
+  # same reason — a flake in the instrumented copy must not fail the pipeline
+  # or block the upload, because job 5 remains the real verdict.
   coverage:
     runs-on: ubuntu-latest
     needs: build-and-check
+
+    services:
+      postgres:
+        image: postgis/postgis:18-3.6-alpine
+        env:
+          POSTGRES_PASSWORD: e2e
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
     steps:
     - uses: actions/checkout@v7
 
@@ -94,30 +120,76 @@ jobs:
       run: |
         sudo apt-get update -qq
         sudo apt-get install -y \
-          libjsoncpp-dev libecpg-dev catch2 libgnutls28-dev gnutls-bin lcov
+          libjsoncpp-dev libecpg-dev catch2 libgnutls28-dev gnutls-bin lcov \
+          postgresql-client python3-pip python3-venv
 
     - name: autogen
       run: ./autogen.sh
 
+    # --enable-server and --enable-fake-client are what the e2e step below
+    # needs; instrumenting them is also the only way server.cpp is measured.
     - name: configure with coverage
-      run: ./configure --enable-tests --enable-coverage
+      run: ./configure --enable-tests --enable-server --enable-fake-client --enable-coverage
 
     - name: make
       run: make -j$(nproc)
 
+    # Two databases: `unit` carries the schema plus the fixtures the live-DB
+    # unit cases expect, `e2e` is left empty for the suite's own migrated_db
+    # fixture to populate.
+    - name: Provision databases
+      env:
+        PGPASSWORD: e2e
+      run: |
+        psql -h 127.0.0.1 -U postgres -c 'CREATE DATABASE unit;'
+        psql -h 127.0.0.1 -U postgres -c 'CREATE DATABASE e2e;'
+        psql -h 127.0.0.1 -U postgres -d unit -f e2e/schema/001_init.sql
+        psql -h 127.0.0.1 -U postgres -d unit -f tests/db-fixtures.sql
+
     - name: make check
+      env:
+        TEST_DB_HOST: 127.0.0.1
+        TEST_DB_PORT: "5432"
+        TEST_DB_USER: postgres
+        TEST_DB_PASS: e2e
+        TEST_DB_NAME: unit
       run: make check
 
+    - name: Install Python deps
+      run: |
+        python3 -m venv e2e/.venv
+        e2e/.venv/bin/pip install -q -r e2e/requirements.txt
+
+    - name: Run E2E tests (instrumented)
+      continue-on-error: true
+      env:
+        PGHOST: 127.0.0.1
+        PGPORT: 5432
+        PGPASSWORD: e2e
+        FSS_E2E_EXTERNAL_DB: "host=127.0.0.1 port=5432 user=postgres password=e2e dbname=e2e"
+      run: |
+        cd e2e
+        .venv/bin/pytest -q --timeout=120
+
+    # Capture src/ *and* tests/: the inline bodies in src/*.hpp are attributed
+    # to whichever translation unit instantiated them, and for headers like
+    # server-failsafe.hpp that is only ever a test TU. Capturing src/ alone
+    # reported the whole db_failsafe class as unreachable while
+    # server_failsafe_test.cpp covered every line of it.
+    #
+    # The removal patterns therefore drop the test *sources* rather than the
+    # tests/ directory, so those header records survive the filter.
     - name: Capture coverage
       run: |
         lcov --capture \
              --directory src \
+             --directory tests \
              --output-file cov.info \
-             --ignore-errors mismatch,empty
+             --ignore-errors mismatch,empty,inconsistent
         lcov --remove cov.info \
-             '/usr/*' '*/tests/*' \
+             '/usr/*' '*/tests/*.cpp' '*/tests/*.hpp' \
              --output-file cov.info \
-             --ignore-errors unused
+             --ignore-errors unused,inconsistent
 
     - name: Upload to Codecov
       uses: codecov/codecov-action@v7
