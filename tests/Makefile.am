@@ -29,7 +29,7 @@ AM_LDFLAGS += $(TSAN_LDFLAGS)
 # ran `make dist`, and the release tarball must carry these files regardless
 # of that tree's configure flags (tsan.supp was silently dropped from the
 # 1.2.0 tarball this way).
-EXTRA_DIST = test_helpers.hpp mock_database.hpp tsan.supp
+EXTRA_DIST = test_helpers.hpp mock_database.hpp tsan.supp db-fixtures.sql
 
 if ENABLE_TSAN
 # Under --enable-tsan the whole suite runs instrumented, so `make check` needs
