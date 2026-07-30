@@ -47,8 +47,20 @@ libfss_client_ssl_la_LIBADD = $(GNUTLS_LIBS) $(JSONCPP_LIBS) -L. libfss.la libfs
 include_HEADERS += fss-client-ssl.hpp
 pkgconfig_DATA += fss-client-ssl.pc
 
+# ecpg copies its input path verbatim into the #line directives of the generated
+# C, so the path must be absolute: server-db.c is compiled twice, once from src/
+# (fss-server) and once from tests/ (all_test, which lists ../src/server-db.c).
+# With a bare relative "server-db.pgc" each compile resolves it against its own
+# directory, so gcov attributes the two objects to src/server-db.pgc and
+# tests/server-db.pgc — the latter a path that does not exist. Coverage then
+# reports the file twice, never merges the two halves, and any filter that drops
+# tests/ discards the unit tests' share of it outright.
+#
+# $(<F) rather than a shell `basename` (no subshell) or GNU make's
+# $(notdir $<): the F-suffixed internal macros are POSIX, and no other
+# Makefile.am in the tree uses a GNU-only make function.
 .pgc.c:
-	ecpg -o $@ $< $(ECPGFLAGS)
+	ecpg -o $@ $(abs_srcdir)/$(<F) $(ECPGFLAGS)
 
 # server-db.c is generated from server-db.pgc, by either the server build or
 # the tests (when the server is disabled). Clean it unconditionally so it is
