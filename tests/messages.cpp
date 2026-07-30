@@ -1152,6 +1152,73 @@ TEST_CASE("messages: unknown command_ack reason degrades to supersede_none")
     REQUIRE(decoded->getReason() == flight_safety_system::transport::supersede_none);
 }
 
+TEST_CASE("messages: comms-loss supersede reason survives the round trip")
+{
+    auto msg_id = static_cast<uint64_t>(random());
+    auto acked_command_id = static_cast<uint64_t>(random());
+    auto timestamp = static_cast<uint64_t>(random());
+
+    /* The fourth supersede reason. It is the one the operator most needs told
+     * apart from the others: a comms-loss RTL means the FMU acted on its own
+     * because it lost the link, not that a battery latch or a newer command
+     * displaced what was asked for. Each reason has its own decode arm, so each
+     * needs its own round trip or a swapped arm would go unnoticed. */
+    auto msg = std::make_shared<flight_safety_system::transport::fss_message_command_ack>(
+        acked_command_id, flight_safety_system::transport::asset_command_rtl,
+        flight_safety_system::transport::command_ack_superseded, flight_safety_system::transport::supersede_comms_loss,
+        timestamp);
+    REQUIRE(msg->getReason() == flight_safety_system::transport::supersede_comms_loss);
+
+    msg->setId(msg_id);
+    auto bl = msg->getPacked();
+    REQUIRE(bl != nullptr);
+    auto decoded = std::make_shared<flight_safety_system::transport::fss_message_command_ack>(msg_id, bl);
+    REQUIRE(decoded->getAckedCommandId() == acked_command_id);
+    REQUIRE(decoded->getOutcome() == flight_safety_system::transport::command_ack_superseded);
+    REQUIRE(decoded->getReason() == flight_safety_system::transport::supersede_comms_loss);
+    REQUIRE(decoded->getTimeStamp() == timestamp);
+}
+
+TEST_CASE("messages: out-of-range capability ids are ignored, not shifted")
+{
+    /* The capability bitmap is a uint64_t, so a shift by 64 or more is undefined
+     * behaviour. Ids come off the wire and from callers, so both entry points
+     * bounds-check; this pins that they no-op rather than corrupting the bitmap
+     * (or, on the query side, reading a neighbouring bit). */
+    auto msg = std::make_shared<flight_safety_system::transport::fss_message_identity_non_aircraft>();
+    msg->addCapability(63); // the highest legal id
+    REQUIRE(msg->getCapability(63));
+
+    msg->addCapability(64);
+    msg->addCapability(255);
+    REQUIRE_FALSE(msg->getCapability(64));
+    REQUIRE_FALSE(msg->getCapability(255));
+    /* The legal bit is untouched by the rejected ones. */
+    REQUIRE(msg->getCapability(63));
+}
+
+TEST_CASE("messages: a string longer than the 16-bit length prefix is clamped")
+{
+    /* The on-wire length prefix is 16 bits. A longer string can only arrive from
+     * an upstream programming error, and the danger is not the loss of the tail:
+     * a prefix disagreeing with the bytes written desyncs the decoder for every
+     * later message on the connection. Pin that pack clamps both together. */
+    const size_t over = static_cast<size_t>(std::numeric_limits<uint16_t>::max()) + 100;
+    auto msg = std::make_shared<flight_safety_system::transport::fss_message_smm_settings>(
+        std::string(over, 'a'), flight_safety_system::secure_string{std::string_view{"user"}},
+        flight_safety_system::secure_string{std::string_view{"pass"}});
+    msg->setId(1);
+    auto bl = msg->getPacked();
+    REQUIRE(bl != nullptr);
+
+    /* The address field is packed first, immediately after the framed header:
+     * its big-endian length prefix must be the clamped 0xFFFF, not the
+     * truncated low 16 bits of the real length (which would have been 99). */
+    const char *prefix = bl->getData() + framed_header_len;
+    REQUIRE(static_cast<unsigned char>(prefix[0]) == 0xFF);
+    REQUIRE(static_cast<unsigned char>(prefix[1]) == 0xFF);
+}
+
 /* readUint32 failure (line 129): version message truncated after the two
  * uint16 version fields, so the uint32_t feature_flags read fails. */
 TEST_CASE("messages: BufferReader readUint32 short-read returns false")
