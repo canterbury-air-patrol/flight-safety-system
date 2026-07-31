@@ -20,17 +20,14 @@
 #include "db-write-queue.hpp"
 #include "test_helpers.hpp"
 
+/* Shared controllable clock (tests/test_helpers.hpp). */
+using fss_test::FakeClock;
+
 namespace fss = flight_safety_system;
 
 namespace {
 
 /* ── shared test doubles ─────────────────────────────────── */
-
-struct FakeClock : public fss::IClock {
-    uint64_t t{0};
-    auto now_ms() const -> uint64_t override { return t; }
-    void advance(uint64_t ms) { t += ms; }
-};
 
 class FakeConnection : public fss::transport::fss_connection {
 public:

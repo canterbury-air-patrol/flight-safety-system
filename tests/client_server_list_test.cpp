@@ -20,6 +20,10 @@
 
 #include "fss-client-ssl.hpp"
 #include "fss-transport.hpp"
+#include "test_helpers.hpp"
+
+/* Shared controllable clock (tests/test_helpers.hpp). */
+using fss_test::FakeClock;
 
 /* todo/67: updateServers() only ever ADDED. There was no removal path anywhere
  * in client-ssl.cpp — entries migrated between `servers` and
@@ -32,12 +36,6 @@
 namespace {
 
 namespace fss = flight_safety_system;
-
-struct FakeClock : public fss::IClock {
-    uint64_t t{0};
-    auto now_ms() const -> uint64_t override { return t; }
-    void advance(uint64_t ms) { t += ms; }
-};
 
 /* Exposes the configuration setters, which are protected because they are meant
  * to be driven from a config file. Nothing here ever dials, so every server
