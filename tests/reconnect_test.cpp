@@ -26,6 +26,9 @@
 #include "fss-client-ssl.hpp"
 #include "test_helpers.hpp"
 
+/* Shared controllable clock (tests/test_helpers.hpp). */
+using fss_test::FakeClock;
+
 /* The client-ssl reconnect path needs TLS fixtures; the test Makefile
  * generates these under certs/ at build time and they're reused by
  * tests/client.cpp. */
@@ -47,12 +50,6 @@ auto make_listener(uint16_t port)
     return std::make_shared<flight_safety_system::transport_ssl::fss_listen>(port, handoff.callback(), CA_PUBLIC_FILE,
                                                                              SERVER_PRIVATE_FILE, SERVER_PUBLIC_FILE);
 }
-
-struct FakeClock : public flight_safety_system::IClock {
-    uint64_t t{0};
-    auto now_ms() const -> uint64_t override { return t; }
-    void advance(uint64_t ms) { t += ms; }
-};
 
 class CountingServer : public flight_safety_system::client_ssl::fss_server {
 public:

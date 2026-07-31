@@ -28,6 +28,9 @@
 #include "db-write-queue.hpp"
 #include "test_helpers.hpp"
 
+/* Shared controllable clock (tests/test_helpers.hpp). */
+using fss_test::FakeClock;
+
 namespace fss = flight_safety_system;
 
 namespace flight_safety_system::server {
@@ -186,12 +189,6 @@ auto count_sent(const std::vector<std::shared_ptr<fss::transport::fss_message>> 
     }
     return count;
 }
-
-struct FakeClock : public fss::IClock {
-    uint64_t t{0};
-    auto now_ms() const -> uint64_t override { return t; }
-    void advance(uint64_t ms) { t += ms; }
-};
 
 /* Builds a db_write_queue that forwards to the mock — tests that don't care
  * about telemetry still need a non-null writer for the fss_client ctor. */

@@ -31,6 +31,9 @@
 #include "server-clients.hpp"
 #include "test_helpers.hpp"
 
+/* Shared controllable clock (tests/test_helpers.hpp). */
+using fss_test::FakeClock;
+
 namespace fss = flight_safety_system;
 
 namespace {
@@ -124,12 +127,6 @@ auto count_sent(const std::vector<std::shared_ptr<fss::transport::fss_message>> 
     }
     return count;
 }
-
-struct FakeClock : public fss::IClock {
-    uint64_t t{0};
-    auto now_ms() const -> uint64_t override { return t; }
-    void advance(uint64_t ms) { t += ms; }
-};
 
 auto make_null_writer() -> std::shared_ptr<fss::server::db_write_queue>
 {

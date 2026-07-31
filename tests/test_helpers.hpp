@@ -19,10 +19,24 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include "fss.hpp"
 #include "fss-log.hpp"
 #include "fss-transport.hpp"
 
 namespace fss_test {
+
+/* A clock the test drives by hand. Every timekeeping class in the tree takes an
+ * injectable IClock so its timing behaviour can be asserted at the threshold
+ * ("no trip at 4.9 s, trip at 5.1 s") instead of by sleeping and hoping.
+ *
+ * Starts at 0, which is a real value rather than a sentinel: a class that uses
+ * 0 to mean "no timestamp recorded" will silently misbehave here, so use an
+ * explicit flag for that rather than advancing the clock past it. */
+struct FakeClock : public flight_safety_system::IClock {
+    uint64_t t{0};
+    [[nodiscard]] auto now_ms() const -> uint64_t override { return t; }
+    void advance(uint64_t ms) { t += ms; }
+};
 
 inline auto wait_for(const std::function<bool()> &pred,
                      std::chrono::milliseconds timeout = std::chrono::milliseconds(2000),
