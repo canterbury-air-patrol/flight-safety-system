@@ -450,7 +450,25 @@ auto main(int argc, char *argv[]) -> int
         }
     });
 
-    uint64_t tick_counter = 0;
+    /* Deadline-based, not usleep-plus-a-tick-counter (todo/70). The loop period
+     * is the sleep PLUS whatever the body took — sendCommand() fans out over
+     * every client, and once a second cleanupRemovableClients() joins departing
+     * clients' recv threads — and usleep returns early on a signal, since the
+     * handlers install with sa_flags = 0 and the CRL reload wants that. So a
+     * counter drifted in both directions and "every second" really meant "every
+     * tenth iteration, whenever those happened". Each schedule advances by its
+     * own period after firing, so a slow or interrupted tick changes when work
+     * is observed and never accumulates skew. Same shape as
+     * examples/fake_client.cpp's loop, which documents the failure mode for its
+     * own intervals. */
+    constexpr uint64_t ms_per_sec = 1000;
+    constexpr uint64_t send_config_period_ms = 15 * ms_per_sec;
+    flight_safety_system::MonotonicClock loop_clock;
+    /* First deadlines one period out, so the first pass of each task happens
+     * after one sleep exactly as the tick counter arranged. */
+    uint64_t next_send_ms = loop_clock.now_ms() + command_poll_ms;
+    uint64_t next_second_ms = next_send_ms;
+    uint64_t next_config_ms = next_send_ms;
     flight_safety_system::exception_guard tick_guard("server", "main loop tick");
     while (running == 1)
     {
@@ -474,10 +492,23 @@ auto main(int argc, char *argv[]) -> int
                 FSS_LOG_INFO("server", "CRL reload: no CRL file configured; nothing to do");
             }
         }
-        usleep(command_poll_ms * usec_per_msec);
+        uint64_t now_ms = loop_clock.now_ms();
+        if (now_ms < next_send_ms)
+        {
+            usleep(static_cast<useconds_t>((next_send_ms - now_ms) * usec_per_msec));
+            /* Round again rather than falling through: a signal can cut that
+             * sleep short, and the top of the loop is where a SIGHUP's CRL
+             * reload and a SIGTERM's shutdown are noticed. Whatever remains of
+             * the period is slept on the next pass. */
+            continue;
+        }
+        /* Decided before the body so the body cannot influence which tasks this
+         * pass owns. */
+        const bool do_per_second = now_ms >= next_second_ms;
+        const bool do_per_config_period = now_ms >= next_config_ms;
         tick_guard.run([&]() -> void {
             clients->sendCommand();
-            if ((tick_counter % ticks_per_sec) == 0)
+            if (do_per_second)
             {
                 clients->cleanupRemovableClients();
                 clients->checkTimeouts();
@@ -543,7 +574,7 @@ auto main(int argc, char *argv[]) -> int
                     case db_failsafe::event::none: break;
                 }
             }
-            if ((tick_counter % send_config_period_ticks) == 0)
+            if (do_per_config_period)
             {
                 /* Cache-only: the poller builds the server list and refreshes
                  * the per-client SMM settings. Empty cache (startup race with
@@ -557,7 +588,28 @@ auto main(int argc, char *argv[]) -> int
                 clients->sendSMMSettings();
             }
         });
-        tick_counter++;
+        /* Advance each schedule that fired. Normally one period; if the body
+         * overran, skip the missed slots instead of firing them back to back —
+         * a catch-up burst would redispatch the same command repeatedly and
+         * hand the fail-safe a run of zero-length seconds, which is the drift
+         * this loop exists to remove, in the other direction. */
+        const uint64_t after_ms = loop_clock.now_ms();
+        auto advance = [after_ms](uint64_t &next, uint64_t period) -> void {
+            next += period;
+            if (next <= after_ms)
+            {
+                next = after_ms + period;
+            }
+        };
+        advance(next_send_ms, command_poll_ms);
+        if (do_per_second)
+        {
+            advance(next_second_ms, ms_per_sec);
+        }
+        if (do_per_config_period)
+        {
+            advance(next_config_ms, send_config_period_ms);
+        }
     }
 
     /* Explicit shutdown ordering: stop accepting, then stop the command
