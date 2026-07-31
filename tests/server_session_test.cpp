@@ -823,6 +823,171 @@ TEST_CASE("session: every delivery stays ackable even though only the first is r
     REQUIRE(mock.getAcks().front().command_dbid == command_dbid);
 }
 
+namespace {
+
+/* Build an identified, ack-capable session with one pending command, dispatch
+ * it once, and hand back the id that went out on the wire. The terminal-ack
+ * cases below all need exactly this preamble. */
+struct AckableSession {
+    std::shared_ptr<FakeConnection> conn{nullptr};
+    std::shared_ptr<fss::server::fss_client> session{nullptr};
+    std::shared_ptr<FakeClock> clock{nullptr};
+    uint64_t dispatched_id{0};
+};
+
+auto make_dispatched_session(fss_test::MockDatabase &mock, fss::server::fss_client_handler *handler,
+                             const std::shared_ptr<fss::server::db_write_queue> &writer, uint64_t command_dbid)
+    -> AckableSession
+{
+    AckableSession out;
+    out.conn = std::make_shared<FakeConnection>();
+    out.conn->cert_names.push_back("craft");
+    out.conn->setNegotiatedFeatureFlags(fss::transport::FSS_FEATURE_COMMAND_ACK);
+    out.clock = std::make_shared<FakeClock>();
+    out.session = std::make_shared<fss::server::fss_client>(out.conn, &mock, writer, handler);
+    out.session->setClock(out.clock);
+    out.session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+    out.session->setPendingCommand(
+        std::make_shared<fss::server::asset_command>(command_dbid, /*ts*/ 500, "RTL", 0.0, 0.0, 0));
+    out.session->sendCommand();
+    const auto sent = out.conn->sentSnapshot();
+    out.dispatched_id = 0;
+    for (const auto &msg : sent)
+    {
+        if (msg != nullptr && msg->getType() == fss::transport::message_type_command)
+        {
+            out.dispatched_id = msg->getId();
+        }
+    }
+    return out;
+}
+
+auto ack_for(uint64_t acked_id, fss::transport::fss_command_ack_outcome outcome)
+    -> std::shared_ptr<fss::transport::fss_message_command_ack>
+{
+    return std::make_shared<fss::transport::fss_message_command_ack>(acked_id, fss::transport::asset_command_rtl,
+                                                                     outcome, uint64_t{1});
+}
+
+} // namespace
+
+TEST_CASE("session: a terminal ack ends the command's redelivery (todo/68)")
+{
+    /* Redelivery covers a delivery the aircraft never acted on. Once it has
+     * reported what it did, resending every 10 s for the rest of the flight
+     * only produces command_ack_noop traffic. */
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 12;
+    NullClientHandler handler;
+    auto writer = make_mock_writer(mock);
+    constexpr uint64_t command_dbid = 88;
+    auto s = make_dispatched_session(mock, &handler, writer, command_dbid);
+    REQUIRE(s.dispatched_id != 0);
+
+    s.session->processMessage(ack_for(s.dispatched_id, fss::transport::command_ack_actioned));
+    REQUIRE(fss_test::wait_for([&]() -> bool { return !mock.getAcks().empty(); }));
+
+    for (int i = 0; i < 4; ++i)
+    {
+        s.clock->advance((10 * uint64_t{1000}) + 1);
+        s.session->sendCommand();
+    }
+    REQUIRE(count_sent<fss::transport::fss_message_asset_command>(s.conn->sent) == 1);
+}
+
+TEST_CASE("session: a non-terminal 'received' ack does not end the redelivery (todo/68)")
+{
+    /* "received" means the frame arrived, not that the aircraft acted on it —
+     * the same distinction db_command_record_ack's writable set draws. An
+     * aircraft that acknowledges receipt and then goes quiet must keep being
+     * told its commanded state. */
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 12;
+    NullClientHandler handler;
+    auto writer = make_mock_writer(mock);
+    auto s = make_dispatched_session(mock, &handler, writer, /*command_dbid*/ 88);
+    REQUIRE(s.dispatched_id != 0);
+
+    s.session->processMessage(ack_for(s.dispatched_id, fss::transport::command_ack_received));
+    REQUIRE(fss_test::wait_for([&]() -> bool { return !mock.getAcks().empty(); }));
+
+    for (int i = 0; i < 4; ++i)
+    {
+        s.clock->advance((10 * uint64_t{1000}) + 1);
+        s.session->sendCommand();
+    }
+    REQUIRE(count_sent<fss::transport::fss_message_asset_command>(s.conn->sent) == 5);
+}
+
+TEST_CASE("session: a newer command dispatches despite an earlier terminal ack (todo/68)")
+{
+    /* The stop is scoped to the command that was acked, not to the session. An
+     * operator issuing a new command after the aircraft actioned the last one
+     * must still reach it — this is the DISARM/TERM path. */
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 12;
+    NullClientHandler handler;
+    auto writer = make_mock_writer(mock);
+    auto s = make_dispatched_session(mock, &handler, writer, /*command_dbid*/ 88);
+    REQUIRE(s.dispatched_id != 0);
+
+    s.session->processMessage(ack_for(s.dispatched_id, fss::transport::command_ack_actioned));
+    REQUIRE(fss_test::wait_for([&]() -> bool { return !mock.getAcks().empty(); }));
+
+    constexpr uint64_t newer_dbid = 89;
+    s.session->setPendingCommand(
+        std::make_shared<fss::server::asset_command>(newer_dbid, /*ts*/ 600, "TERM", 0.0, 0.0, 0));
+    s.session->sendCommand();
+
+    REQUIRE(count_sent<fss::transport::fss_message_asset_command>(s.conn->sent) == 2);
+    REQUIRE(fss_test::wait_for([&]() -> bool { return mock.getDispatches().size() == 2; }));
+    REQUIRE(mock.getDispatches().back().command_dbid == newer_dbid);
+}
+
+TEST_CASE("session: a restarted aircraft is dispatched to again despite the old session's terminal ack (todo/68)")
+{
+    /* The invariant the whole redelivery stop rests on. cap-fmu has no
+     * persistent storage, so an aircraft that restarts has forgotten its
+     * commanded state — and the server must not treat an ack from the previous
+     * connection as evidence that it still holds the command.
+     *
+     * terminally_acked_dbid lives in the per-connection session, and the server
+     * builds a new session for every accepted connection, so a restart resets
+     * it by construction. Model the restart the way the server sees one: the
+     * old session ends and a new session for the same asset and the same
+     * command row takes over. It must dispatch, and must keep resending until
+     * it gets an ack of its own. */
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 12;
+    NullClientHandler handler;
+    auto writer = make_mock_writer(mock);
+    constexpr uint64_t command_dbid = 88;
+
+    auto first = make_dispatched_session(mock, &handler, writer, command_dbid);
+    REQUIRE(first.dispatched_id != 0);
+    first.session->processMessage(ack_for(first.dispatched_id, fss::transport::command_ack_actioned));
+    REQUIRE(fss_test::wait_for([&]() -> bool { return !mock.getAcks().empty(); }));
+    /* Confirm the precondition: the old session really has stopped resending,
+     * so the assertions below cannot pass just because nothing was suppressed. */
+    first.clock->advance((10 * uint64_t{1000}) + 1);
+    first.session->sendCommand();
+    REQUIRE(count_sent<fss::transport::fss_message_asset_command>(first.conn->sent) == 1);
+    first.session->disconnect();
+
+    /* The aircraft comes back: same asset, same pending command row. */
+    auto second = make_dispatched_session(mock, &handler, writer, command_dbid);
+    REQUIRE(second.dispatched_id != 0);
+    REQUIRE(count_sent<fss::transport::fss_message_asset_command>(second.conn->sent) == 1);
+    /* And the new connection keeps resending until it acks for itself. */
+    for (int i = 0; i < 3; ++i)
+    {
+        second.clock->advance((10 * uint64_t{1000}) + 1);
+        second.session->sendCommand();
+    }
+    REQUIRE(count_sent<fss::transport::fss_message_asset_command>(second.conn->sent) == 4);
+    second.session->disconnect();
+}
+
 TEST_CASE("session: dispatched command carries the server command id only when negotiated (todo/49)")
 {
     /* The dispatched wire message identifies the operator action by this

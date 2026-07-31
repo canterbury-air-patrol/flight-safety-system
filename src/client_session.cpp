@@ -475,6 +475,22 @@ void fss::server::fss_client::sendCommand()
             /* Same command we last handled and still inside the resend window. */
             return;
         }
+        if (!is_new_command && dbid == this->terminally_acked_dbid)
+        {
+            /* The aircraft has told us what it did with this command on this
+             * connection, so there is nothing left to say (todo/68). Redelivery
+             * exists to cover a delivery the aircraft never acted on; once it
+             * has reported actioned/superseded/rejected/noop, resending every
+             * 10 s for the rest of the flight only produces command_ack_noop
+             * traffic and keeps a protected DB write in flight.
+             *
+             * This does NOT assume the aircraft still holds the command later:
+             * terminally_acked_dbid lives in the session, and an FMU that
+             * restarts arrives on a new connection with a new session, where
+             * identify-time dispatch delivers again and the resend loop runs
+             * until that connection acks for itself. */
+            return;
+        }
         /* Mark a command as handled for the current resend window: applied on a
          * permanent validation rejection below (which can never succeed, so
          * re-evaluating it every tick would only spam the log). Deliberately
@@ -620,6 +636,12 @@ auto fss::server::fss_client::recordDispatchedCommand(uint64_t dispatch_id, uint
     }
     this->last_dispatch_write_dbid = command_dbid;
     return true;
+}
+
+void fss::server::fss_client::markCommandTerminallyAcked(uint64_t command_dbid)
+{
+    std::scoped_lock guard(this->client_lock);
+    this->terminally_acked_dbid = command_dbid;
 }
 
 auto fss::server::fss_client::lookupDispatchedCommand(uint64_t dispatch_id) -> uint64_t
@@ -1433,6 +1455,16 @@ void fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss
                     this->writer->enqueue(command_ack_write{acked_dbid, static_cast<uint8_t>(ack_msg->getOutcome()),
                                                             ack_msg->getTimeStamp(),
                                                             static_cast<uint8_t>(ack_msg->getReason())});
+                    /* A terminal outcome ends the redelivery of that command on
+                     * this connection (todo/68). "received" is not terminal —
+                     * it means the frame arrived, not that the aircraft acted —
+                     * so the resend must keep running until it says what it
+                     * did. Matches db_command_record_ack's writable set, which
+                     * treats NULL and received as unsettled. */
+                    if (ack_msg->getOutcome() != fss::transport::command_ack_received)
+                    {
+                        this->markCommandTerminallyAcked(acked_dbid);
+                    }
                 }
                 else if (ack_msg != nullptr)
                 {

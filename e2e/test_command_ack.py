@@ -350,3 +350,165 @@ def test_ack_lands_only_on_the_dispatched_row_despite_dispatch_id_collisions(
             f"ack_state={state}, ack_timestamp={ack_ts}, ack_superseded_by={reason}; "
             "server log:\n" + server_proc["log"].read_text(errors="replace")
         )
+
+
+@pytest.mark.satisfies("TC-SRV-004")
+@pytest.mark.requires_docker
+@pytest.mark.timeout(COLLISION_TEST_TIMEOUT)
+def test_restarted_client_is_dispatched_to_again(db_conn, fake_client, server_proc):
+    """An aircraft that restarts is re-sent its pending command, even though it
+    already acked that command terminally before the restart.
+
+    This is the invariant the todo/68 redelivery stop rests on. The server now
+    stops re-sending a command once the aircraft reports a terminal outcome —
+    but cap-fmu has no persistent storage, so an aircraft that restarts has
+    forgotten its commanded state and must be told again.
+
+    What makes that safe is that the stop is scoped to the *connection*: the
+    server holds it in the per-session object and builds a new session for
+    every accepted connection, so a restart resets it by construction. This
+    test proves it end to end rather than by inspection — kill the client
+    outright (no graceful shutdown, no chance to persist anything), let it come
+    back, and require a second dispatch and a second ack.
+
+    Distinct from test_server_restart.py, which bounces the *server*.
+    """
+    with db_conn.cursor() as cur:
+        cur.execute("INSERT INTO assets_asset (name) VALUES ('test1') RETURNING id")
+        asset_id = cur.fetchone()[0]
+    db_conn.commit()
+
+    first = fake_client("test1", client_id="before-restart")
+    _wait_for_client_ready(server_proc, "test1")
+
+    dbid = _dispatch_rtl(db_conn, asset_id)
+    row = _poll_row(db_conn, dbid, timeout=ACK_POLL_TIMEOUT)
+    assert row is not None, (
+        f"command dbid={dbid} never got an ack before the restart; server log:\n"
+        + server_proc["log"].read_text(errors="replace")
+    )
+    _, _, first_ack_timestamp = row
+    assert first_ack_timestamp is not None
+
+    # Exactly one delivery so far: the terminal ack stopped the resend. Without
+    # that stop this count would keep climbing every 10 s and the assertion
+    # after the restart would prove nothing.
+    dispatch_line = f"dispatched command dbid={dbid} to test1"
+    log_path = server_proc["log"]
+    assert log_path.read_text(errors="replace").count(dispatch_line) == 1
+
+    # Kill it the way a crash or power cycle would: no signal handler, no
+    # graceful close, nothing carried across.
+    first["proc"].kill()
+    first["proc"].wait(timeout=10)
+
+    fake_client("test1", client_id="after-restart")
+    # The readiness helper tails from the start of the log, so it would match
+    # the *first* identify line. Wait for the second one instead.
+    deadline = time.monotonic() + CLIENT_READY_TIMEOUT
+    needle = "Aircraft client identified: test1"
+    while time.monotonic() < deadline:
+        if log_path.read_text(errors="replace").count(needle) >= 2:
+            break
+        time.sleep(0.05)
+    else:
+        raise AssertionError(
+            "the restarted client never identified; server log:\n"
+            + log_path.read_text(errors="replace")
+        )
+
+    # The new session re-dispatches the still-pending command...
+    deadline = time.monotonic() + ACK_POLL_TIMEOUT
+    while time.monotonic() < deadline:
+        if log_path.read_text(errors="replace").count(dispatch_line) >= 2:
+            break
+        time.sleep(0.05)
+    else:
+        raise AssertionError(
+            f"command dbid={dbid} was not re-dispatched to the restarted client; server log:\n"
+            + log_path.read_text(errors="replace")
+        )
+
+    # ...and the re-ack lands. A fresh ack_timestamp is what distinguishes it
+    # from the pre-restart one still sitting in the row: the redispatch clears
+    # the ack columns, so this can only be the new connection's ack.
+    reacked = _poll(
+        db_conn,
+        "SELECT ack_state, ack_timestamp FROM assets_assetcommand WHERE id = %s",
+        (dbid,),
+        lambda r: r[0] == ACK_STATE_ACTIONED and r[1] is not None and r[1] != first_ack_timestamp,
+        timeout=ACK_POLL_TIMEOUT,
+        poll=0.02,
+    )
+    assert reacked is not None, f"row for dbid={dbid} vanished"
+    failure = (
+        f"the restarted client did not re-ack: got ack_state={reacked[0]}, "
+        f"ack_timestamp={reacked[1]} (pre-restart was {first_ack_timestamp}); server log:\n"
+        + log_path.read_text(errors="replace")
+    )
+    assert reacked[0] == ACK_STATE_ACTIONED, failure
+    assert reacked[1] != first_ack_timestamp, failure
+
+
+@pytest.mark.satisfies("TC-SRV-004")
+@pytest.mark.requires_docker
+@pytest.mark.timeout(CLIENT_READY_TIMEOUT + 3 * RESEND_WINDOW + ACK_POLL_TIMEOUT + 20.0)
+def test_acked_command_stops_churning_the_row(db_conn, fake_client, server_proc):
+    """todo/68's acceptance criterion, measured end to end.
+
+    An aircraft that acks a command terminally must not cause a new dispatch
+    write every 10 s, and the stored ack must survive rather than being nulled
+    and rewritten on each redelivery.
+
+    Watch a steady state spanning several resend windows: exactly one dispatch
+    is logged, and the row's ack columns never move once they settle.
+    """
+    with db_conn.cursor() as cur:
+        cur.execute("INSERT INTO assets_asset (name) VALUES ('test1') RETURNING id")
+        asset_id = cur.fetchone()[0]
+    db_conn.commit()
+
+    fake_client("test1")
+    _wait_for_client_ready(server_proc, "test1")
+
+    dbid = _dispatch_rtl(db_conn, asset_id)
+    settled = _poll_row(db_conn, dbid, timeout=ACK_POLL_TIMEOUT)
+    assert settled is not None, (
+        f"command dbid={dbid} never got an ack stored; server log:\n"
+        + server_proc["log"].read_text(errors="replace")
+    )
+
+    # Sample the row across more than two resend windows. Before todo/68 each
+    # window enqueued a dispatch write that nulled all three ack columns, so a
+    # sample would eventually catch NULLs and the dispatch count would climb.
+    deadline = time.monotonic() + (2 * RESEND_WINDOW) + 5.0
+    samples = []
+    while time.monotonic() < deadline:
+        db_conn.rollback()
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "SELECT dispatch_id, ack_state, ack_timestamp, ack_superseded_by "
+                "FROM assets_assetcommand WHERE id = %s",
+                (dbid,),
+            )
+            samples.append(cur.fetchone())
+        time.sleep(0.25)
+
+    assert len(set(samples)) == 1, (
+        f"the ack columns changed while the command sat acked and pending: "
+        f"saw {sorted(set(samples))}; server log:\n"
+        + server_proc["log"].read_text(errors="replace")
+    )
+    # The sampled values are the ones _poll_row already saw settle. (The fourth
+    # column, ack_superseded_by, is 0 = supersede_none for a plain actioned ack,
+    # not NULL — _poll_row does not select it.)
+    assert samples[0][:3] == settled, (
+        f"the settled row changed under the samples: {samples[0][:3]} vs {settled}"
+    )
+
+    log_text = server_proc["log"].read_text(errors="replace")
+    dispatches = log_text.count(f"dispatched command dbid={dbid} to test1")
+    assert dispatches == 1, (
+        f"expected exactly one dispatch across {2 * RESEND_WINDOW + 5:.0f}s of steady state, "
+        f"got {dispatches}; server log:\n" + log_text
+    )
