@@ -317,6 +317,22 @@ private:
      * refusal — a command that was never sent must not count as dispatched.
      * Guarded by client_lock. */
     uint64_t last_dispatch_write_dbid{0};
+    /* The command row this connection's aircraft has reported a terminal
+     * outcome for, which ends its redelivery (todo/68). 0 = none.
+     *
+     * Scoped to the connection, and that is load-bearing rather than
+     * incidental: an FMU has no persistent storage, so the server must never
+     * assume an aircraft still holds a command it acked on an earlier
+     * connection. A session is built per accepted connection and never reused,
+     * so an aircraft that restarts arrives with this at 0, is dispatched at
+     * identify time, and is resent to until *that* connection acks terminally.
+     * Storing it on the command row instead would wrongly survive the
+     * reconnect. See docs/decisions/68-command-redelivery-and-ack-keying.md.
+     * Guarded by client_lock. */
+    uint64_t terminally_acked_dbid{0};
+    /* Record a terminal ack for command_dbid, ending its resend on this
+     * connection. Takes client_lock. */
+    void markCommandTerminallyAcked(uint64_t command_dbid);
     /* Guarded by client_lock. Maps a dispatch id (the per-connection message id
      * sendMsg() stamped onto a dispatched command) to the command row it
      * delivered, so an ack echoing that id names an exact row (todo/68). The
