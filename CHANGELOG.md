@@ -45,6 +45,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tracked documents; the rest are retargeted as those files are next touched.
 
 ### Changed
+- **A command issued once no longer destroys and rewrites its own stored
+  acknowledgement every 10 seconds** (todo/68,
+  `docs/decisions/68-command-redelivery-and-ack-keying.md`). Nothing retires a
+  command row, so the server re-dispatched an asset's newest command every 10 s
+  for as long as it stayed connected — and every redelivery recorded a new
+  dispatch, which clears `ack_state`, `ack_timestamp` and `ack_superseded_by` to
+  reopen the ack cycle. The stored outcome of a command was therefore erased and
+  re-established on a 10-second loop, indefinitely, on the healthy path: an
+  operator or investigator saw the ack for the most recent redelivery, never the
+  aircraft's original response, and an aircraft that went quiet mid-cycle left
+  the columns reading NULL. It also put a permanent floor of ~18 non-evictable
+  writes per minute per aircraft under the queue whose first dropped command
+  write severs the fleet. Three changes: acks are matched on the command row's
+  primary key, translated in-session from the per-connection id the aircraft
+  echoes (no wire or schema change), which also means an ack for a dispatch the
+  session never made is dropped rather than reconstructed onto a plausible row;
+  a dispatch is recorded once per connection instead of once per resend; and
+  redelivery stops once the aircraft reports a terminal outcome. The redelivery
+  stop is scoped to the *connection*, never to the command row — an aircraft has
+  no persistent storage, so a restart, link drop or server bounce arrives as a
+  new session that dispatches again immediately and keeps resending until that
+  connection acks for itself. An autopilot rebooting underneath a live client
+  connection is the one case the server cannot see; it is raised with cap-fmu.
+  Decision 48's fencing argument is revised accordingly, and decision 49's claim
+  that `dispatch_id` is "stable across resends of that delivery" is corrected —
+  it never was, and the same wording was repeated on the `server_command_id`
+  field comment in `fss-transport.hpp`.
 - **ABI break:** all four library sonames bump `.so.3` → `.so.4`
   (`-version-info 4:0:0` for `libfss`, `libfss-transport`,
   `libfss-transport-ssl`, `libfss-client-ssl`). Two independent layout changes
