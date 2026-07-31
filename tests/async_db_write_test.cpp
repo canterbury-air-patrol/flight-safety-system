@@ -70,11 +70,11 @@ struct CapturingSink {
                 [&](const fss::server::position_write &w) -> void { asset_ids.push_back(w.asset_id); },
                 [&](const fss::server::status_write &w) -> void { asset_ids.push_back(w.asset_id); },
                 [&](const fss::server::search_status_write &w) -> void { asset_ids.push_back(w.asset_id); },
-                /* Command writes are keyed by command/dispatch id, not
-                 * asset id; these tests don't enqueue them, but the visit
-                 * must cover every alternative, so record the id present. */
+                /* Command writes are keyed by the command row id, not asset
+                 * id; these tests don't enqueue them, but the visit must
+                 * cover every alternative, so record the id present. */
                 [&](const fss::server::command_dispatch_write &w) -> void { asset_ids.push_back(w.command_dbid); },
-                [&](const fss::server::command_ack_write &w) -> void { asset_ids.push_back(w.dispatch_id); },
+                [&](const fss::server::command_ack_write &w) -> void { asset_ids.push_back(w.command_dbid); },
             },
             task);
         count.fetch_add(1);
@@ -284,12 +284,12 @@ TEST_CASE("db_write_queue: a command ack survives a telemetry overflow")
     constexpr std::size_t depth = 5;
     fss::server::db_write_queue q(depth, [cap](const fss::server::db_write_task &t) -> void { (*cap)(t); });
 
-    constexpr uint64_t ack_dispatch_id = 2000000;
+    constexpr uint64_t ack_command_dbid = 2000000;
     for (uint64_t i = 1; i <= depth; ++i)
     {
         q.enqueue(fss::server::position_write{i, 0.0, 0.0, 0});
     }
-    q.enqueue(fss::server::command_ack_write{42, ack_dispatch_id, 0, 0, 0});
+    q.enqueue(fss::server::command_ack_write{ack_command_dbid, 0, 0, 0});
     for (uint64_t i = 100; i < 200; ++i)
     {
         q.enqueue(fss::server::position_write{i, 0.0, 0.0, 0});
@@ -298,7 +298,7 @@ TEST_CASE("db_write_queue: a command ack survives a telemetry overflow")
     q.stop();
 
     auto seen = cap->snapshot();
-    REQUIRE(std::find(seen.begin(), seen.end(), ack_dispatch_id) != seen.end());
+    REQUIRE(std::find(seen.begin(), seen.end(), ack_command_dbid) != seen.end());
     REQUIRE(q.command_dropped_count() == 0);
 }
 

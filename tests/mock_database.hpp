@@ -69,8 +69,7 @@ public:
         uint64_t dispatch_id;
     };
     struct recorded_ack {
-        uint64_t asset_id;
-        uint64_t dispatch_id;
+        uint64_t command_dbid;
         uint8_t ack_state;
         uint64_t ack_timestamp;
         uint8_t ack_reason;
@@ -123,11 +122,10 @@ public:
         dispatches.push_back({command_dbid, dispatch_id});
     }
 
-    void recordCommandAck(uint64_t asset_id, uint64_t dispatch_id, uint8_t ack_state, uint64_t ack_timestamp,
-                          uint8_t ack_reason) override
+    void recordCommandAck(uint64_t command_dbid, uint8_t ack_state, uint64_t ack_timestamp, uint8_t ack_reason) override
     {
         const std::scoped_lock lock(records_lock);
-        acks.push_back({asset_id, dispatch_id, ack_state, ack_timestamp, ack_reason});
+        acks.push_back({command_dbid, ack_state, ack_timestamp, ack_reason});
     }
 
     /* Snapshot accessors: copy the sink under the lock so a test can inspect it

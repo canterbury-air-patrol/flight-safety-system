@@ -204,15 +204,14 @@ void flight_safety_system::server::db_connection::recordCommandDispatch(uint64_t
     }
 }
 
-void flight_safety_system::server::db_connection::recordCommandAck(uint64_t asset_id, uint64_t dispatch_id,
-                                                                   uint8_t ack_state, uint64_t ack_timestamp,
-                                                                   uint8_t ack_reason)
+void flight_safety_system::server::db_connection::recordCommandAck(uint64_t command_dbid, uint8_t ack_state,
+                                                                   uint64_t ack_timestamp, uint8_t ack_reason)
 {
     std::scoped_lock guard(this->write_lock);
-    if (db_command_record_ack(write_conn_name, asset_id, dispatch_id, static_cast<int>(ack_state), ack_timestamp,
+    if (db_command_record_ack(write_conn_name, command_dbid, static_cast<int>(ack_state), ack_timestamp,
                               static_cast<int>(ack_reason)) == 0)
     {
-        throw database_error("command ack write failed for asset " + std::to_string(asset_id));
+        throw database_error("command ack write failed for command " + std::to_string(command_dbid));
     }
 }
 

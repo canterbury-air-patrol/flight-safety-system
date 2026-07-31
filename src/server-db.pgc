@@ -222,31 +222,30 @@ int db_command_set_dispatch_id(const char *conn_arg, unsigned long long command_
     return 1;
 }
 
-int db_command_record_ack(const char *conn_arg, unsigned long long asset_id_arg, unsigned long long dispatch_id_arg, int ack_state_arg, unsigned long long ack_timestamp_arg, int ack_superseded_by_arg)
+int db_command_record_ack(const char *conn_arg, unsigned long long command_dbid_arg, int ack_state_arg, unsigned long long ack_timestamp_arg, int ack_superseded_by_arg)
 {
     EXEC SQL BEGIN DECLARE SECTION;
     const char *conn = conn_arg;
-    unsigned long long asset_id = asset_id_arg;
-    unsigned long long dispatch_id = dispatch_id_arg;
+    unsigned long long command_dbid = command_dbid_arg;
     int ack_state = ack_state_arg;
     unsigned long long ack_timestamp = ack_timestamp_arg;
     int ack_superseded_by = ack_superseded_by_arg;
     EXEC SQL END DECLARE SECTION;
 
-    /* Match the dispatched row by the acking asset and its stamped id, and
-     * update only the NEWEST such row. dispatch_id is the per-connection
-     * last_msg_id: it is not globally unique (so asset_id is needed to avoid a
-     * different asset's row) AND it resets to 0 on every reconnect, so one asset
-     * accumulates several historical command rows sharing a dispatch_id across
-     * sessions. An ack is always for the command just dispatched on the current
-     * connection — the latest such row — so target it alone via a subselect
-     * ordered by timestamp; matching all of them would let this ack rewrite a
-     * long-settled historical row.
+    /* Match the acked row by its primary key (todo/68). What the aircraft echoes
+     * on the wire is the per-connection dispatch id, which identifies a row only
+     * in combination with the session that sent it: it is not globally unique,
+     * and it restarts at 0 on every connection, so one asset accumulates several
+     * historical rows sharing a dispatch_id. This function used to reconstruct
+     * the intended row from (asset_id, dispatch_id) plus a newest-row subselect;
+     * the acking session now translates the id to the row it dispatched, which
+     * is exact rather than reconstructed, so neither the asset scoping nor the
+     * subselect is needed. An ack naming a dispatch this session never sent is
+     * dropped before it reaches the queue and never arrives here.
      * Terminal-transition policy (todo/48): a terminal outcome is final for
      * its dispatch. The row is writable only while unsettled — stored state
      * NULL (no ack yet) or received (0) — so neither a late "received" nor a
-     * second terminal outcome (from a buggy, misordered or forged peer; acks
-     * are not validated in-session against a dispatched command) can rewrite
+     * second terminal outcome (from a buggy or misordered peer) can rewrite
      * a settled actioned/superseded/rejected/noop. The conforming two-phase
      * flow (received, then exactly one terminal) is unaffected, and a
      * REDELIVERED command still re-acks normally: db_command_set_dispatch_id()
@@ -259,9 +258,7 @@ int db_command_record_ack(const char *conn_arg, unsigned long long asset_id_arg,
      * ack_superseded_by is only meaningful for the superseded state. */
     EXEC SQL AT :conn UPDATE assets_assetcommand
         SET ack_state = :ack_state, ack_timestamp = :ack_timestamp, ack_superseded_by = :ack_superseded_by
-        WHERE id = (SELECT id FROM assets_assetcommand
-                    WHERE asset_id = :asset_id AND dispatch_id = :dispatch_id
-                    ORDER BY timestamp DESC LIMIT 1)
+        WHERE id = :command_dbid
           AND (ack_state IS NULL OR ack_state = 0);
 
     if (sqlca.sqlcode < 0)

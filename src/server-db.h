@@ -68,14 +68,14 @@ int db_position_create_entry(const char *conn, unsigned long long asset_id, doub
  * command via dispatch_id == acked_command_id. */
 int db_command_set_dispatch_id(const char *conn, unsigned long long command_dbid, unsigned long long dispatch_id);
 
-/* Updates the ack fields on the assets_assetcommand row whose (asset_id,
- * dispatch_id) matches the acking asset and the acked id. dispatch_id is only
- * per-connection unique, so asset_id scopes the match to avoid clobbering another
- * asset's same-dispatch_id row. ack_state is the fss_command_ack_outcome int,
+/* Updates the ack fields on the assets_assetcommand row identified by its primary
+ * key (command_dbid). The caller translates the wire's per-connection acked id to
+ * the row it dispatched before calling (todo/68), so this names one row outright
+ * and needs no asset scoping. ack_state is the fss_command_ack_outcome int,
  * ack_superseded_by the fss_command_ack_reason int, ack_timestamp the FMU
  * wall-clock ms. The update never lowers an already-terminal ack_state back to a
  * non-terminal one (a late "received" cannot clobber a settled outcome). */
-int db_command_record_ack(const char *conn, unsigned long long asset_id, unsigned long long dispatch_id, int ack_state,
+int db_command_record_ack(const char *conn, unsigned long long command_dbid, int ack_state,
                           unsigned long long ack_timestamp, int ack_superseded_by);
 
 struct asset_command_s {

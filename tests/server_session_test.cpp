@@ -213,7 +213,7 @@ auto make_mock_writer(fss_test::MockDatabase &mock) -> std::shared_ptr<fss::serv
                            mock.recordCommandDispatch(w.command_dbid, w.dispatch_id);
                        },
                        [&](const fss::server::command_ack_write &w) -> void {
-                           mock.recordCommandAck(w.asset_id, w.dispatch_id, w.ack_state, w.ack_timestamp, w.ack_reason);
+                           mock.recordCommandAck(w.command_dbid, w.ack_state, w.ack_timestamp, w.ack_reason);
                        },
                    },
                    task);
@@ -1342,7 +1342,17 @@ TEST_CASE("rate limiter: rtt_response and command_ack are exempt (todo/37)")
 
     session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
 
-    /* A real outstanding request to reconcile the response against. */
+    /* A real dispatch to ack, and a real outstanding request to reconcile the
+     * response against. Both are outbound, so neither spends inbound budget. */
+    constexpr uint64_t command_dbid = 4242;
+    session->setPendingCommand(
+        std::make_shared<fss::server::asset_command>(command_dbid, /*ts*/ 500, "RTL", 0.0, 0.0, 0));
+    session->sendCommand();
+    REQUIRE(fss_test::wait_for([&]() -> bool { return mock.getDispatches().size() == 1; }));
+    const auto dispatched = mock.getDispatches();
+    REQUIRE_FALSE(dispatched.empty());
+    const uint64_t dispatched_id = dispatched.front().dispatch_id;
+
     auto rtt_req = std::make_shared<fss::transport::fss_message_rtt_request>();
     session->sendRTTRequest(rtt_req);
     uint64_t assigned_id = rtt_req->getId();
@@ -1367,26 +1377,26 @@ TEST_CASE("rate limiter: rtt_response and command_ack are exempt (todo/37)")
 
     /* Bucket is still drained: without the fix this ack would be silently
      * dropped before ever reaching the writer. */
-    constexpr uint64_t acked_id = 42;
-    auto ack = std::make_shared<fss::transport::fss_message_command_ack>(acked_id, fss::transport::asset_command_hold,
-                                                                         fss::transport::command_ack_actioned,
-                                                                         fss::transport::supersede_none, uint64_t{500});
+    auto ack = std::make_shared<fss::transport::fss_message_command_ack>(
+        dispatched_id, fss::transport::asset_command_hold, fss::transport::command_ack_actioned,
+        fss::transport::supersede_none, uint64_t{500});
     session->processMessage(ack);
     REQUIRE(fss_test::wait_for([&]() -> bool { return !mock.getAcks().empty(); }));
-    REQUIRE(mock.getAcks().front().dispatch_id == acked_id);
+    REQUIRE(mock.getAcks().front().command_dbid == command_dbid);
 }
 
 TEST_CASE("rate limiter: a command_ack flood is capped, not exempted outright (todo/37)")
 {
-    /* Unlike rtt_response, a command_ack is not naturally bounded: nothing
-     * in-session validates it against a command this server actually
-     * dispatched before enqueueing, and command_ack_write is a protected task
-     * in the shared db_write_queue that can evict other assets' telemetry
+    /* Unlike rtt_response, a command_ack is not naturally bounded. Since
+     * todo/68 an ack must name a dispatch this session made, which stops a peer
+     * inventing ids — but nothing stops it re-acking a command it was
+     * legitimately sent, over and over, and command_ack_write is a protected
+     * task in the shared db_write_queue that can evict other assets' telemetry
      * and even other command writes under sustained pressure. A blanket
      * exemption would let one identified peer flood that queue at line rate,
      * so command_ack gets its own small bucket (10 burst, 5/s refill in
-     * fss-server.hpp) instead. Flood well past that cap and assert only the
-     * bucket's worth land. */
+     * fss-server.hpp) instead. Flood well past that cap with a valid acked id
+     * and assert only the bucket's worth land. */
     fss_test::MockDatabase mock;
     mock.asset_ids["craft"] = 1;
 
@@ -1402,11 +1412,19 @@ TEST_CASE("rate limiter: a command_ack flood is capped, not exempted outright (t
 
     session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
 
+    session->setPendingCommand(
+        std::make_shared<fss::server::asset_command>(/*dbid*/ 4242, /*ts*/ 500, "RTL", 0.0, 0.0, 0));
+    session->sendCommand();
+    REQUIRE(fss_test::wait_for([&]() -> bool { return mock.getDispatches().size() == 1; }));
+    const auto dispatched = mock.getDispatches();
+    REQUIRE_FALSE(dispatched.empty());
+    const uint64_t dispatched_id = dispatched.front().dispatch_id;
+
     constexpr int acks_sent = 30;
     for (int i = 0; i < acks_sent; ++i)
     {
         auto ack = std::make_shared<fss::transport::fss_message_command_ack>(
-            static_cast<uint64_t>(i), fss::transport::asset_command_hold, fss::transport::command_ack_actioned,
+            dispatched_id, fss::transport::asset_command_hold, fss::transport::command_ack_actioned,
             fss::transport::supersede_none, uint64_t{500});
         session->processMessage(ack);
     }
@@ -2318,22 +2336,66 @@ TEST_CASE("session: command_ack is stored when the capability is negotiated")
     auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
     session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
 
-    constexpr uint64_t acked_id = 0xABCDEF;
+    /* The ack has to name a command this session actually dispatched (todo/68),
+     * so dispatch one and ack the id that went out on the wire. */
+    constexpr uint64_t command_dbid = 4242;
+    session->setPendingCommand(
+        std::make_shared<fss::server::asset_command>(command_dbid, /*ts*/ 500, "RTL", 0.0, 0.0, 0));
+    session->sendCommand();
+    REQUIRE(fss_test::wait_for([&]() -> bool { return mock.getDispatches().size() == 1; }));
+    const auto dispatched = mock.getDispatches();
+    REQUIRE_FALSE(dispatched.empty());
+    const uint64_t dispatched_id = dispatched.front().dispatch_id;
+
     constexpr uint64_t ack_ts = 1750000000000ULL;
-    auto ack = std::make_shared<fss::transport::fss_message_command_ack>(acked_id, fss::transport::asset_command_manual,
-                                                                         fss::transport::command_ack_superseded,
-                                                                         fss::transport::supersede_low_battery, ack_ts);
+    auto ack = std::make_shared<fss::transport::fss_message_command_ack>(
+        dispatched_id, fss::transport::asset_command_manual, fss::transport::command_ack_superseded,
+        fss::transport::supersede_low_battery, ack_ts);
     session->processMessage(ack);
 
     REQUIRE(fss_test::wait_for([&]() { return !mock.getAcks().empty(); }));
-    /* The ack is scoped to the acking asset (the one this connection identified
-     * as), not just the per-connection dispatch_id. */
+    /* The stored ack names the command ROW, translated from the wire's
+     * per-connection id by the session that dispatched it. */
     auto acks = mock.getAcks();
-    REQUIRE(acks.front().asset_id == 13);
-    REQUIRE(acks.front().dispatch_id == acked_id);
+    REQUIRE(acks.front().command_dbid == command_dbid);
     REQUIRE(acks.front().ack_state == static_cast<uint8_t>(fss::transport::command_ack_superseded));
     REQUIRE(acks.front().ack_timestamp == ack_ts);
     REQUIRE(acks.front().ack_reason == static_cast<uint8_t>(fss::transport::supersede_low_battery));
+}
+
+TEST_CASE("session: an ack naming a dispatch this session never made is dropped")
+{
+    /* todo/68: the wire's acked id is only per-connection unique, so it names a
+     * command row only in combination with the session that sent it. An id this
+     * session never dispatched must not reach the database — before the
+     * translation it was forwarded raw, and the DB reconstructed a plausible
+     * row from (asset_id, dispatch_id), which is how a colliding id could land
+     * an ack on the wrong command. */
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 13;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    conn->setNegotiatedFeatureFlags(fss::transport::FSS_FEATURE_COMMAND_ACK);
+    NullClientHandler handler;
+
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+
+    session->setPendingCommand(
+        std::make_shared<fss::server::asset_command>(/*dbid*/ 4242, /*ts*/ 500, "RTL", 0.0, 0.0, 0));
+    session->sendCommand();
+    REQUIRE(fss_test::wait_for([&]() -> bool { return mock.getDispatches().size() == 1; }));
+    const auto dispatched = mock.getDispatches();
+    REQUIRE_FALSE(dispatched.empty());
+    const uint64_t dispatched_id = dispatched.front().dispatch_id;
+
+    auto ack = std::make_shared<fss::transport::fss_message_command_ack>(
+        dispatched_id + 1000, fss::transport::asset_command_rtl, fss::transport::command_ack_actioned, uint64_t{1});
+    session->processMessage(ack);
+
+    REQUIRE_FALSE(fss_test::wait_for([&]() { return !mock.getAcks().empty(); }, std::chrono::milliseconds(200)));
 }
 
 TEST_CASE("session: command_ack is dropped when the capability is not negotiated")
