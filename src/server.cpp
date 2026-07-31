@@ -514,14 +514,24 @@ auto main(int argc, char *argv[]) -> int
                     case db_failsafe::event::tripped: {
                         clients->setDegraded(true);
                         auto severed = clients->disconnectAll();
-                        FSS_LOG_ERROR("server", "DB fail-safe tripped ("
-                                                    << (failsafe.reason() == db_failsafe::trip_reason::command_drop
-                                                            ? "a command dispatch/ack DB write was dropped — audit "
-                                                              "state destroyed"
-                                                            : "sustained DB write failures")
-                                                    << "); severed " << severed
-                                                    << " connection(s) and refusing new sessions until the write "
-                                                       "queue drains and stays quiet");
+                        bool dropped = failsafe.reason() == db_failsafe::trip_reason::command_drop;
+                        /* Name how long the incident had been running: with the
+                         * threshold now measured against a clock rather than a
+                         * tick count (todo/70), the operator can tell a
+                         * just-over-threshold trip from one that had been
+                         * failing for a minute. Only meaningful for the
+                         * sustained-failure path — a command drop trips on the
+                         * first occurrence, with no incident to age. */
+                        FSS_LOG_ERROR("server",
+                                      "DB fail-safe tripped ("
+                                          << (dropped ? "a command dispatch/ack DB write was dropped — audit "
+                                                        "state destroyed"
+                                                      : "sustained DB write failures")
+                                          << (dropped ? std::string{}
+                                                      : " over " + std::to_string(failsafe.incidentAgeSecs()) + "s")
+                                          << "); severed " << severed
+                                          << " connection(s) and refusing new sessions until the write "
+                                             "queue drains and stays quiet");
                         break;
                     }
                     case db_failsafe::event::recovered:
