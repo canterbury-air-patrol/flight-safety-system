@@ -207,9 +207,9 @@ int db_command_set_dispatch_id(const char *conn_arg, unsigned long long command_
      * A redelivery (identify resends the newest command on every reconnect)
      * must therefore reopen the ack cycle here, or the re-ack the redelivered
      * command legitimately produces would be refused as a duplicate terminal.
-     * An ack can only match this row by carrying the new dispatch_id, which
-     * does not exist on the row until this statement lands, so no ack for the
-     * new delivery can slip in ahead of the clear. */
+     * Since todo/68 the caller fires this once per command per connection, not
+     * once per resend, so no clear can land between a delivery and its ack —
+     * see docs/decisions/68-command-redelivery-and-ack-keying.md. */
     EXEC SQL AT :conn UPDATE assets_assetcommand
         SET dispatch_id = :dispatch_id, ack_state = NULL, ack_timestamp = NULL, ack_superseded_by = NULL
         WHERE id = :command_dbid;

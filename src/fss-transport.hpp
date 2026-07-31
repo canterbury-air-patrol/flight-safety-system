@@ -727,9 +727,9 @@ private:
      *     as an optional trailing wire field, omitted when 0, like
      *     rtt_response's client_timestamp (todo/17 item 3).
      * This is NOT the per-connection header id used for command-ack
-     * correlation (dispatch_id): that one is scoped to a single delivery and
-     * stable across resends of it; this one is scoped to the operator action
-     * and survives reconnects.
+     * correlation (dispatch_id): that one is scoped to a single delivery, is
+     * re-stamped on every resend, and restarts at 0 on each connection; this
+     * one is scoped to the operator action and survives reconnects.
      *
      * The other of the two optional trailing fields the prefix-closed
      * extension rule above (docs/decisions/51-optional-trailing-field-rule.md)

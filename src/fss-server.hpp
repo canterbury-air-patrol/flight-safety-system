@@ -107,10 +107,12 @@ public:
     virtual void recordStatus(uint64_t asset_id, uint8_t bat_percent, uint32_t bat_mah_used, double bat_voltage) = 0;
     virtual void recordSearchStatus(uint64_t asset_id, uint64_t search_id, uint64_t completed, uint64_t total) = 0;
     /* Records the dispatch id (the per-connection message id the server stamped
-     * on the command) against the command row, so a later ack can be matched to
-     * this specific command. Also reopens the row's ack cycle (clears the ack
-     * columns): the stored ack always describes the latest dispatch, and a
-     * terminal outcome is final only within its dispatch — see recordCommandAck. */
+     * on the command) against the command row, and reopens the row's ack cycle
+     * (clears the ack columns): the stored ack always describes the latest
+     * dispatch, and a terminal outcome is final only within its dispatch — see
+     * recordCommandAck. Enqueued once per command per connection, not on every
+     * resend (todo/68): the clear is what made the healthy path destroy and
+     * rewrite a command's stored outcome every resend window. */
     virtual void recordCommandDispatch(uint64_t command_dbid, uint64_t dispatch_id) = 0;
     /* Stores a command ack against the command row named by its primary key.
      * The caller has already translated the wire's per-connection acked id to the
@@ -309,6 +311,12 @@ private:
     void updateClockOffset(uint64_t client_timestamp, uint64_t rtt_ms, uint64_t recv_wall);
     uint64_t last_command_send_ts{0};
     uint64_t last_command_dbid{0};
+    /* The command row this session has already recorded a dispatch write for
+     * (todo/68). Deliberately separate from last_command_dbid, which
+     * sendCommand()'s mark_handled also sets on a permanent validation
+     * refusal — a command that was never sent must not count as dispatched.
+     * Guarded by client_lock. */
+    uint64_t last_dispatch_write_dbid{0};
     /* Guarded by client_lock. Maps a dispatch id (the per-connection message id
      * sendMsg() stamped onto a dispatched command) to the command row it
      * delivered, so an ack echoing that id names an exact row (todo/68). The
@@ -326,8 +334,10 @@ private:
     static constexpr size_t max_tracked_dispatches = 16;
     std::list<std::pair<uint64_t, uint64_t>> dispatched_commands{};
     /* Remember that dispatch_id delivered command_dbid, evicting the oldest
-     * entry once the cap is reached. Takes client_lock. */
-    void recordDispatchedCommand(uint64_t dispatch_id, uint64_t command_dbid);
+     * entry once the cap is reached. Returns true when this is the first
+     * delivery of that command on this connection, i.e. when a dispatch write
+     * is due; a resend returns false. Takes client_lock. */
+    auto recordDispatchedCommand(uint64_t dispatch_id, uint64_t command_dbid) -> bool;
     /* The command row dispatch_id delivered, or 0 if this session never
      * dispatched it (or it has aged out of the FIFO). Takes client_lock. */
     auto lookupDispatchedCommand(uint64_t dispatch_id) -> uint64_t;

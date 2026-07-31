@@ -722,6 +722,107 @@ TEST_CASE("session: a successful command send records exactly one dispatch and s
     REQUIRE(mock.getDispatches().front().command_dbid == 88);
 }
 
+TEST_CASE("session: resends across the window do not re-record the dispatch (todo/68)")
+{
+    /* The measurement todo/68's acceptance criterion asks for. Nothing retires
+     * a command row, so the resend fires every 10 s for as long as the aircraft
+     * stays connected. Every resend used to enqueue a command_dispatch_write,
+     * and db_command_set_dispatch_id nulls the three ack columns to reopen the
+     * cycle — so the stored outcome of a command was destroyed and rewritten
+     * every 10 s, forever, on the healthy path.
+     *
+     * Drive several whole resend windows and assert the wire saw a delivery
+     * each time (the aircraft is still being told its commanded state) while
+     * the database saw exactly one dispatch. */
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 12;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+    auto clock = std::make_shared<FakeClock>();
+
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    session->setClock(clock);
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+
+    constexpr uint64_t command_dbid = 88;
+    session->setPendingCommand(
+        std::make_shared<fss::server::asset_command>(command_dbid, /*ts*/ 500, "RTL", 0.0, 0.0, 0));
+
+    /* client_session.cpp's resend window, plus a margin so `>` is satisfied. */
+    constexpr uint64_t resend_window_ms = 10 * uint64_t{1000};
+    constexpr int windows = 4;
+    session->sendCommand();
+    for (int i = 0; i < windows; ++i)
+    {
+        clock->advance(resend_window_ms + 1);
+        session->sendCommand();
+    }
+
+    REQUIRE(count_sent<fss::transport::fss_message_asset_command>(conn->sent) == windows + 1);
+    REQUIRE(fss_test::wait_for([&]() -> bool { return !mock.getDispatches().empty(); }));
+    REQUIRE(mock.getDispatches().size() == 1);
+    REQUIRE(mock.getDispatches().front().command_dbid == command_dbid);
+
+    /* A genuinely new command is still recorded: the suppression is per
+     * command row, not a one-dispatch-per-connection cap. */
+    constexpr uint64_t newer_dbid = 89;
+    session->setPendingCommand(
+        std::make_shared<fss::server::asset_command>(newer_dbid, /*ts*/ 600, "HOLD", 0.0, 0.0, 0));
+    session->sendCommand();
+    REQUIRE(fss_test::wait_for([&]() -> bool { return mock.getDispatches().size() == 2; }));
+    REQUIRE(mock.getDispatches().back().command_dbid == newer_dbid);
+}
+
+TEST_CASE("session: every delivery stays ackable even though only the first is recorded (todo/68)")
+{
+    /* The dispatch-write suppression must not narrow what the aircraft can
+     * ack. The translating map is populated on every send, so an ack echoing
+     * the id of a *resent* frame — which is what an aircraft that only acted
+     * on the third delivery would send — still resolves to the command row. */
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 12;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    conn->setNegotiatedFeatureFlags(fss::transport::FSS_FEATURE_COMMAND_ACK);
+    NullClientHandler handler;
+    auto clock = std::make_shared<FakeClock>();
+
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    session->setClock(clock);
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+
+    constexpr uint64_t command_dbid = 88;
+    session->setPendingCommand(
+        std::make_shared<fss::server::asset_command>(command_dbid, /*ts*/ 500, "RTL", 0.0, 0.0, 0));
+    session->sendCommand();
+    clock->advance((10 * uint64_t{1000}) + 1);
+    session->sendCommand();
+
+    /* The id of the second (unrecorded) delivery, taken off the wire. */
+    auto sent = conn->sentSnapshot();
+    std::vector<uint64_t> command_ids;
+    for (const auto &msg : sent)
+    {
+        if (msg != nullptr && msg->getType() == fss::transport::message_type_command)
+        {
+            command_ids.push_back(msg->getId());
+        }
+    }
+    REQUIRE(command_ids.size() == 2);
+    REQUIRE(command_ids[0] != command_ids[1]);
+
+    session->processMessage(std::make_shared<fss::transport::fss_message_command_ack>(
+        command_ids[1], fss::transport::asset_command_rtl, fss::transport::command_ack_actioned, uint64_t{1}));
+
+    REQUIRE(fss_test::wait_for([&]() -> bool { return !mock.getAcks().empty(); }));
+    REQUIRE(mock.getAcks().front().command_dbid == command_dbid);
+}
+
 TEST_CASE("session: dispatched command carries the server command id only when negotiated (todo/49)")
 {
     /* The dispatched wire message identifies the operator action by this

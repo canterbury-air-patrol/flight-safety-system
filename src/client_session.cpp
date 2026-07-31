@@ -576,16 +576,32 @@ void fss::server::fss_client::sendCommand()
     /* sendMsg stamped the per-connection message id into msg. Remember locally
      * which command row that id delivered, so an ack echoing it as
      * acked_command_id resolves to this exact row (todo/68) rather than being
-     * reconstructed from (asset_id, dispatch_id) in SQL. */
-    this->recordDispatchedCommand(msg->getId(), dbid);
-    /* Record it against the command row too (cached_asset_id is non-zero here —
-     * the early return above guarantees it), so the stored dispatch id says
-     * which delivery the row's ack columns describe. */
-    this->writer->enqueue(command_dispatch_write{dbid, msg->getId()});
+     * reconstructed from (asset_id, dispatch_id) in SQL. Every delivery is
+     * remembered, including a resend — the aircraft acks whichever frame it
+     * actually received. */
+    if (this->recordDispatchedCommand(msg->getId(), dbid))
+    {
+        /* First delivery of this command on this connection, so record the
+         * dispatch against the row (cached_asset_id is non-zero here — the
+         * early return above guarantees it).
+         *
+         * A resend deliberately does NOT write (todo/68). The write is not
+         * free: db_command_set_dispatch_id also clears ack_state,
+         * ack_timestamp and ack_superseded_by to reopen the ack cycle, so
+         * firing it every resend destroyed and rewrote the row's stored
+         * outcome every 10 s for as long as the aircraft stayed connected —
+         * the audit state the todo/45 fail-safe exists to protect, erased on
+         * the healthy path, at a steady cost in non-evictable queue slots.
+         * Nothing needs the stored dispatch_id to track the latest frame now
+         * that the ack is keyed on the row id; it records which delivery the
+         * ack columns describe, and that is the first one until the aircraft
+         * reconnects and a new session dispatches afresh. */
+        this->writer->enqueue(command_dispatch_write{dbid, msg->getId()});
+    }
     FSS_LOG_INFO("server", "dispatched command dbid=" << dbid << " to " << client_name);
 }
 
-void fss::server::fss_client::recordDispatchedCommand(uint64_t dispatch_id, uint64_t command_dbid)
+auto fss::server::fss_client::recordDispatchedCommand(uint64_t dispatch_id, uint64_t command_dbid) -> bool
 {
     std::scoped_lock guard(this->client_lock);
     this->dispatched_commands.emplace_back(dispatch_id, command_dbid);
@@ -593,6 +609,17 @@ void fss::server::fss_client::recordDispatchedCommand(uint64_t dispatch_id, uint
     {
         this->dispatched_commands.pop_front();
     }
+    /* Checked and claimed under the same lock as the insert above, for the
+     * same reason sendCommand() claims its resend window before sending: the
+     * recv thread's identify path and an outbound worker can both be in here
+     * for the same command, and two dispatch writes for one delivery would
+     * null the ack columns twice. */
+    if (command_dbid == this->last_dispatch_write_dbid)
+    {
+        return false;
+    }
+    this->last_dispatch_write_dbid = command_dbid;
+    return true;
 }
 
 auto fss::server::fss_client::lookupDispatchedCommand(uint64_t dispatch_id) -> uint64_t
