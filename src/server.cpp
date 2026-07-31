@@ -93,7 +93,7 @@ auto main(int argc, char *argv[]) -> int
      * arriving once the incident spans the threshold, so only sustained
      * failure -- what disk-full looks like -- can fire it. Command
      * dispatch/ack drops trip unconditionally, with no threshold (todo/45). */
-    constexpr uint64_t default_db_write_failure_disconnect_ticks = 5;
+    constexpr uint64_t default_db_write_failure_disconnect_secs = 5;
     /* Two roles (same meaning: how long with no new failure before the
      * incident is considered over). Outside a trip: how long failures may
      * pause and still chain into one incident (PR #327 review: configurable
@@ -119,7 +119,7 @@ auto main(int argc, char *argv[]) -> int
     uint64_t rate_capacity = default_rate_capacity;
     uint64_t rate_refill = default_rate_refill_per_s;
     auto duplicate_identity_policy = default_duplicate_identity_policy;
-    uint64_t db_write_failure_disconnect_ticks = default_db_write_failure_disconnect_ticks;
+    uint64_t db_write_failure_disconnect_secs = default_db_write_failure_disconnect_secs;
     uint64_t db_write_failure_recovery_grace_secs = default_db_write_failure_recovery_grace_secs;
     unsigned int tls_handshake_timeout_ms = default_tls_handshake_timeout_ms;
     std::size_t max_concurrent_handshakes = default_max_concurrent_handshakes;
@@ -270,9 +270,29 @@ auto main(int argc, char *argv[]) -> int
                                                                               << "'; using default (reject_newcomer)");
             }
         }
-        if (config.isMember("db_write_failure_disconnect_ticks"))
+        /* Renamed from db_write_failure_disconnect_ticks (todo/70): the value
+         * always meant seconds — it is documented in seconds and its sibling
+         * has always been named _secs — but until the threshold was measured
+         * against a clock it was really counting loop iterations, and the old
+         * name was the only place the tree admitted that. The old key is still
+         * accepted so an existing deployment's config keeps working; the new
+         * one wins if both are present. */
+        if (config.isMember("db_write_failure_disconnect_secs"))
         {
-            db_write_failure_disconnect_ticks = config["db_write_failure_disconnect_ticks"].asUInt64();
+            db_write_failure_disconnect_secs = config["db_write_failure_disconnect_secs"].asUInt64();
+            if (config.isMember("db_write_failure_disconnect_ticks"))
+            {
+                FSS_LOG_WARN("server", "both db_write_failure_disconnect_secs and the deprecated "
+                                       "db_write_failure_disconnect_ticks are set; using the former ("
+                                           << db_write_failure_disconnect_secs << ")");
+            }
+        }
+        else if (config.isMember("db_write_failure_disconnect_ticks"))
+        {
+            db_write_failure_disconnect_secs = config["db_write_failure_disconnect_ticks"].asUInt64();
+            FSS_LOG_WARN("server", "db_write_failure_disconnect_ticks is deprecated; rename it to "
+                                   "db_write_failure_disconnect_secs (the value is unchanged: "
+                                       << db_write_failure_disconnect_secs << "s)");
         }
         if (config.isMember("db_write_failure_recovery_grace_secs"))
         {
@@ -516,7 +536,7 @@ auto main(int argc, char *argv[]) -> int
                 using flight_safety_system::server::db_failsafe;
                 static uint64_t last_failure_count = 0;
                 static uint64_t last_command_dropped = 0;
-                static db_failsafe failsafe(db_write_failure_disconnect_ticks, db_write_failure_recovery_grace_secs);
+                static db_failsafe failsafe(db_write_failure_disconnect_secs, db_write_failure_recovery_grace_secs);
                 uint64_t current_failures = writer->write_failure_count();
                 if (current_failures != last_failure_count)
                 {

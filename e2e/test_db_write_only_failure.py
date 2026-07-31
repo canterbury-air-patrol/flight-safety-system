@@ -4,7 +4,7 @@ The shipped todo/34 fail-safe severed every client on sustained DB write
 failure but left the listener ungated. If the failure is write-only — reads
 still succeed, so re-identify works — every severed aircraft reconnected
 straight back into the same unhealthy server, failed writes again, and was
-severed again ~db_write_failure_disconnect_ticks later: a sustained
+severed again ~db_write_failure_disconnect_secs later: a sustained
 disconnect/reconnect flap oscillating aircraft in and out of comms-loss RTL.
 (The pure disk-full case never showed this because Postgres PANICs and the
 read side dies too; see test_db_disk_full.py.)
@@ -107,7 +107,7 @@ def test_write_only_db_failure_latches_one_failsafe_event(db_conn, fake_client, 
             cur.execute("SELECT id FROM assets_asset WHERE name = 'test1'")
             assert cur.fetchone()[0] == asset_id
 
-        # The incident must span db_write_failure_disconnect_ticks (5s) of
+        # The incident must span db_write_failure_disconnect_secs (5s) of
         # recurring failures before tripping; RTT writes recur ~1s.
         assert _wait_for(lambda: "DB fail-safe tripped" in log_text(), timeout=30.0, poll=0.2), (
             "server never tripped the fail-safe on sustained write-only failure\n" + log_text()

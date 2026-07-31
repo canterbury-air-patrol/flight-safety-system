@@ -45,6 +45,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tracked documents; the rest are retargeted as those files are next touched.
 
 ### Changed
+- **The DB fail-safe's thresholds are measured in real time, not in loop
+  iterations** (todo/70). `db_failsafe` opened each tick with `elapsed_secs++`
+  and compared every threshold against that counter, but the caller advances it
+  on a 100 ms sleep *plus* whatever the loop body took — a fan-out over every
+  client, and once a second a pass that joins departing clients' receive
+  threads — and the signal handlers install without `SA_RESTART`, so a SIGHUP or
+  SIGTERM returned the sleep early. "5 seconds of sustained failure before
+  severing the fleet" therefore meant five loop iterations: stretched under
+  load, compressed under signal traffic. Load correlates with the database being
+  unwell, so the trip ran late in exactly the conditions it exists for. This was
+  also the only timekeeping class in the tree without an injectable clock, which
+  is why the drift had never been measured — its tests could only assert the
+  counter arithmetic. It now takes an `IClock`, and the main loop runs every
+  periodic task on its own deadline, so `checkTimeouts()` and the RTT sweep keep
+  honest time as well. No threshold or transition changed; the existing twelve
+  cases are unchanged and six new ones pin the edges (no trip at 4.9 s, trip at
+  5.1 s; recovery at 15.001 s but not at 15.000 s; one six-second tick trips
+  where five calls would not have; thirty signal-shortened ticks inside a second
+  do not). The trip log now names how long the incident had been running.
+  **The config field `db_write_failure_disconnect_ticks` is renamed
+  `db_write_failure_disconnect_secs`** — which is what it always meant, and what
+  its sibling was already called; the old key is still accepted and warns.
 - **A command issued once no longer destroys and rewrites its own stored
   acknowledgement every 10 seconds** (todo/68,
   `docs/decisions/68-command-redelivery-and-ack-keying.md`). Nothing retires a
