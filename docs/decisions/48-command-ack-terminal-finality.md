@@ -22,9 +22,32 @@ cycle**: when it stamps a new dispatch id it clears the three ack columns. The
 ack columns therefore always describe the *latest dispatch*, not the row's
 lifetime.
 
-There is no ordering race in that pairing: an ack for the new delivery can only
-match the row via the new dispatch id, and that dispatch id does not exist on
-the row until the same statement that clears the acks lands.
+### What fences a stale ack (revised by [68](68-command-redelivery-and-ack-keying.md))
+
+As decided here, the fence was the freshly minted dispatch id: an ack for the
+new delivery could only match the row by carrying that id, and the id did not
+exist on the row until the same statement that cleared the acks landed.
+
+**That argument no longer holds, and is not what protects the row today.**
+Decision 68 keys the ack on the command row's primary key rather than on the
+stored `dispatch_id`, and stops writing a dispatch on every resend — so the ack
+no longer reaches the row via the stored id at all, and the clearing statement
+fires once per delivery rather than once per resend.
+
+The replacement fence is narrower and stronger:
+
+- The ack names the **row**, and finality is scoped to that row's current
+  dispatch via the unchanged writable-set guard. There is no id to collide and
+  no subselect to pick the wrong row.
+- Cross-connection staleness is impossible because the translation is
+  in-process: `fss_client` holds the `dispatch_id → command_dbid` map, a
+  server-side session is built per accepted connection and never reused, and
+  the map dies with the session. An ack arriving on a new connection for a
+  delivery made on the old one resolves to nothing and is dropped.
+- Within one connection, the ack cycle is reopened exactly once — at the first
+  delivery of a given command — and every later frame for that command is a
+  resend that writes nothing. So no clear can land between a delivery and its
+  ack.
 
 ## Alternative deliberately not taken: blanket "terminal is final"
 
@@ -33,6 +56,11 @@ legitimate terminal-over-terminal exists and is pinned by
 `e2e/test_server_restart.py`: a command redelivered after a server bounce must
 settle back to `actioned` with a fresh `ack_timestamp`. Blanket finality would
 leave that row stuck at its pre-bounce outcome forever.
+
+Decision 68 does not change this. A server bounce (or an aircraft reconnect)
+builds a new session, whose `last_dispatch_write_dbid` starts at zero, so the
+first delivery on the new connection still records a dispatch, still reopens the
+cycle, and the re-ack still lands.
 
 ## A refused write is not an error
 

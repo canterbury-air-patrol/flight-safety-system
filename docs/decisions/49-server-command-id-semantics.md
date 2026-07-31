@@ -54,9 +54,21 @@ above, at zero infrastructure cost.
 ## Not to be conflated with `dispatch_id`
 
 `dispatch_id` is the per-connection message header id used for command-ack
-correlation. It is scoped to a *single delivery* and is stable across resends of
-that delivery. `server_command_id` is scoped to the *operator action* and
-survives reconnects. They are different values with different lifetimes.
+correlation. It is scoped to a *single delivery*: `fss_connection::sendMsg()`
+stamps the next sequence number unconditionally, so every resend of a command
+goes out under a **new** dispatch id, and the counter restarts at 0 on each
+connection. `server_command_id` is scoped to the *operator action* and survives
+reconnects. They are different values with different lifetimes.
+
+> Corrected 2026-07-31 (todo/68). This section previously said `dispatch_id` was
+> "stable across resends of that delivery", which was never true of the
+> implementation — the same claim was repeated on the field comment in
+> `fss-transport.hpp`. The distinction the section draws is right; only that
+> clause was wrong. Since resends no longer record a dispatch at all, the
+> `dispatch_id` **stored on the command row** is now stable for the life of a
+> connection — but the id on the wire still changes with every frame, which is
+> why the ack is keyed on the row id instead
+> (see [68](68-command-redelivery-and-ack-keying.md)).
 
 ## Implementation trap, found during the work
 

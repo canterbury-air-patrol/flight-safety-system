@@ -64,8 +64,10 @@ int db_position_create_entry(const char *conn, unsigned long long asset_id, doub
 
 /* Records the per-connection message id the server stamped onto the dispatched
  * command, on the assets_assetcommand row identified by its primary key
- * (command_dbid). Lets a later command-ack be matched back to this specific
- * command via dispatch_id == acked_command_id. */
+ * (command_dbid), and reopens the row's ack cycle. Called once per command per
+ * connection, not once per resend (todo/68), so the stored id names the
+ * delivery the row's ack columns describe. The ack itself is matched on the row
+ * id, not on this column. */
 int db_command_set_dispatch_id(const char *conn, unsigned long long command_dbid, unsigned long long dispatch_id);
 
 /* Updates the ack fields on the assets_assetcommand row identified by its primary

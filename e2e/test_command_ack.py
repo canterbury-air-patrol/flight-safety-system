@@ -44,21 +44,20 @@ COLLISION_BAND = 20
 
 # Nothing retires a command row, so the newest row for an asset stays pending
 # and sendCommand() re-dispatches it every 10 s (client_session.cpp's
-# `timeout_time`, the resend window). Every redelivery enqueues a
-# command_dispatch_write, and db_command_set_dispatch_id nulls ack_state,
-# ack_timestamp and ack_superseded_by before the fresh ack re-populates them —
-# so each redelivery opens a brief window in which the ack columns read NULL
-# for a command that was acked (todo/68).
+# `timeout_time`, the resend window).
 #
-# Polling with a deadline of exactly the resend window puts every poll on that
-# boundary: a poll that starts just after one redelivery expires just as the
-# next one lands, and can time out inside the null gap, reporting "never acked".
-# Poll for longer than two resend windows instead, so a single null gap can
-# never consume a whole deadline, and pick a value that is not a multiple of the
-# window so the two cadences do not stay phase-locked across a run.
+# A redelivery used to null ack_state, ack_timestamp and ack_superseded_by
+# before the fresh ack re-populated them, so each one opened a brief window in
+# which the ack columns read NULL for a command that had been acked. Polling on
+# exactly the resend window put every poll on that boundary and could time out
+# inside the gap, reporting "never acked" — hence the deliberately off-boundary
+# deadline below.
 #
-# This is a harness-side mitigation, not a fix: the churn itself is todo/68
-# proper. Keep this off the boundary if the resend window ever changes.
+# todo/68 closed the gap at the source: a resend no longer records a dispatch,
+# so the ack columns are written once per delivery and never cleared under a
+# poll. The margin is kept anyway, because it costs nothing on the happy path
+# (every poll returns as soon as its condition holds) and the polls still have
+# to outlast a first delivery that lands just after a poll starts.
 RESEND_WINDOW = 10.0
 ACK_POLL_TIMEOUT = 2.5 * RESEND_WINDOW
 
