@@ -46,6 +46,7 @@ several `todo/` items is filed under all of them (`34-45-47-…`).
 | [49 — the FMU command identifier is per-server](decisions/49-server-command-id-semantics.md) | Protocol |
 | [51 — optional trailing wire fields are prefix-closed](decisions/51-optional-trailing-field-rule.md) | Protocol |
 | [66/67 — the client fans out through per-server workers, and prunes what it learns](decisions/66-67-client-outbound-fanout.md) | Client library |
+| [68 — command acks name the row; redelivery ends at a terminal ack](decisions/68-command-redelivery-and-ack-keying.md) | Protocol / audit |
 | [73 — the server verifies the database schema at startup](decisions/73-startup-schema-verification.md) | Database seam |
 
 ## Citing a decision
