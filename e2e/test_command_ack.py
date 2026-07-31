@@ -67,12 +67,12 @@ ACK_POLL_TIMEOUT = 2.5 * RESEND_WINDOW
 CLIENT_READY_TIMEOUT = 15.0
 
 # pytest.ini caps every test at 60 s, which is the reason the poll deadline used
-# to be exactly the resend window: the two dispatch_id-collision tests make four
+# to be exactly the resend window: the dispatch_id-collision test makes four
 # sequential polls, and 15 + 4x10 = 55 s just fit under the cap. Raising the
 # polls off the boundary breaks that fit, and a pytest-timeout kill is a strictly
 # worse failure than a poll timeout — it loses the assertion messages, which
-# carry the server log. So give those tests a budget derived from the polls they
-# actually make. Only the worst case is longer; the happy path is unchanged,
+# carry the server log. So give that test a budget derived from the polls it
+# actually makes. Only the worst case is longer; the happy path is unchanged,
 # since every poll returns as soon as its condition holds.
 COLLISION_TEST_TIMEOUT = CLIENT_READY_TIMEOUT + 4 * ACK_POLL_TIMEOUT + 30.0
 
@@ -241,150 +241,49 @@ def _dispatch_rtl(db_conn, asset_id: int) -> int:
     return new_dbid
 
 
+
+
 @pytest.mark.satisfies("TC-SRV-004")
 @pytest.mark.requires_docker
 @pytest.mark.timeout(COLLISION_TEST_TIMEOUT)
-def test_ack_does_not_cross_assets_on_dispatch_id_collision(
+def test_ack_lands_only_on_the_dispatched_row_despite_dispatch_id_collisions(
     db_conn, fake_client, server_proc
 ):
-    """An ack from one asset must not touch another asset's command row, even
-    when the two rows share a dispatch_id.
+    """An ack must reach only the command row it was dispatched for, whatever
+    else shares its dispatch_id.
 
-    dispatch_id is a per-connection monotonic id, not globally unique, so two
-    assets routinely have commands stamped with the same dispatch_id. The ack
-    UPDATE is scoped by asset_id (not dispatch_id alone); without that scoping an
-    ack for asset B would overwrite asset A's same-dispatch_id row and show the
-    operator a false confirmation on A. This is the regression the single-asset
-    test could not catch.
+    dispatch_id is the connection's last_msg_id: it is unique to neither the
+    asset nor the session (it restarts at 0 on every connection), so rows
+    sharing one are routine in both directions — another asset's row, and this
+    asset's own older row from a previous session.
 
-    Construction (no hard-coded dispatch_id): only asset B has a live client.
-    We dispatch one command to B to learn where its connection's dispatch_id
-    currently sits, then pre-seed asset A with a *band* of database-only command
-    rows spanning the dispatch_ids B's next command might use, each carrying a
-    distinct terminal ack (superseded). dispatch_id is the connection's
-    last_msg_id, bumped by every server->client message — not just commands —
-    so the once-a-second RTT request can land between B's two commands and B's
-    next command is not reliably the very next id. Seeding a band rather than a
-    single guessed id makes the collision deterministic: B's second command
-    lands on one row in the band, and the asset scoping must leave every seeded
-    A row untouched while B's own row advances to actioned.
+    Since todo/68 the ack is keyed on the command row's primary key, which the
+    dispatching session resolved locally, so a collision cannot reach the wrong
+    row. This test replaces the two that pinned the older reconstruction (an
+    (asset_id, dispatch_id) match plus an `ORDER BY timestamp DESC LIMIT 1`
+    subselect); it covers both of their regressions in one pass and, unlike
+    them, keeps holding if the row-id keying is ever reverted.
+
+    Construction (no hard-coded dispatch_id): dispatch one command to the live
+    asset to learn where its connection's dispatch_id sits, then seed a *band*
+    spanning the ids the next command might use — the once-a-second RTT request
+    also bumps last_msg_id, so the next command is not reliably +1. Each seeded
+    row carries a terminal `superseded` sentinel the fake client never produces,
+    so any change to one is unambiguously attributable to the code under test.
     """
     with db_conn.cursor() as cur:
         cur.execute("INSERT INTO assets_asset (name) VALUES ('test1') RETURNING id")
-        asset_a = cur.fetchone()[0]
+        live_asset = cur.fetchone()[0]
         cur.execute("INSERT INTO assets_asset (name) VALUES ('test2') RETURNING id")
-        asset_b = cur.fetchone()[0]
-    db_conn.commit()
-
-    # Only asset B gets a live client; asset A is a database-only asset whose
-    # command row we craft to collide with B's dispatch_id.
-    fake_client("test2")
-    _wait_for_client_ready(server_proc, "test2")
-
-    # First dispatch to B: learn the dispatch_id its connection is currently at.
-    b_first = _dispatch_rtl(db_conn, asset_b)
-    b_first_dispatch = _poll_field(db_conn, b_first, "dispatch_id", timeout=ACK_POLL_TIMEOUT)
-    assert b_first_dispatch is not None, (
-        f"B's first command dbid={b_first} never recorded a dispatch_id; server log:\n"
-        + server_proc["log"].read_text(errors="replace")
-    )
-    # Let B's own ack for this first command settle so it can't interfere later.
-    _poll_field(db_conn, b_first, "ack_state", timeout=ACK_POLL_TIMEOUT)
-
-    # Pre-seed asset A with a band of database-only rows spanning the
-    # dispatch_ids B's next command might use, each with a terminal superseded
-    # ack the fake client never produces — so any change is unambiguous. The
-    # band absorbs RTT/other server->client messages that bump B's id between
-    # commands by an unpredictable (small) amount; B's second command lands on
-    # exactly one of these. The band is wide enough to cover many seconds of
-    # intervening once-a-second RTT traffic.
-    sentinel_ts = SENTINEL_ACK_TIMESTAMP
-    sentinel_reason = SENTINEL_SUPERSEDE_REASON
-    collision_band = range(b_first_dispatch + 1, b_first_dispatch + 1 + COLLISION_BAND)
-    a_dbids: dict[int, int] = {}  # dispatch_id -> asset A command row id
-    with db_conn.cursor() as cur:
-        for dispatch_id in collision_band:
-            cur.execute(
-                "INSERT INTO assets_assetcommand "
-                "(asset_id, command, position, altitude, dispatch_id, "
-                " ack_state, ack_timestamp, ack_superseded_by) "
-                "VALUES (%s, 'RTL', ST_SetSRID(ST_MakePoint(0, 0), 4326)::geography, 0, "
-                "        %s, %s, %s, %s) RETURNING id",
-                (asset_a, dispatch_id, ACK_STATE_SUPERSEDED, sentinel_ts, sentinel_reason),
-            )
-            a_dbids[dispatch_id] = cur.fetchone()[0]
-    db_conn.commit()
-
-    # Second dispatch to B: lands on one dispatch_id in the band and is acked.
-    b_second = _dispatch_rtl(db_conn, asset_b)
-    b_second_dispatch = _poll_field(db_conn, b_second, "dispatch_id", timeout=ACK_POLL_TIMEOUT)
-    b_second_state = _poll_ack_state(db_conn, b_second, ACK_STATE_ACTIONED, timeout=ACK_POLL_TIMEOUT)
-
-    # Guard the construction itself: if B's command did not collide with a seeded
-    # row the test proves nothing, so fail loudly rather than pass vacuously.
-    assert b_second_dispatch in collision_band, (
-        f"setup failed to collide: B's second command got dispatch_id="
-        f"{b_second_dispatch}, outside the seeded band "
-        f"{collision_band.start}..{collision_band.stop - 1}; server log:\n"
-        + server_proc["log"].read_text(errors="replace")
-    )
-    assert b_second_state == ACK_STATE_ACTIONED, (
-        f"B's own command should have been acked actioned, got {b_second_state}"
-    )
-
-    # The real assertion: none of asset A's rows are touched by B's ack — above
-    # all the one sharing B's dispatch_id. With the bug (match on dispatch_id
-    # alone) B's actioned ack would overwrite that row's superseded sentinel and
-    # stamp it with B's ack_timestamp.
-    db_conn.rollback()
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "SELECT dispatch_id, ack_state, ack_timestamp, ack_superseded_by "
-            "FROM assets_assetcommand WHERE asset_id = %s ORDER BY dispatch_id",
-            (asset_a,),
-        )
-        a_rows = cur.fetchall()
-    for dispatch_id, a_state, a_ts, a_reason in a_rows:
-        assert (a_state, a_ts, a_reason) == (ACK_STATE_SUPERSEDED, sentinel_ts, sentinel_reason), (
-            f"asset A's command row at dispatch_id={dispatch_id} was mutated by asset B's "
-            f"ack (B collided at dispatch_id={b_second_dispatch}): got ack_state={a_state}, "
-            f"ack_timestamp={a_ts}, ack_superseded_by={a_reason}; server log:\n"
-            + server_proc["log"].read_text(errors="replace")
-        )
-
-
-@pytest.mark.satisfies("TC-SRV-004")
-@pytest.mark.requires_docker
-@pytest.mark.timeout(COLLISION_TEST_TIMEOUT)
-def test_ack_updates_only_the_latest_row_on_cross_session_dispatch_id_reuse(
-    db_conn, fake_client, server_proc
-):
-    """Within a single asset, an ack must update only the newest command sharing
-    a dispatch_id, not an old already-settled one from a prior session.
-
-    dispatch_id is the connection's last_msg_id, which resets to 0 on every
-    reconnect, so the same asset accumulates several historical command rows that
-    share a dispatch_id across sessions. The ack is for the command just
-    dispatched on the current connection — the latest row — so the UPDATE targets
-    the newest match. An ack must never reach back and rewrite a long-settled
-    historical row that happens to carry the same dispatch_id.
-
-    We give the asset one live client, seed an OLD command row with a terminal
-    "superseded" sentinel and an old timestamp at the dispatch_id the next live
-    command will use, then dispatch a NEW command that lands on that same
-    dispatch_id. The client's ack must advance only the NEW row and leave the OLD
-    sentinel untouched.
-    """
-    with db_conn.cursor() as cur:
-        cur.execute("INSERT INTO assets_asset (name) VALUES ('test1') RETURNING id")
-        asset = cur.fetchone()[0]
+        other_asset = cur.fetchone()[0]
     db_conn.commit()
 
     fake_client("test1")
     _wait_for_client_ready(server_proc, "test1")
 
-    # First dispatch: learn the connection's current dispatch_id.
-    first = _dispatch_rtl(db_conn, asset)
+    # First dispatch: learn the connection's current dispatch_id, and let its
+    # own ack settle so it cannot interfere with the assertions below.
+    first = _dispatch_rtl(db_conn, live_asset)
     first_dispatch = _poll_field(db_conn, first, "dispatch_id", timeout=ACK_POLL_TIMEOUT)
     assert first_dispatch is not None, (
         f"first command dbid={first} never recorded a dispatch_id; server log:\n"
@@ -392,59 +291,63 @@ def test_ack_updates_only_the_latest_row_on_cross_session_dispatch_id_reuse(
     )
     _poll_field(db_conn, first, "ack_state", timeout=ACK_POLL_TIMEOUT)
 
-    # Seed OLD already-acked rows for the SAME asset across the band of
-    # dispatch_ids the next live command might land on — the connection's
-    # last_msg_id is bumped by RTT and other server->client traffic, so it is
-    # not reliably first_dispatch + 1. Each carries an explicitly older timestamp
-    # so the newest-row subselect must prefer the live command's row, never these.
+    # Seed both collision shapes across the band: a *different asset's* row
+    # (which an unscoped match would clobber) and this asset's own *older*
+    # row from a notional earlier session (which a newest-row subselect could
+    # reach back to if it picked wrong).
     sentinel_ts = SENTINEL_ACK_TIMESTAMP
     sentinel_reason = SENTINEL_SUPERSEDE_REASON
     collision_band = range(first_dispatch + 1, first_dispatch + 1 + COLLISION_BAND)
-    old_dbids: dict[int, int] = {}  # dispatch_id -> seeded historical row id
+    seeded: list[int] = []
     with db_conn.cursor() as cur:
         for dispatch_id in collision_band:
-            cur.execute(
-                "INSERT INTO assets_assetcommand "
-                "(asset_id, command, position, altitude, timestamp, dispatch_id, "
-                " ack_state, ack_timestamp, ack_superseded_by) "
-                "VALUES (%s, 'RTL', ST_SetSRID(ST_MakePoint(0, 0), 4326)::geography, 0, "
-                "        NOW() - INTERVAL '1 hour', %s, %s, %s, %s) RETURNING id",
-                (asset, dispatch_id, ACK_STATE_SUPERSEDED, sentinel_ts, sentinel_reason),
-            )
-            old_dbids[dispatch_id] = cur.fetchone()[0]
+            # Both are timestamped an hour ago: the same-asset row has to be
+            # older than the live dispatch for the historical-row case to mean
+            # anything, and the other asset's age is immaterial.
+            for asset_id in (other_asset, live_asset):
+                cur.execute(
+                    "INSERT INTO assets_assetcommand "
+                    "(asset_id, command, position, altitude, timestamp, dispatch_id, "
+                    " ack_state, ack_timestamp, ack_superseded_by) "
+                    "VALUES (%s, 'RTL', ST_SetSRID(ST_MakePoint(0, 0), 4326)::geography, 0, "
+                    "        NOW() - INTERVAL '1 hour', %s, %s, %s, %s) RETURNING id",
+                    (asset_id, dispatch_id, ACK_STATE_SUPERSEDED, sentinel_ts, sentinel_reason),
+                )
+                seeded.append(cur.fetchone()[0])
     db_conn.commit()
 
-    # New dispatch: lands on one dispatch_id in the band with a fresh timestamp.
-    new_dbid = _dispatch_rtl(db_conn, asset)
+    # The live dispatch: lands on one dispatch_id in the band, colliding with
+    # two seeded rows, and is acked by the client.
+    new_dbid = _dispatch_rtl(db_conn, live_asset)
     new_dispatch = _poll_field(db_conn, new_dbid, "dispatch_id", timeout=ACK_POLL_TIMEOUT)
     new_state = _poll_ack_state(db_conn, new_dbid, ACK_STATE_ACTIONED, timeout=ACK_POLL_TIMEOUT)
 
+    # Guard the construction itself: without a collision the test proves
+    # nothing, so fail loudly rather than pass vacuously.
     assert new_dispatch in collision_band, (
-        f"setup failed to reuse dispatch_id: the new command got dispatch_id="
-        f"{new_dispatch}, outside the seeded band "
-        f"{collision_band.start}..{collision_band.stop - 1}; server log:\n"
-        + server_proc["log"].read_text(errors="replace")
+        f"setup failed to collide: the new command got dispatch_id={new_dispatch}, "
+        f"outside the seeded band {collision_band.start}..{collision_band.stop - 1}; "
+        "server log:\n" + server_proc["log"].read_text(errors="replace")
     )
-    # The new (latest) row is the one the ack must land on.
     assert new_state == ACK_STATE_ACTIONED, (
-        f"the new command should have been acked actioned, got {new_state}"
+        f"the dispatched command should have been acked actioned, got {new_state}"
     )
 
-    # The old, already-settled rows must all be untouched — above all the one
-    # sharing the new command's dispatch_id, which the newest-row subselect must
-    # not reach back to.
+    # The real assertion: every seeded row still carries its sentinel.
     db_conn.rollback()
     with db_conn.cursor() as cur:
         cur.execute(
-            "SELECT dispatch_id, ack_state, ack_timestamp, ack_superseded_by "
-            "FROM assets_assetcommand WHERE id = ANY(%s) ORDER BY dispatch_id",
-            (list(old_dbids.values()),),
+            "SELECT id, asset_id, dispatch_id, ack_state, ack_timestamp, ack_superseded_by "
+            "FROM assets_assetcommand WHERE id = ANY(%s) ORDER BY id",
+            (seeded,),
         )
-        old_rows = cur.fetchall()
-    for dispatch_id, old_state, old_ts, old_reason in old_rows:
-        assert (old_state, old_ts, old_reason) == (ACK_STATE_SUPERSEDED, sentinel_ts, sentinel_reason), (
-            f"the old already-acked row at dispatch_id={dispatch_id} was rewritten by an ack "
-            f"meant for the newer command (which landed at dispatch_id={new_dispatch}): got "
-            f"ack_state={old_state}, ack_timestamp={old_ts}, ack_superseded_by={old_reason}; "
+        rows = cur.fetchall()
+    assert len(rows) == len(seeded), f"expected {len(seeded)} seeded rows, read {len(rows)}"
+    for row_id, asset_id, dispatch_id, state, ack_ts, reason in rows:
+        which = "the other asset's" if asset_id == other_asset else "this asset's older"
+        assert (state, ack_ts, reason) == (ACK_STATE_SUPERSEDED, sentinel_ts, sentinel_reason), (
+            f"{which} command row id={row_id} at dispatch_id={dispatch_id} was mutated by an "
+            f"ack meant for dbid={new_dbid} (which landed at dispatch_id={new_dispatch}): got "
+            f"ack_state={state}, ack_timestamp={ack_ts}, ack_superseded_by={reason}; "
             "server log:\n" + server_proc["log"].read_text(errors="replace")
         )

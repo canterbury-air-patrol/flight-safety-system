@@ -573,12 +573,37 @@ void fss::server::fss_client::sendCommand()
                      "Failed to send command dbid=" << dbid << " to " << client_name << "; will retry on next tick");
         return;
     }
-    /* sendMsg stamped the per-connection message id into msg; record it against
-     * the command row (cached_asset_id is non-zero here — the early return above
-     * guarantees it) so a later ack, which echoes this id as acked_command_id,
-     * can be matched back to this specific command. */
+    /* sendMsg stamped the per-connection message id into msg. Remember locally
+     * which command row that id delivered, so an ack echoing it as
+     * acked_command_id resolves to this exact row (todo/68) rather than being
+     * reconstructed from (asset_id, dispatch_id) in SQL. */
+    this->recordDispatchedCommand(msg->getId(), dbid);
+    /* Record it against the command row too (cached_asset_id is non-zero here —
+     * the early return above guarantees it), so the stored dispatch id says
+     * which delivery the row's ack columns describe. */
     this->writer->enqueue(command_dispatch_write{dbid, msg->getId()});
     FSS_LOG_INFO("server", "dispatched command dbid=" << dbid << " to " << client_name);
+}
+
+void fss::server::fss_client::recordDispatchedCommand(uint64_t dispatch_id, uint64_t command_dbid)
+{
+    std::scoped_lock guard(this->client_lock);
+    this->dispatched_commands.emplace_back(dispatch_id, command_dbid);
+    while (this->dispatched_commands.size() > max_tracked_dispatches)
+    {
+        this->dispatched_commands.pop_front();
+    }
+}
+
+auto fss::server::fss_client::lookupDispatchedCommand(uint64_t dispatch_id) -> uint64_t
+{
+    std::scoped_lock guard(this->client_lock);
+    /* Newest first: a resend of the same command adds a fresh entry, and the
+     * aircraft is acking the delivery it most recently received. */
+    auto entry =
+        std::find_if(this->dispatched_commands.rbegin(), this->dispatched_commands.rend(),
+                     [dispatch_id](const std::pair<uint64_t, uint64_t> &e) -> bool { return e.first == dispatch_id; });
+    return entry == this->dispatched_commands.rend() ? 0 : entry->second;
 }
 
 void fss::server::fss_client::setClock(std::shared_ptr<fss::IClock> t_clock)
@@ -1367,26 +1392,31 @@ void fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss
                     break;
                 }
                 auto ack_msg = std::dynamic_pointer_cast<fss::transport::fss_message_command_ack>(msg);
-                /* Scope the stored ack to the acking asset: dispatch_id is only
-                 * per-connection unique, so without asset_id the DB update could
-                 * land on a different asset's same-dispatch_id command row. An
-                 * ack from a connection with no identified asset (asset_id == 0)
-                 * cannot be scoped, so it is dropped. */
-                if (ack_msg != nullptr && asset_id != 0)
+                /* Resolve the acked id against what this session actually
+                 * dispatched (todo/68). The wire id is only per-connection
+                 * unique, so it names a row only in combination with the session
+                 * that sent it; translating here means the write that reaches the
+                 * database names one row outright, and an ack for a dispatch this
+                 * session never sent is dropped rather than being turned into a
+                 * plausible-looking update to somebody else's row. */
+                uint64_t acked_dbid =
+                    ack_msg == nullptr ? 0 : this->lookupDispatchedCommand(ack_msg->getAckedCommandId());
+                if (ack_msg != nullptr && acked_dbid != 0)
                 {
-                    this->writer->enqueue(command_ack_write{
-                        asset_id, ack_msg->getAckedCommandId(), static_cast<uint8_t>(ack_msg->getOutcome()),
-                        ack_msg->getTimeStamp(), static_cast<uint8_t>(ack_msg->getReason())});
+                    this->writer->enqueue(command_ack_write{acked_dbid, static_cast<uint8_t>(ack_msg->getOutcome()),
+                                                            ack_msg->getTimeStamp(),
+                                                            static_cast<uint8_t>(ack_msg->getReason())});
                 }
                 else if (ack_msg != nullptr)
                 {
-                    /* asset_id == 0: the connection has no identified asset, so the
-                     * ack cannot be scoped and is dropped. A conforming client only
-                     * acks after identifying, so this is unexpected — log it so an
-                     * unscoped ack can be investigated rather than vanishing. */
+                    /* Either the connection has no identified asset (so it can
+                     * never have been sent a command), or the id does not match
+                     * any dispatch this session made. A conforming client only
+                     * acks a command it was just sent, so log it rather than
+                     * letting it vanish. */
                     FSS_LOG_WARN("server", "Dropping command-ack for acked-command "
-                                               << ack_msg->getAckedCommandId()
-                                               << " from connection with no identified asset (asset_id==0)");
+                                               << ack_msg->getAckedCommandId() << " from " << this->name
+                                               << ": no matching dispatch on this connection");
                 }
             }
             break;

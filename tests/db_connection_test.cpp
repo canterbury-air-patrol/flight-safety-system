@@ -244,8 +244,7 @@ TEST_CASE("db_connection: write methods throw database_error when the write conn
     REQUIRE(threw_database_error([&] { dbc->recordStatus(asset_id, uint8_t{80}, uint32_t{1000}, 12.4); }));
     REQUIRE(threw_database_error([&] { dbc->recordSearchStatus(asset_id, uint64_t{1}, uint64_t{50}, uint64_t{100}); }));
     REQUIRE(threw_database_error([&] { dbc->recordCommandDispatch(uint64_t{1}, uint64_t{1}); }));
-    REQUIRE(threw_database_error(
-        [&] { dbc->recordCommandAck(asset_id, uint64_t{1}, uint8_t{1}, uint64_t{1}, uint8_t{0}); }));
+    REQUIRE(threw_database_error([&] { dbc->recordCommandAck(uint64_t{1}, uint8_t{1}, uint64_t{1}, uint8_t{0}); }));
 }
 
 TEST_CASE("db_connection: getSmmSettings returns non-null for configured asset")
@@ -544,9 +543,9 @@ TEST_CASE("db_connection: recordCommandAck stores ack_state, ack_timestamp and a
     auto command_id = insert_test_command(asset_id);
     dbc->recordCommandDispatch(command_id, uint64_t{5555});
 
-    dbc->recordCommandAck(
-        asset_id, uint64_t{5555}, static_cast<uint8_t>(flight_safety_system::transport::command_ack_superseded),
-        uint64_t{1700000000000}, static_cast<uint8_t>(flight_safety_system::transport::supersede_low_battery));
+    dbc->recordCommandAck(command_id, static_cast<uint8_t>(flight_safety_system::transport::command_ack_superseded),
+                          uint64_t{1700000000000},
+                          static_cast<uint8_t>(flight_safety_system::transport::supersede_low_battery));
 
     REQUIRE(get_command_column(command_id, "ack_state") == "2");
     REQUIRE(get_command_column(command_id, "ack_timestamp") == "1700000000000");
@@ -563,12 +562,10 @@ TEST_CASE("db_connection: recordCommandAck does not regress an already-terminal 
     auto command_id = insert_test_command(asset_id);
     dbc->recordCommandDispatch(command_id, uint64_t{6666});
 
-    dbc->recordCommandAck(asset_id, uint64_t{6666},
-                          static_cast<uint8_t>(flight_safety_system::transport::command_ack_actioned), uint64_t{100},
-                          static_cast<uint8_t>(flight_safety_system::transport::supersede_none));
-    dbc->recordCommandAck(asset_id, uint64_t{6666},
-                          static_cast<uint8_t>(flight_safety_system::transport::command_ack_received), uint64_t{200},
-                          static_cast<uint8_t>(flight_safety_system::transport::supersede_none));
+    dbc->recordCommandAck(command_id, static_cast<uint8_t>(flight_safety_system::transport::command_ack_actioned),
+                          uint64_t{100}, static_cast<uint8_t>(flight_safety_system::transport::supersede_none));
+    dbc->recordCommandAck(command_id, static_cast<uint8_t>(flight_safety_system::transport::command_ack_received),
+                          uint64_t{200}, static_cast<uint8_t>(flight_safety_system::transport::supersede_none));
 
     REQUIRE(get_command_column(command_id, "ack_state") == "1");
     REQUIRE(get_command_column(command_id, "ack_timestamp") == "100");
@@ -594,10 +591,9 @@ TEST_CASE("db_connection: recordCommandAck refuses a second terminal outcome")
         auto command_id = insert_test_command(asset_id);
         dbc->recordCommandDispatch(command_id, dispatch_id);
 
-        dbc->recordCommandAck(asset_id, dispatch_id,
-                              static_cast<uint8_t>(flight_safety_system::transport::command_ack_actioned),
+        dbc->recordCommandAck(command_id, static_cast<uint8_t>(flight_safety_system::transport::command_ack_actioned),
                               uint64_t{100}, static_cast<uint8_t>(flight_safety_system::transport::supersede_none));
-        dbc->recordCommandAck(asset_id, dispatch_id, later_state, uint64_t{200},
+        dbc->recordCommandAck(command_id, later_state, uint64_t{200},
                               static_cast<uint8_t>(flight_safety_system::transport::supersede_low_battery));
 
         REQUIRE(get_command_column(command_id, "ack_state") == "1");
@@ -616,14 +612,12 @@ TEST_CASE("db_connection: recordCommandAck admits the conforming received-then-t
     auto command_id = insert_test_command(asset_id);
     dbc->recordCommandDispatch(command_id, uint64_t{7780});
 
-    dbc->recordCommandAck(asset_id, uint64_t{7780},
-                          static_cast<uint8_t>(flight_safety_system::transport::command_ack_received), uint64_t{100},
-                          static_cast<uint8_t>(flight_safety_system::transport::supersede_none));
+    dbc->recordCommandAck(command_id, static_cast<uint8_t>(flight_safety_system::transport::command_ack_received),
+                          uint64_t{100}, static_cast<uint8_t>(flight_safety_system::transport::supersede_none));
     REQUIRE(get_command_column(command_id, "ack_state") == "0");
 
-    dbc->recordCommandAck(asset_id, uint64_t{7780},
-                          static_cast<uint8_t>(flight_safety_system::transport::command_ack_actioned), uint64_t{200},
-                          static_cast<uint8_t>(flight_safety_system::transport::supersede_none));
+    dbc->recordCommandAck(command_id, static_cast<uint8_t>(flight_safety_system::transport::command_ack_actioned),
+                          uint64_t{200}, static_cast<uint8_t>(flight_safety_system::transport::supersede_none));
     REQUIRE(get_command_column(command_id, "ack_state") == "1");
     REQUIRE(get_command_column(command_id, "ack_timestamp") == "200");
 }
@@ -640,9 +634,8 @@ TEST_CASE("db_connection: recordCommandDispatch reopens the ack cycle")
     auto asset_id = get_test_asset_id(*dbc);
     auto command_id = insert_test_command(asset_id);
     dbc->recordCommandDispatch(command_id, uint64_t{7790});
-    dbc->recordCommandAck(asset_id, uint64_t{7790},
-                          static_cast<uint8_t>(flight_safety_system::transport::command_ack_actioned), uint64_t{100},
-                          static_cast<uint8_t>(flight_safety_system::transport::supersede_none));
+    dbc->recordCommandAck(command_id, static_cast<uint8_t>(flight_safety_system::transport::command_ack_actioned),
+                          uint64_t{100}, static_cast<uint8_t>(flight_safety_system::transport::supersede_none));
     REQUIRE(get_command_column(command_id, "ack_state") == "1");
 
     /* Redispatch (e.g. after a reconnect, with the new connection's id). */
@@ -652,12 +645,40 @@ TEST_CASE("db_connection: recordCommandDispatch reopens the ack cycle")
     REQUIRE(get_command_column(command_id, "ack_superseded_by").empty());
 
     /* The re-ack for the new delivery lands, terminal over the reopened row. */
-    dbc->recordCommandAck(asset_id, uint64_t{7791},
-                          static_cast<uint8_t>(flight_safety_system::transport::command_ack_superseded), uint64_t{200},
-                          static_cast<uint8_t>(flight_safety_system::transport::supersede_comms_loss));
+    dbc->recordCommandAck(command_id, static_cast<uint8_t>(flight_safety_system::transport::command_ack_superseded),
+                          uint64_t{200}, static_cast<uint8_t>(flight_safety_system::transport::supersede_comms_loss));
     REQUIRE(get_command_column(command_id, "ack_state") == "2");
     REQUIRE(get_command_column(command_id, "ack_timestamp") == "200");
     REQUIRE(get_command_column(command_id, "ack_superseded_by") == "2");
+}
+
+TEST_CASE("db_connection: recordCommandAck updates only the row it names")
+{
+    /* todo/68: the ack is keyed on the command row's primary key, which the
+     * acking session resolved from the id it dispatched. Two commands for the
+     * same asset -- the shape that used to force an (asset_id, dispatch_id)
+     * match plus a newest-row subselect, and the shape a colliding dispatch id
+     * could land on the wrong one of -- must now be independent. Ack the OLDER
+     * row and confirm the newer one is untouched: under the old newest-row
+     * reconstruction this was not expressible at all. */
+    LIVE_DB_OR_SKIP(dbc);
+    auto asset_id = get_test_asset_id(*dbc);
+    auto older_command = insert_test_command(asset_id);
+    auto newer_command = insert_test_command(asset_id);
+    REQUIRE(older_command != newer_command);
+
+    /* The same dispatch id on both, which is realistic: it restarts at 0 on
+     * every connection, so two deliveries across two sessions collide. */
+    dbc->recordCommandDispatch(older_command, uint64_t{8800});
+    dbc->recordCommandDispatch(newer_command, uint64_t{8800});
+
+    dbc->recordCommandAck(older_command, static_cast<uint8_t>(flight_safety_system::transport::command_ack_actioned),
+                          uint64_t{100}, static_cast<uint8_t>(flight_safety_system::transport::supersede_none));
+
+    REQUIRE(get_command_column(older_command, "ack_state") == "1");
+    REQUIRE(get_command_column(older_command, "ack_timestamp") == "100");
+    REQUIRE(get_command_column(newer_command, "ack_state").empty());
+    REQUIRE(get_command_column(newer_command, "ack_timestamp").empty());
 }
 
 TEST_CASE("db_connection: verifySchema accepts the provisioned schema")

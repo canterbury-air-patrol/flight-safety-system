@@ -16,6 +16,7 @@
 #include <mutex>
 #include <thread>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace flight_safety_system {
@@ -111,15 +112,16 @@ public:
      * columns): the stored ack always describes the latest dispatch, and a
      * terminal outcome is final only within its dispatch — see recordCommandAck. */
     virtual void recordCommandDispatch(uint64_t command_dbid, uint64_t dispatch_id) = 0;
-    /* Stores a command ack against the row whose (asset_id, dispatch_id) matches.
-     * Terminal-transition policy (todo/48): a terminal outcome (actioned/
-     * superseded/rejected/noop) is final for its dispatch — the write is refused
-     * unless the stored state is empty or received, so neither a late "received"
-     * nor a second terminal can rewrite a settled outcome; a redispatch reopens
-     * the cycle. dispatch_id is only per-connection unique, so asset_id scopes
-     * the match to the acking asset. ack_state/ack_reason are the
+    /* Stores a command ack against the command row named by its primary key.
+     * The caller has already translated the wire's per-connection acked id to the
+     * row it dispatched (todo/68), so this names exactly one row and carries no
+     * scoping of its own. Terminal-transition policy (todo/48): a terminal outcome
+     * (actioned/superseded/rejected/noop) is final for its dispatch — the write is
+     * refused unless the stored state is empty or received, so neither a late
+     * "received" nor a second terminal can rewrite a settled outcome; a redispatch
+     * reopens the cycle. ack_state/ack_reason are the
      * fss_command_ack_outcome/fss_command_ack_reason ints. */
-    virtual void recordCommandAck(uint64_t asset_id, uint64_t dispatch_id, uint8_t ack_state, uint64_t ack_timestamp,
+    virtual void recordCommandAck(uint64_t command_dbid, uint8_t ack_state, uint64_t ack_timestamp,
                                   uint8_t ack_reason) = 0;
     /* The asset's newest pending command, or nullopt when the read failed.
      * nullopt is NOT "no pending command": that is an engaged null pointer.
@@ -200,7 +202,7 @@ public:
     void recordStatus(uint64_t asset_id, uint8_t bat_percent, uint32_t bat_mah_used, double bat_voltage) override;
     void recordSearchStatus(uint64_t asset_id, uint64_t search_id, uint64_t completed, uint64_t total) override;
     void recordCommandDispatch(uint64_t command_dbid, uint64_t dispatch_id) override;
-    void recordCommandAck(uint64_t asset_id, uint64_t dispatch_id, uint8_t ack_state, uint64_t ack_timestamp,
+    void recordCommandAck(uint64_t command_dbid, uint8_t ack_state, uint64_t ack_timestamp,
                           uint8_t ack_reason) override;
     auto getCommand(uint64_t asset_id) -> std::optional<std::shared_ptr<asset_command>> override;
     auto getCommands(const std::vector<uint64_t> &asset_ids)
@@ -307,6 +309,28 @@ private:
     void updateClockOffset(uint64_t client_timestamp, uint64_t rtt_ms, uint64_t recv_wall);
     uint64_t last_command_send_ts{0};
     uint64_t last_command_dbid{0};
+    /* Guarded by client_lock. Maps a dispatch id (the per-connection message id
+     * sendMsg() stamped onto a dispatched command) to the command row it
+     * delivered, so an ack echoing that id names an exact row (todo/68). The
+     * wire id alone cannot: it restarts at 0 on every connection and is unique
+     * to neither the asset nor the session. Translating here rather than in SQL
+     * also means an ack for a dispatch this session never sent is dropped
+     * instead of reaching the database as a plausible-looking update.
+     *
+     * A server-side session is built per accepted connection and never reused,
+     * so this starts empty for every new connection by construction. Bounded
+     * FIFO, like stray_rtt_responses above: a session holds one entry per
+     * delivery, and the cap stops a peer that never acks from growing it
+     * without limit. Oldest-first eviction is the right direction — an
+     * unacked dispatch that old has been superseded by the ones behind it. */
+    static constexpr size_t max_tracked_dispatches = 16;
+    std::list<std::pair<uint64_t, uint64_t>> dispatched_commands{};
+    /* Remember that dispatch_id delivered command_dbid, evicting the oldest
+     * entry once the cap is reached. Takes client_lock. */
+    void recordDispatchedCommand(uint64_t dispatch_id, uint64_t command_dbid);
+    /* The command row dispatch_id delivered, or 0 if this session never
+     * dispatched it (or it has aged out of the FIFO). Takes client_lock. */
+    auto lookupDispatchedCommand(uint64_t dispatch_id) -> uint64_t;
     bool liveness_active{false};
     uint64_t last_rtt_response_time{0};
     uint64_t client_timeout_ms{30000};
