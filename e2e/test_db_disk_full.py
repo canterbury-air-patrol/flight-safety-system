@@ -24,7 +24,7 @@ Two confirmed defects, both fixed alongside this test:
    quiet tick could never reach its threshold. Fixed by tracking a
    wall-clock failure *incident* (started at the first new failure, only
    cleared after a 15s quiet recovery window) instead of a per-tick streak;
-   once the incident has lasted db_write_failure_disconnect_ticks (default
+   once the incident has lasted db_write_failure_disconnect_secs (default
    5s), every connected client is severed via
    server_clients::disconnectAll() -- matching Tier-3 Path M m05's
    expectation that the server "sever connections cleanly ... rather than
@@ -263,7 +263,7 @@ def test_disk_full_fails_visibly_and_a_fresh_instance_recovers(certs_dir, tmp_pa
 
         # The failure must escalate to visibly severing the session, not
         # stay a silently-kept-alive one -- give the streak/incident guard
-        # its own window (db_write_failure_disconnect_ticks, default 5s,
+        # its own window (db_write_failure_disconnect_secs, default 5s,
         # plus margin) *after* the first failure was already observed
         # above, rather than checking instantly. (todo/45+47 unified the
         # severance into the "DB fail-safe tripped ... severed N

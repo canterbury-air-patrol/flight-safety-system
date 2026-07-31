@@ -26,7 +26,7 @@ One state machine owning both triggers and the latch.
 **Triggers.** A `command_dropped_count()` increase trips *immediately* — a
 dropped dispatch or ack write is known-destroyed audit state, with no threshold
 to age through. A write-*failure* incident trips only when a **new** failure
-arrives while the incident is already `db_write_failure_disconnect_ticks` old.
+arrives while the incident is already `db_write_failure_disconnect_secs` old.
 
 That second condition also fixed a defect in the shipped 34 tracker: a *single*
 transient failure kept the incident active through the recovery grace and
@@ -44,6 +44,26 @@ clients are severed unactivated.
 `db_write_failure_recovery_grace_secs` of quiet lowers the gate; readmitted
 traffic is itself the health probe. A persistent fault re-latches on the
 incident timescale rather than flapping.
+
+### Both windows are real time (revised 2026-07-31, todo/70)
+
+As shipped, `db_failsafe` counted `tick()` calls and both thresholds were
+expressed against that counter. The caller drove it from a loop whose period was
+a 100 ms sleep plus the loop body's work, and which a signal could cut short, so
+the windows above stretched under load and compressed under signal traffic —
+load being correlated with the database being unwell, the trip ran late in
+exactly the conditions it exists for.
+
+`db_failsafe` now takes an injectable `IClock` and measures elapsed milliseconds.
+No threshold, comparison or transition changed; what changed is that they are
+now measured rather than counted, and can be asserted at the edge. The main loop
+also runs its periodic tasks on deadlines rather than an iteration count, so the
+other per-second work (`checkTimeouts()`, `sendRTTRequest()`) keeps honest time
+too.
+
+The config field `db_write_failure_disconnect_ticks` is renamed
+`db_write_failure_disconnect_secs`, which is what it always meant; the old key
+is still accepted with a deprecation warning.
 
 ## Alternatives deliberately not taken
 
