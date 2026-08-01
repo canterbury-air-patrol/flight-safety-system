@@ -62,9 +62,10 @@ migrated is not a degraded deployment — it severs the fleet on the first comma
 and cannot recover, because the schema stays wrong
 (see [decision 73](decisions/73-startup-schema-verification.md)).
 
-**As of this release, FSS requires fss-web's `assets` migration 0008 or later**,
+**As of this release, FSS requires fss-web's `assets` migration 0016 or later**,
 which provides `dispatch_id`, `ack_state`, `ack_timestamp` and
-`ack_superseded_by` on `assets_assetcommand`. The server verifies this at
+`ack_superseded_by` on `assets_assetcommand` (0008), and `gps_fix_valid` with a
+nullable `position` on `assets_assetposition` (0016). The server verifies this at
 startup and refuses to run against a database without them, so the failure is a
 restart rather than an outage — but the requirement still has to reach whoever
 does the deploy, in the release notes, ahead of it.
