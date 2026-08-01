@@ -119,3 +119,26 @@ enforced by a test.
   (`VARCHAR(15)` against a 16-byte buffer warns not at all, `VARCHAR(32)` warns
   and still starts), a dropped table reports each of its columns, and an empty
   database reports the missing PostGIS extension followed by all 40 columns.
+
+## Amendment: the first deliberate change to the mirror (todo/76)
+
+`gps_fix_valid` on `assets_assetposition` is the first column added to
+`required_columns[]` since this check landed, and so the first test of the
+process it implies. Three things had to move in one commit: the entry in
+`required_columns[]`, the table definition in the hand-written mirror
+`e2e/schema/001_init.sql`, and the stated migration floor in the README and
+`docs/release-checklist.md` (0008 → 0016).
+
+What enforces the pairing is the *positive* case in
+`tests/db_connection_test.cpp` — "verifySchema accepts the provisioned schema".
+Adding a required column without adding it to the mirror fails that test
+immediately, which is the intended tripwire and is why the negative
+column-dropped case is not the important one here.
+
+The same commit made `position` nullable in the mirror. The check only tests
+for a column's presence, so a nullability change is invisible to it: had the
+mirror kept `NOT NULL`, the server would have started cleanly and then failed
+every no-fix write at runtime. Both open options above (provisioning from
+fss-web's real migrations, or diffing an `information_schema` dump) would have
+caught that; the presence check alone cannot, and the e2e no-fix test is what
+covers it today. See [decision 76](76-gps-fix-recording.md).

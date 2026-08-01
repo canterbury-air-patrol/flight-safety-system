@@ -8,6 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **A position report now records whether its coordinates are backed by a GPS
+  fix** (todo/76, `docs/decisions/76-gps-fix-recording.md`). An aircraft that
+  loses GPS keeps reporting and says so — cap-fmu clears the position report's
+  coords-valid flag and sends the wire no-fix sentinel — but the server
+  discarded those reports with a throttled log line and never read the flags
+  word at all. The operator saw a position that stopped advancing while RTT kept
+  the asset `connected`, which is also what a MAVLink dropout, a stalled
+  position stream and a wedged FMU look like; only one of those means an RTL
+  cannot be relied on to navigate home. Every report is now stored with its
+  validity: a dead-reckoned estimate keeps its coordinates and is marked, a
+  report carrying no coordinates stores NULL geometry, and neither is silently
+  dropped. A NaN is still never relayed to another aircraft. Reading the flags
+  word is gated on the negotiated `FSS_FEATURE_POSITION_FLAGS`, so a client that
+  predates the capability is unaffected rather than latching a permanent false
+  GPS warning. **Deployments now require `fss-web`'s `assets` migration 0016 or
+  later** (`gps_fix_valid` and a nullable `position` on
+  `assets_assetposition`); the startup schema check refuses to run without it.
 - **The server verifies the database schema at startup and refuses to run
   without it** (todo/73,
   `docs/decisions/73-startup-schema-verification.md`). The tables FSS reads and
