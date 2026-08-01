@@ -102,7 +102,15 @@ public:
      * indistinguishable from a fleet of unregistered assets (todo/60,
      * matches the getActiveServers() convention below). */
     virtual auto getAssetId(const std::string &name) -> std::optional<uint64_t> = 0;
-    virtual void recordPosition(uint64_t asset_id, double latitude, double longitude, uint32_t altitude) = 0;
+    /* gps_fix_valid false marks the coordinates as the autopilot's
+     * dead-reckoned estimate rather than a GPS-backed position, so fss-web can
+     * label them instead of ageing them as if they were a fix. A NaN latitude
+     * or longitude means the report carried no coordinates at all and stores
+     * NULL geometry; a no-fix report is recorded either way, because "the
+     * aircraft says it is blind" is what the operator needs and it is not
+     * inferable from a position that merely stops advancing (todo/76). */
+    virtual void recordPosition(uint64_t asset_id, double latitude, double longitude, uint32_t altitude,
+                                bool gps_fix_valid) = 0;
     virtual void recordRtt(uint64_t asset_id, uint64_t rtt_ms) = 0;
     virtual void recordStatus(uint64_t asset_id, uint8_t bat_percent, uint32_t bat_mah_used, double bat_voltage) = 0;
     virtual void recordSearchStatus(uint64_t asset_id, uint64_t search_id, uint64_t completed, uint64_t total) = 0;
@@ -199,7 +207,8 @@ public:
     auto operator=(db_connection &&) -> db_connection & = delete;
     ~db_connection() override;
     auto getAssetId(const std::string &name) -> std::optional<uint64_t> override;
-    void recordPosition(uint64_t asset_id, double latitude, double longitude, uint32_t altitude) override;
+    void recordPosition(uint64_t asset_id, double latitude, double longitude, uint32_t altitude,
+                        bool gps_fix_valid) override;
     void recordRtt(uint64_t asset_id, uint64_t rtt_ms) override;
     void recordStatus(uint64_t asset_id, uint8_t bat_percent, uint32_t bat_mah_used, double bat_voltage) override;
     void recordSearchStatus(uint64_t asset_id, uint64_t search_id, uint64_t completed, uint64_t total) override;
@@ -309,6 +318,11 @@ private:
      * from an authenticated peer — this is a healthy-link correction, not an
      * adversarial defence (see todo/17). Recv thread only. */
     void updateClockOffset(uint64_t client_timestamp, uint64_t rtt_ms, uint64_t recv_wall);
+    /* Log the edges of this session's GPS-fix state (todo/76). Every report is
+     * recorded to the database regardless; this only decides what reaches the
+     * log, which is why it is edge-triggered and the storage is not. Recv
+     * thread only. */
+    void logGpsFixState(bool gps_fix_valid, bool have_coords);
     uint64_t last_command_send_ts{0};
     uint64_t last_command_dbid{0};
     /* The command row this session has already recorded a dispatch write for
@@ -380,10 +394,17 @@ private:
     rate_limiter command_ack_rate{10, 5};
     uint64_t ack_rate_limit_rejects{0};
     uint64_t last_ack_rate_limit_log_ms{0};
-    /* Cumulative position reports discarded for having no GPS fix (NaN
-     * coordinates) this session; touched only on the recv thread
-     * (processMessage), used to throttle the warning. */
+    /* Position reports in the CURRENT no-fix run — reset when the fix returns,
+     * so the restore log can name how long the outage ran. Touched only on the
+     * recv thread (processMessage), used to throttle the warning. */
     uint64_t no_fix_reports{0};
+    /* Last GPS-fix state seen this session, and whether any has been seen yet.
+     * Session-scoped by design: a reconnect mid-outage genuinely has no prior
+     * state and re-logs the loss, which is information rather than a duplicate.
+     * Drives logging only — every report is recorded either way. Recv thread
+     * only. */
+    bool gps_fix_state_known{false};
+    bool gps_fix_valid{true};
     /* Position staleness window in ms (0 disables the check). A report whose
      * timestamp is further than this from the (offset-corrected) server clock
      * is discarded. Configurable via server.json position_staleness_ms. */

@@ -59,8 +59,13 @@ int db_status_create_entry(const char *conn, unsigned long long asset_id, unsign
                            unsigned int bat_mah_used, double bat_voltage);
 int db_search_status_create_entry(const char *conn, unsigned long long asset_id, unsigned long long search_id,
                                   unsigned long long search_completed, unsigned long long search_total);
+/* gps_fix_valid is the wire flags word's coords-valid bit, stored so fss-web
+ * can tell a GPS-backed position from the autopilot's dead-reckoned estimate.
+ * A non-finite latitude or longitude means the report carried no coordinates
+ * at all (the wire no-fix sentinel) and writes NULL geometry -- the same
+ * NaN<->NULL convention asset_command_s already uses in the read direction. */
 int db_position_create_entry(const char *conn, unsigned long long asset_id, double latitude, double longitude,
-                             int altitude);
+                             int altitude, int gps_fix_valid);
 
 /* Records the per-connection message id the server stamped onto the dispatched
  * command, on the assets_assetcommand row identified by its primary key

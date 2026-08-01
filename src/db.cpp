@@ -216,7 +216,7 @@ void flight_safety_system::server::db_connection::recordCommandAck(uint64_t comm
 }
 
 void flight_safety_system::server::db_connection::recordPosition(uint64_t asset_id, double latitude, double longitude,
-                                                                 uint32_t altitude)
+                                                                 uint32_t altitude, bool gps_fix_valid)
 {
     std::scoped_lock guard(this->write_lock);
     if (altitude > static_cast<uint32_t>(std::numeric_limits<int>::max()))
@@ -225,7 +225,8 @@ void flight_safety_system::server::db_connection::recordPosition(uint64_t asset_
                                         << asset_id);
         return;
     }
-    if (db_position_create_entry(write_conn_name, asset_id, latitude, longitude, static_cast<int>(altitude)) == 0)
+    if (db_position_create_entry(write_conn_name, asset_id, latitude, longitude, static_cast<int>(altitude),
+                                 gps_fix_valid ? 1 : 0) == 0)
     {
         throw database_error("position write failed for asset " + std::to_string(asset_id));
     }

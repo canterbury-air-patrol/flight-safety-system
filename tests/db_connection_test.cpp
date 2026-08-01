@@ -204,7 +204,22 @@ TEST_CASE("db_connection: recordPosition with valid altitude inserts row")
 {
     LIVE_DB_OR_SKIP(dbc);
     auto asset_id = get_test_asset_id(*dbc);
-    dbc->recordPosition(asset_id, -43.5, 172.6, uint32_t{100});
+    dbc->recordPosition(asset_id, -43.5, 172.6, uint32_t{100}, true);
+}
+
+TEST_CASE("db_connection: recordPosition without a GPS fix inserts a row")
+{
+    /* todo/76: a no-fix report is stored, not discarded. Both shapes must
+     * reach the database -- a dead-reckoned estimate (finite coordinates,
+     * gps_fix_valid false) and a report with no coordinates at all, which
+     * writes NULL geometry via the ECPG indicator variables. The column and
+     * the nullable geometry both arrive with fss-web migration 0016, so this
+     * also proves the e2e schema mirror matches. */
+    LIVE_DB_OR_SKIP(dbc);
+    auto asset_id = get_test_asset_id(*dbc);
+    dbc->recordPosition(asset_id, -43.5, 172.6, uint32_t{100}, false);
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    dbc->recordPosition(asset_id, nan, nan, uint32_t{100}, false);
 }
 
 TEST_CASE("db_connection: recordPosition with overflow altitude is discarded")
@@ -212,7 +227,7 @@ TEST_CASE("db_connection: recordPosition with overflow altitude is discarded")
     LIVE_DB_OR_SKIP(dbc);
     auto asset_id = get_test_asset_id(*dbc);
     constexpr auto huge_alt = static_cast<uint32_t>(std::numeric_limits<int>::max()) + uint32_t{1};
-    dbc->recordPosition(asset_id, -43.5, 172.6, huge_alt);
+    dbc->recordPosition(asset_id, -43.5, 172.6, huge_alt, true);
 }
 
 TEST_CASE("db_connection: write methods throw database_error when the write connection is down (todo/34)")
@@ -239,7 +254,7 @@ TEST_CASE("db_connection: write methods throw database_error when the write conn
         return false;
     };
 
-    REQUIRE(threw_database_error([&] { dbc->recordPosition(asset_id, -43.5, 172.6, uint32_t{100}); }));
+    REQUIRE(threw_database_error([&] { dbc->recordPosition(asset_id, -43.5, 172.6, uint32_t{100}, true); }));
     REQUIRE(threw_database_error([&] { dbc->recordRtt(asset_id, uint64_t{42}); }));
     REQUIRE(threw_database_error([&] { dbc->recordStatus(asset_id, uint8_t{80}, uint32_t{1000}, 12.4); }));
     REQUIRE(threw_database_error([&] { dbc->recordSearchStatus(asset_id, uint64_t{1}, uint64_t{50}, uint64_t{100}); }));

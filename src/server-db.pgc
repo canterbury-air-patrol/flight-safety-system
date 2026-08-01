@@ -173,7 +173,7 @@ int db_search_status_create_entry(const char *conn_arg, unsigned long long asset
     return 1;
 }
 
-int db_position_create_entry(const char *conn_arg, unsigned long long asset_id_arg, double latitude, double longitude, int altitude)
+int db_position_create_entry(const char *conn_arg, unsigned long long asset_id_arg, double latitude, double longitude, int altitude, int gps_fix_valid_arg)
 {
     EXEC SQL BEGIN DECLARE SECTION;
     const char *conn = conn_arg;
@@ -181,9 +181,17 @@ int db_position_create_entry(const char *conn_arg, unsigned long long asset_id_a
     double lat = latitude;
     double lng = longitude;
     int alt = altitude;
+    bool fix_valid = gps_fix_valid_arg != 0;
+    /* Negative indicator == SQL NULL. A report with no coordinates (the wire
+     * no-fix sentinel, decoded to NaN) must store NULL geometry rather than
+     * (0,0) -- Null Island is a real place. ST_MakePoint of a NULL argument is
+     * NULL, and ST_SetSRID of NULL is NULL, so the whole expression collapses
+     * to the NULL the column now permits (fss-web migration 0016). */
+    int lat_ind = isnan(latitude) ? -1 : 0;
+    int lng_ind = isnan(longitude) ? -1 : 0;
     EXEC SQL END DECLARE SECTION;
 
-    EXEC SQL AT :conn INSERT INTO assets_assetposition (asset_id, position, altitude, timestamp) VALUES (:asset_id, ST_SetSRID(ST_MakePoint(:lng, :lat), 4326), :alt, NOW());
+    EXEC SQL AT :conn INSERT INTO assets_assetposition (asset_id, position, altitude, gps_fix_valid, timestamp) VALUES (:asset_id, ST_SetSRID(ST_MakePoint(:lng :lng_ind, :lat :lat_ind), 4326), :alt, :fix_valid, NOW());
 
     if (sqlca.sqlcode < 0)
     {
@@ -802,6 +810,7 @@ static const struct required_column_s required_columns[] = {
     {"assets_assetposition", "asset_id", 0},
     {"assets_assetposition", "position", 0},
     {"assets_assetposition", "altitude", 0},
+    {"assets_assetposition", "gps_fix_valid", 0},
     {"assets_assetposition", "timestamp", 0},
     {"assets_assetrtt", "asset_id", 0},
     {"assets_assetrtt", "rtt", 0},

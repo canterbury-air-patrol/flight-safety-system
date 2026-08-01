@@ -198,7 +198,7 @@ auto make_mock_writer(fss_test::MockDatabase &mock) -> std::shared_ptr<fss::serv
         std::visit(fss::server::overloaded{
                        [&](const fss::server::rtt_write &w) -> void { mock.recordRtt(w.asset_id, w.rtt_ms); },
                        [&](const fss::server::position_write &w) -> void {
-                           mock.recordPosition(w.asset_id, w.latitude, w.longitude, w.altitude);
+                           mock.recordPosition(w.asset_id, w.latitude, w.longitude, w.altitude, w.gps_fix_valid);
                        },
                        [&](const fss::server::status_write &w) -> void {
                            mock.recordStatus(w.asset_id, w.bat_percent, w.bat_mah_used, w.bat_voltage);
@@ -1795,8 +1795,24 @@ TEST_CASE("session: legacy client (no version handshake) is accepted")
 namespace {
 auto make_position_msg(uint64_t ts) -> std::shared_ptr<fss::transport::fss_message_position_report>
 {
+    /* The coords-valid flag is set: these stand for ordinary healthy reports,
+     * and establish_v2_session negotiates the capability that makes the flags
+     * word meaningful (todo/76). */
     return std::make_shared<fss::transport::fss_message_position_report>(
-        0.0, 0.0, 0U, 0U, 0U, int16_t{0}, 0U, std::string{}, 0U, uint8_t{0}, 0U, uint8_t{0}, uint8_t{0}, ts);
+        0.0, 0.0, 0U, 0U, 0U, int16_t{0}, 0U, std::string{}, 0U, uint8_t{0},
+        fss::transport::FSS_POSITION_FLAG_VALID_COORDS, uint8_t{0}, uint8_t{0}, ts);
+}
+
+/* Number of non-overlapping occurrences of `needle` in `haystack`. Used to
+ * assert that a log line fires once per event rather than once per report. */
+auto count_occurrences(const std::string &haystack, const std::string &needle) -> size_t
+{
+    size_t count = 0;
+    for (size_t pos = haystack.find(needle); pos != std::string::npos; pos = haystack.find(needle, pos + needle.size()))
+    {
+        ++count;
+    }
+    return count;
 }
 
 /* Drive a version + identity exchange over a v2 connection.
@@ -2097,8 +2113,18 @@ TEST_CASE("session: no-fix (NaN) position report is discarded, not stored or bro
         std::string{}, 0U, uint8_t{0}, 0U, uint8_t{0}, uint8_t{0}, fss::fss_current_timestamp());
     session->processMessage(no_fix);
 
-    REQUIRE(mock.getPositions().empty()); // not stored
-    REQUIRE(handler.broadcasts.empty());  // not broadcast
+    /* Recorded, not discarded (todo/76): the operator cannot otherwise tell a
+     * blind aircraft from a silent one, because RTT keeps the asset connected
+     * either way. The coordinates stay NaN so the DB layer writes NULL
+     * geometry rather than Null Island. */
+    REQUIRE(fss_test::wait_for([&]() { return mock.getPositions().size() == 1; }));
+    auto stored = mock.getPositions();
+    REQUIRE_FALSE(stored[0].gps_fix_valid);
+    REQUIRE(std::isnan(stored[0].latitude));
+    REQUIRE(std::isnan(stored[0].longitude));
+    /* Still never relayed: a NaN coordinate is a hazard to a receiving
+     * aircraft, not information. */
+    REQUIRE(handler.broadcasts.empty());
     /* Logged distinctly as a no-fix, not the generic invalid-coordinate path. */
     REQUIRE(cap.str().find("no GPS fix") != std::string::npos);
 
@@ -2106,6 +2132,177 @@ TEST_CASE("session: no-fix (NaN) position report is discarded, not stored or bro
     auto fresh = make_position_msg(fss::fss_current_timestamp());
     session->processMessage(fresh);
     REQUIRE(handler.broadcasts.size() == 1);
+    REQUIRE(fss_test::wait_for([&]() { return mock.getPositions().size() == 2; }));
+    stored = mock.getPositions();
+    REQUIRE(stored[1].gps_fix_valid);
+    /* The restore edge is logged too -- before todo/76 the log said an
+     * aircraft had lost its fix and then never mentioned it again. */
+    REQUIRE(cap.str().find("GPS fix restored") != std::string::npos);
+}
+
+TEST_CASE("session: a run of no-fix reports is recorded per report but logged on the edges")
+{
+    /* The storage is per-report because fss-web ages the latest row to decide
+     * whether the no-fix state is current; the log is edge-triggered because an
+     * aircraft streams position at up to 5 Hz and an unthrottled line per
+     * report would bury every other message for the length of the outage. */
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 1;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+
+    fss_test::capture_cerr cap;
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    constexpr size_t no_fix_count = 20;
+    for (size_t i = 0; i < no_fix_count; ++i)
+    {
+        session->processMessage(std::make_shared<fss::transport::fss_message_position_report>(
+            nan, nan, 0U, 0U, 0U, int16_t{0}, 0U, std::string{}, 0U, uint8_t{0}, 0U, uint8_t{0}, uint8_t{0},
+            fss::fss_current_timestamp()));
+    }
+
+    REQUIRE(fss_test::wait_for([&]() { return mock.getPositions().size() == no_fix_count; }));
+    /* One loss line for the run, not twenty. */
+    REQUIRE(count_occurrences(cap.str(), "no GPS fix") == 1);
+}
+
+TEST_CASE("session: a cleared coords-valid flag records a dead-reckoned estimate without dropping it")
+{
+    /* The user-visible gap todo/76 closes on the flags side: a client can send
+     * finite coordinates while clearing the flags word's coords-valid bit,
+     * meaning "this is the estimator's guess, not a GPS fix". The position is
+     * still stored and still relayed -- a safety system must not discard a real
+     * coordinate on the strength of a metadata bit -- but it is marked, so
+     * fss-web labels it instead of ageing it as if it were a fix. */
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 1;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    uint64_t next_id = 1;
+    establish_v2_session(session, next_id);
+
+    fss_test::capture_cerr cap;
+    auto estimate = std::make_shared<fss::transport::fss_message_position_report>(
+        -43.5, 172.6, 100U, 0U, 0U, int16_t{0}, 0U, std::string{}, 0U, uint8_t{0}, uint16_t{0}, uint8_t{0}, uint8_t{0},
+        fss::fss_current_timestamp());
+    estimate->setId(next_id++);
+    session->processMessage(estimate);
+
+    REQUIRE(fss_test::wait_for([&]() { return mock.getPositions().size() == 1; }));
+    auto stored = mock.getPositions();
+    REQUIRE(stored[0].latitude == -43.5);
+    REQUIRE(stored[0].longitude == 172.6);
+    REQUIRE_FALSE(stored[0].gps_fix_valid);
+    REQUIRE(handler.broadcasts.size() == 1);
+    REQUIRE(cap.str().find("dead-reckoned estimate") != std::string::npos);
+
+    /* Setting the bit again restores the fix state. */
+    auto fixed = std::make_shared<fss::transport::fss_message_position_report>(
+        -43.5, 172.6, 100U, 0U, 0U, int16_t{0}, 0U, std::string{}, 0U, uint8_t{0},
+        fss::transport::FSS_POSITION_FLAG_VALID_COORDS, uint8_t{0}, uint8_t{0}, fss::fss_current_timestamp());
+    fixed->setId(next_id++);
+    session->processMessage(fixed);
+    REQUIRE(fss_test::wait_for([&]() { return mock.getPositions().size() == 2; }));
+    stored = mock.getPositions();
+    REQUIRE(stored[1].gps_fix_valid);
+}
+
+TEST_CASE("session: a peer that never negotiated the capability keeps its flags word ignored")
+{
+    /* Compat: a client predating FSS_FEATURE_POSITION_FLAGS leaves the flags
+     * word at 0. Reading that as "no fix" would mark every position it ever
+     * sends as dead-reckoned and, in fss-web, latch a permanent no-fix warning
+     * on a perfectly healthy aircraft. Without the negotiated capability the
+     * word says nothing and the report is a normal fix. */
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 1;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    /* Identity only -- no version handshake, so nothing is negotiated. */
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+    REQUIRE(conn->getNegotiatedFeatureFlags() == 0U);
+
+    session->processMessage(std::make_shared<fss::transport::fss_message_position_report>(
+        -43.5, 172.6, 100U, 0U, 0U, int16_t{0}, 0U, std::string{}, 0U, uint8_t{0}, uint16_t{0}, uint8_t{0}, uint8_t{0},
+        fss::fss_current_timestamp()));
+
+    REQUIRE(fss_test::wait_for([&]() { return mock.getPositions().size() == 1; }));
+    auto stored = mock.getPositions();
+    REQUIRE(stored[0].gps_fix_valid);
+    REQUIRE(handler.broadcasts.size() == 1);
+}
+
+TEST_CASE("session: a no-coordinate report outranks a flags word claiming a valid fix")
+{
+    /* cap-fmu drives both halves of the signal from one bool, but they can
+     * disagree if a client is wrong or malicious. NaN coordinates win: there is
+     * no position for a fix to back, so no flag can make the report valid. */
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 1;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    uint64_t next_id = 1;
+    establish_v2_session(session, next_id);
+
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    auto claimed_fix = std::make_shared<fss::transport::fss_message_position_report>(
+        nan, nan, 0U, 0U, 0U, int16_t{0}, 0U, std::string{}, 0U, uint8_t{0},
+        fss::transport::FSS_POSITION_FLAG_VALID_COORDS, uint8_t{0}, uint8_t{0}, fss::fss_current_timestamp());
+    claimed_fix->setId(next_id++);
+    session->processMessage(claimed_fix);
+
+    REQUIRE(fss_test::wait_for([&]() { return mock.getPositions().size() == 1; }));
+    auto stored = mock.getPositions();
+    REQUIRE_FALSE(stored[0].gps_fix_valid);
+    REQUIRE(handler.broadcasts.empty());
+}
+
+TEST_CASE("session: a malformed coordinate is discarded and leaves no fix record")
+{
+    /* An out-of-range coordinate is a broken report, not a report about the
+     * GPS. It must not masquerade as a no-fix row, or a buggy client would
+     * read as an aircraft that had lost its fix. */
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 1;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+
+    fss_test::capture_cerr cap;
+    session->processMessage(std::make_shared<fss::transport::fss_message_position_report>(
+        91.0, 172.6, 100U, 0U, 0U, int16_t{0}, 0U, std::string{}, 0U, uint8_t{0}, uint16_t{0}, uint8_t{0}, uint8_t{0},
+        fss::fss_current_timestamp()));
+
+    REQUIRE(mock.getPositions().empty());
+    REQUIRE(handler.broadcasts.empty());
+    REQUIRE(cap.str().find("Invalid position report coordinates") != std::string::npos);
+    REQUIRE(cap.str().find("no GPS fix") == std::string::npos);
 }
 
 TEST_CASE("session: future-dated position report is discarded (symmetric window)")
@@ -2775,10 +2972,13 @@ TEST_CASE("session: position report with out-of-range latitude is rejected")
     REQUIRE(mock.getPositions().front().asset_id == asset_id);
 }
 
-TEST_CASE("session: position report with invalid longitude or non-finite coords is rejected")
+TEST_CASE("session: position report with invalid longitude or infinite coords is rejected")
 {
-    /* is_valid_coordinate also rejects out-of-range longitude and non-finite
-     * lat/long; each such report must be neither stored nor broadcast. */
+    /* is_valid_coordinate also rejects out-of-range longitude and infinite
+     * lat/long; each such report must be neither stored nor broadcast. NaN is
+     * deliberately absent here -- it is not a malformed coordinate but the
+     * wire's no-fix sentinel, and since todo/76 it is recorded rather than
+     * discarded (see the no-fix cases above). */
     fss_test::MockDatabase mock;
     constexpr uint64_t asset_id = 22;
     mock.asset_ids["craft"] = asset_id;
@@ -2796,12 +2996,11 @@ TEST_CASE("session: position report with invalid longitude or non-finite coords 
             fss::fss_current_timestamp());
     };
 
-    const double nan = std::numeric_limits<double>::quiet_NaN();
     const double inf = std::numeric_limits<double>::infinity();
     for (const auto &bad : {make_pos(0.0, 200.0),  // longitude > 180
                             make_pos(0.0, -181.0), // longitude < -180
-                            make_pos(nan, 0.0),    // non-finite latitude
-                            make_pos(0.0, inf)})   // non-finite longitude
+                            make_pos(-inf, 0.0),   // infinite latitude
+                            make_pos(0.0, inf)})   // infinite longitude
     {
         session->processMessage(bad);
     }
