@@ -97,7 +97,19 @@ private:
     void notifyConnectionStatus();
     /* How many live servers have actually admitted this client (todo/79).
      * Precondition: servers_lock held. This — not servers.size() — is what
-     * connectionStatusChange() reports; see serverAdmitted(). */
+     * connectionStatusChange() reports; see serverAdmitted().
+     *
+     * Derived on demand, and a cached admitted_count member was considered and
+     * REJECTED (PR 418 review). serverRequiresReconnect() is not the only way a
+     * server leaves the live list: updateServers() splices expired entries
+     * straight out of `servers` into `expired_servers` under this same lock,
+     * bypassing it. A counter would need updating there too, and missing it
+     * would leave the count permanently high — the client reporting CONNECTED
+     * for a server that no longer exists, which is the very failure todo/79
+     * removes, let back in by another door. The scan it avoids is over a list
+     * bounded by max_learned_servers (16) plus the configured entries, and runs
+     * only on status-change edges: serverAdmitted() returns before counting
+     * once a server is already admitted, so this is not a per-message cost. */
     auto countAdmittedLocked() const -> size_t;
     virtual void connectionStatusChange(flight_safety_system::client_ssl::connection_status status);
 protected:
