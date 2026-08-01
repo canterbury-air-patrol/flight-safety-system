@@ -337,9 +337,15 @@ TEST_CASE("client: an unreachable server does not delay reconnection to a health
     REQUIRE(fss_test::wait_for([&]() -> bool { return stalling->dials_entered.load() == 1; }));
     REQUIRE(healthy->connected());
 
-    /* The pass after the dial lands harvests it into the live server list. */
+    /* The pass after the dial lands harvests it into the live server list. The
+     * server list stands in for the admitting server: since todo/79 a
+     * connected server is reported as service only once it has admitted the
+     * client, so the harvest alone no longer moves the status. Feeding it each
+     * pass is harmless — admission is idempotent — and lets the status stay the
+     * observable for "harvested AND admitted". */
     REQUIRE(fss_test::wait_for([&]() -> bool {
         client->attemptReconnect();
+        healthy->processMessage(std::make_shared<fss::transport::fss_message_server_list>());
         return client->last_status.load() == fss::client_ssl::CLIENT_CONNECTION_STATUS_CONNECTED_1_SERVER;
     }));
 
