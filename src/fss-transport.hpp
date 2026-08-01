@@ -53,6 +53,7 @@ static constexpr uint32_t FSS_FEATURE_RTT_OFFSET = 0x1U;        /* todo/17 item 
 static constexpr uint32_t FSS_FEATURE_COMMAND_ACK = 0x2U;       /* todo/17 item 1 */
 static constexpr uint32_t FSS_FEATURE_SYSTEM_HEALTH = 0x4U;     /* todo/17 item 2 */
 static constexpr uint32_t FSS_FEATURE_SERVER_COMMAND_ID = 0x8U; /* todo/49 */
+static constexpr uint32_t FSS_FEATURE_POSITION_FLAGS = 0x10U;   /* todo/76 */
 static constexpr uint32_t FSS_SUPPORTED_FEATURES =
     FSS_FEATURE_RTT_OFFSET | FSS_FEATURE_COMMAND_ACK | FSS_FEATURE_SERVER_COMMAND_ID;
 
@@ -626,6 +627,18 @@ public:
     virtual auto getRequestId() -> uint64_t;
     virtual auto getClientTimestamp() -> uint64_t;
 };
+
+/* Bit 0 of fss_message_position_report's flags word: the coordinates are
+ * backed by a real GPS fix rather than being the autopilot's dead-reckoned
+ * estimate. Numbered to match MAVLink's ADSB_FLAGS_VALID_COORDS, which is
+ * where the whole flags word comes from, and cap-fmu's POSITION_FLAG_VALID_
+ * COORDS / valid_fields_no_fix.
+ *
+ * A receiver may only act on this bit when the peer negotiated
+ * FSS_FEATURE_POSITION_FLAGS: a peer that predates the capability leaves the
+ * word at 0, and reading that as "no fix" would mark every one of its reports
+ * as dead-reckoned. */
+static constexpr uint16_t FSS_POSITION_FLAG_VALID_COORDS = 0x1U;
 
 class fss_message_position_report : public fss_message {
 private:
