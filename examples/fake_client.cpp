@@ -2,6 +2,7 @@
 
 #include <cstdlib>
 #include <csignal>
+#include <limits>
 #include <iostream>
 #include <optional>
 #include <sstream>
@@ -97,6 +98,12 @@ struct cli_options {
     std::string callsign{"example"};
     int position_interval_ms{5000};
     int64_t clock_offset_ms{0};
+    /* Window, in ms since start, during which position reports are sent with
+     * no GPS fix (todo/76). Both halves of the signal are driven together, as
+     * cap-fmu does: the coords-valid flag is cleared and the coordinates are
+     * NaN'd. Inactive while stop <= start. */
+    int no_fix_start_ms{0};
+    int no_fix_stop_ms{0};
 };
 
 /* Parses `text` as a base-10 integer via strtoul/strtol, requiring the
@@ -149,6 +156,8 @@ auto parse_args(int argc, char *argv[]) -> std::optional<cli_options>
     constexpr std::string_view callsign_prefix = "--callsign=";
     constexpr std::string_view interval_prefix = "--position-interval-ms=";
     constexpr std::string_view clock_offset_prefix = "--clock-offset-ms=";
+    constexpr std::string_view no_fix_start_prefix = "--no-fix-start-ms=";
+    constexpr std::string_view no_fix_stop_prefix = "--no-fix-stop-ms=";
     for (int i = 2; i < argc; i++)
     {
         std::string_view arg = argv[i];
@@ -174,6 +183,20 @@ auto parse_args(int argc, char *argv[]) -> std::optional<cli_options>
         {
             opts.clock_offset_ms =
                 std::strtoll(std::string(arg.substr(clock_offset_prefix.size())).c_str(), nullptr, 10);
+        }
+        else if (arg.substr(0, no_fix_start_prefix.size()) == no_fix_start_prefix)
+        {
+            if (!parse_int_arg(no_fix_start_prefix, arg.substr(no_fix_start_prefix.size()), opts.no_fix_start_ms))
+            {
+                return std::nullopt;
+            }
+        }
+        else if (arg.substr(0, no_fix_stop_prefix.size()) == no_fix_stop_prefix)
+        {
+            if (!parse_int_arg(no_fix_stop_prefix, arg.substr(no_fix_stop_prefix.size()), opts.no_fix_stop_ms))
+            {
+                return std::nullopt;
+            }
         }
         else
         {
@@ -274,8 +297,14 @@ auto main(int argc, char *argv[]) -> int
         }
         if (opts.position_interval_ms > 0 && elapsed_ms >= next_position_ms)
         {
-            constexpr double lat = -43.5;
-            constexpr double lng = 172.5;
+            /* Inside the no-fix window, report exactly as cap-fmu does when
+             * the autopilot drops below a 2D fix: clear the coords-valid bit
+             * and send NaN coordinates. The two are one signal and must not
+             * diverge. */
+            const bool no_fix = opts.no_fix_stop_ms > opts.no_fix_start_ms && elapsed_ms >= opts.no_fix_start_ms &&
+                                elapsed_ms < opts.no_fix_stop_ms;
+            const double lat = no_fix ? std::numeric_limits<double>::quiet_NaN() : -43.5;
+            const double lng = no_fix ? std::numeric_limits<double>::quiet_NaN() : 172.5;
             constexpr int alt = 300;
             constexpr int heading_cdeg = 1800;
             constexpr int hor_vel = 200;
@@ -285,7 +314,8 @@ auto main(int argc, char *argv[]) -> int
             /* ADS-B style validity bits: coords, altitude, heading, velocity,
              * callsign, squawk. Only the coords bit has a name here because it
              * is the only one the server reads (todo/76). */
-            constexpr int flags = fss::transport::FSS_POSITION_FLAG_VALID_COORDS | 2 | 4 | 8 | 16 | 32;
+            constexpr int other_valid_fields = 2 | 4 | 8 | 16 | 32;
+            const int flags = other_valid_fields | (no_fix ? 0 : int{fss::transport::FSS_POSITION_FLAG_VALID_COORDS});
             constexpr int alt_type = 1;
             constexpr int emitter_type = 14;
             /* getSkewedTimestamp() (todo/33) rather than fss_current_timestamp()
