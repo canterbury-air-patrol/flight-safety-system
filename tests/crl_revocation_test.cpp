@@ -37,7 +37,7 @@ auto make_writer(fss_test::MockDatabase &mock) -> std::shared_ptr<fss::server::d
         std::visit(fss::server::overloaded{
                        [&](const fss::server::rtt_write &w) -> void { mock.recordRtt(w.asset_id, w.rtt_ms); },
                        [&](const fss::server::position_write &w) -> void {
-                           mock.recordPosition(w.asset_id, w.latitude, w.longitude, w.altitude);
+                           mock.recordPosition(w.asset_id, w.latitude, w.longitude, w.altitude, w.gps_fix_valid);
                        },
                        [&](const fss::server::status_write &w) -> void {
                            mock.recordStatus(w.asset_id, w.bat_percent, w.bat_mah_used, w.bat_voltage);

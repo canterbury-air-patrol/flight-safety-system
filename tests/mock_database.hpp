@@ -48,9 +48,12 @@ public:
     };
     struct recorded_pos {
         uint64_t asset_id;
+        /* NaN when the report carried no coordinates; the production layer
+         * stores NULL geometry for that row. */
         double latitude;
         double longitude;
         uint32_t altitude;
+        bool gps_fix_valid;
     };
     struct recorded_status {
         uint64_t asset_id;
@@ -92,10 +95,11 @@ public:
         return it == asset_ids.end() ? uint64_t{0} : it->second;
     }
 
-    void recordPosition(uint64_t asset_id, double latitude, double longitude, uint32_t altitude) override
+    void recordPosition(uint64_t asset_id, double latitude, double longitude, uint32_t altitude,
+                        bool gps_fix_valid) override
     {
         const std::scoped_lock lock(records_lock);
-        positions.push_back({asset_id, latitude, longitude, altitude});
+        positions.push_back({asset_id, latitude, longitude, altitude, gps_fix_valid});
     }
 
     void recordRtt(uint64_t asset_id, uint64_t rtt_ms) override

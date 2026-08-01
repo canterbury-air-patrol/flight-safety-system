@@ -362,7 +362,7 @@ auto main(int argc, char *argv[]) -> int
             flight_safety_system::server::overloaded{
                 [&](const flight_safety_system::server::rtt_write &w) -> void { dbc->recordRtt(w.asset_id, w.rtt_ms); },
                 [&](const flight_safety_system::server::position_write &w) -> void {
-                    dbc->recordPosition(w.asset_id, w.latitude, w.longitude, w.altitude);
+                    dbc->recordPosition(w.asset_id, w.latitude, w.longitude, w.altitude, w.gps_fix_valid);
                 },
                 [&](const flight_safety_system::server::status_write &w) -> void {
                     dbc->recordStatus(w.asset_id, w.bat_percent, w.bat_mah_used, w.bat_voltage);

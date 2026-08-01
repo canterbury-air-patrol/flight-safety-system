@@ -27,6 +27,10 @@ constexpr uint64_t rtt_retry_interval = 10 * sec_to_msec;
  * persistently skewed client is unmistakable without a per-message WARN drip. */
 constexpr uint64_t staleness_escalation_threshold = 10;
 constexpr uint64_t staleness_escalation_interval = 100;
+/* How often to repeat the "still no GPS fix" warning while an outage lasts.
+ * The edges are always logged; this only stops a long outage from going silent
+ * between them. */
+constexpr uint64_t no_fix_log_interval = 100;
 /* RTT clock-offset smoothing (todo/17 item 3). A sample's error is bounded by
  * half the round trip, so a link slower than this yields an estimate too coarse
  * to trust for the staleness window — drop it rather than poison the average. */
@@ -840,6 +844,46 @@ void fss::server::fss_client::updateClockOffset(uint64_t client_timestamp, uint6
     }
 }
 
+void fss::server::fss_client::logGpsFixState(bool t_fix_valid, bool t_have_coords)
+{
+    /* The row is written for every report; the log is for the human reading
+     * stderr, so it names only the edges plus a periodic reminder. An aircraft
+     * streams position at up to 5 Hz, so an unthrottled per-report line would
+     * bury every other message in the log for the length of the outage. */
+    if (this->gps_fix_state_known && this->gps_fix_valid == t_fix_valid)
+    {
+        if (!t_fix_valid)
+        {
+            uint64_t no_fix = ++this->no_fix_reports;
+            if (no_fix % no_fix_log_interval == 0)
+            {
+                FSS_LOG_WARN("server",
+                             "Client " << this->name << " still reporting no GPS fix (count=" << no_fix << ")");
+            }
+        }
+        return;
+    }
+    const bool first = !this->gps_fix_state_known;
+    this->gps_fix_state_known = true;
+    this->gps_fix_valid = t_fix_valid;
+    if (!t_fix_valid)
+    {
+        this->no_fix_reports = 1;
+        FSS_LOG_WARN("server", "Position report with no GPS fix from "
+                                   << this->name
+                                   << (t_have_coords ? " (dead-reckoned estimate)" : " (no coordinates)"));
+        return;
+    }
+    if (!first)
+    {
+        /* The restore edge was invisible before todo/76: the log said an
+         * aircraft had lost its fix and then never mentioned it again. */
+        FSS_LOG_INFO("server",
+                     "GPS fix restored for " << this->name << " after " << this->no_fix_reports << " no-fix reports");
+    }
+    this->no_fix_reports = 0;
+}
+
 void fss::server::fss_client::refreshSmmSettings()
 {
     uint64_t asset_id = this->cached_asset_id.load();
@@ -1382,34 +1426,51 @@ void fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss
                      * even if the coordinate below is later rejected. */
                     this->staleness_discards = 0;
                 }
-                if (std::isnan(msg->getLatitude()) || std::isnan(msg->getLongitude()))
+                /* NaN coordinates are the wire sentinel for "no GPS fix" (see
+                 * pack_scaled_coord): the report carries no position at all. */
+                const bool have_coords = !std::isnan(msg->getLatitude()) && !std::isnan(msg->getLongitude());
+                if (have_coords && !is_valid_coordinate(msg->getLatitude(), msg->getLongitude()))
                 {
-                    /* NaN coordinates are the wire sentinel for "no GPS fix"
-                     * (see pack_scaled_coord). This is operationally distinct
-                     * from a malformed coordinate, so log it as such — but a
-                     * persistent no-fix arrives every report, so throttle to
-                     * first + every 100th to avoid flooding the log. */
-                    uint64_t no_fix = ++this->no_fix_reports;
-                    if (no_fix == 1 || (no_fix % 100) == 0)
-                    {
-                        FSS_LOG_WARN("server", "Position report with no GPS fix from "
-                                                   << this->name << " (count=" << no_fix << "), discarding");
-                    }
-                    return;
-                }
-                if (!is_valid_coordinate(msg->getLatitude(), msg->getLongitude()))
-                {
+                    /* Out of range or infinite: a malformed report, not a fix
+                     * report. It says nothing about the GPS, so it is discarded
+                     * outright and leaves no record. */
                     FSS_LOG_WARN("server", "Invalid position report coordinates (lat=" << msg->getLatitude()
                                                                                        << " lon=" << msg->getLongitude()
                                                                                        << "), discarding");
                     return;
                 }
+                /* The flags word's coords-valid bit is only meaningful from a
+                 * peer that negotiated the capability: one that predates it
+                 * leaves the word at 0, and reading that as "no fix" would mark
+                 * every report it ever sends as dead-reckoned. Without coords
+                 * there is nothing for a fix to back, so the bit cannot make
+                 * such a report valid. */
+                auto pos_msg = std::dynamic_pointer_cast<fss::transport::fss_message_position_report>(msg);
+                const bool flags_meaningful = pos_msg != nullptr && (active_conn->getNegotiatedFeatureFlags() &
+                                                                     fss::transport::FSS_FEATURE_POSITION_FLAGS) != 0;
+                const bool fix_valid =
+                    have_coords &&
+                    (!flags_meaningful || (pos_msg->getFlags() & fss::transport::FSS_POSITION_FLAG_VALID_COORDS) != 0);
+                this->logGpsFixState(fix_valid, have_coords);
                 if (this->aircraft && asset_id != 0)
                 {
-                    this->writer->enqueue(
-                        position_write{asset_id, msg->getLatitude(), msg->getLongitude(), msg->getAltitude()});
+                    /* Recorded whether or not there is a fix, carrying the
+                     * validity with it (todo/76). An aircraft reporting itself
+                     * blind is exactly what the operator cannot otherwise see:
+                     * a position that stops advancing looks identical to a
+                     * dropout, and RTT keeps the asset marked connected
+                     * throughout. */
+                    this->writer->enqueue(position_write{asset_id, msg->getLatitude(), msg->getLongitude(),
+                                                         msg->getAltitude(), fix_valid});
                 }
-                this->client_handler->broadcastMsg(msg, this);
+                if (have_coords)
+                {
+                    /* A NaN coordinate is never relayed: to a receiving
+                     * aircraft it is a hazard, not information. A dead-reckoned
+                     * coordinate is relayed unchanged, flags word included, so
+                     * the receiver applies its own policy to it. */
+                    this->client_handler->broadcastMsg(msg, this);
+                }
             }
             break;
             case fss::transport::message_type_system_status: {

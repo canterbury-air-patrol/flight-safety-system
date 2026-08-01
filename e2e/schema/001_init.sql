@@ -13,12 +13,17 @@ CREATE TABLE assets_asset (
     name        VARCHAR(64) NOT NULL UNIQUE
 );
 
+-- position is nullable and gps_fix_valid exists as of fss-web migration 0016:
+-- a report whose coordinates are not GPS-backed is still stored (the autopilot's
+-- dead-reckoned estimate is worth showing, labelled), and a report carrying no
+-- coordinates at all stores NULL geometry rather than being discarded.
 CREATE TABLE assets_assetposition (
-    id          BIGSERIAL PRIMARY KEY,
-    asset_id    BIGINT NOT NULL REFERENCES assets_asset(id),
-    position    GEOMETRY(POINT, 4326) NOT NULL,
-    altitude    INTEGER NOT NULL,
-    timestamp   TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+    id             BIGSERIAL PRIMARY KEY,
+    asset_id       BIGINT NOT NULL REFERENCES assets_asset(id),
+    position       GEOMETRY(POINT, 4326),
+    altitude       INTEGER NOT NULL,
+    gps_fix_valid  BOOLEAN NOT NULL DEFAULT TRUE,
+    timestamp      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE assets_assetrtt (

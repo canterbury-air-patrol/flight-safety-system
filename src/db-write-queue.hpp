@@ -19,9 +19,15 @@ struct rtt_write {
 };
 struct position_write {
     uint64_t asset_id;
+    /* NaN when the report carried no coordinates -- the wire no-fix sentinel.
+     * The row is still written, with NULL geometry, so the operator can see
+     * that the aircraft reported itself blind (todo/76). */
     double latitude;
     double longitude;
     uint32_t altitude;
+    /* False when the coordinates are the autopilot's dead-reckoned estimate
+     * rather than a GPS fix, or when there are no coordinates at all. */
+    bool gps_fix_valid;
 };
 struct status_write {
     uint64_t asset_id;
