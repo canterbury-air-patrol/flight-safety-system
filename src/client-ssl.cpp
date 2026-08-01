@@ -553,6 +553,60 @@ void flight_safety_system::client_ssl::fss_client::updateServers(
     }
 }
 
+/* Does receiving this message prove the server has admitted us (todo/79)?
+ *
+ * Connecting to a server is not the same as being admitted by one, and only the
+ * latter is service: the server refuses a client while its DB fail-safe is
+ * degraded, and refuses a duplicate identity, both after the handshake the
+ * connect already counted as success. The three types below are the ones a
+ * server sends *only* to a client it has identified and admitted, so the first
+ * of them to arrive is proof — no new message type, and nothing to negotiate.
+ *
+ * Deliberately not keyed on the server list alone, as todo/79 proposed: the
+ * identify path skips that send when the active-server read fails
+ * (client_session.cpp) and leaves the client to the 15 s periodic broadcast, so
+ * a server list on its own would report an admitted aircraft as DISCONNECTED
+ * for up to 15 s during exactly the database trouble this exists for.
+ *
+ * Deliberately NOT including rtt_request, which the server sends to every client
+ * in its list rather than to identified ones only: a rejected duplicate identity
+ * (todo/31) is admitted at the transport layer and can receive one in the window
+ * before its identify is refused. Counting that as service would reopen the flap
+ * for the duplicate case while closing it for the fail-safe case.
+ *
+ * If all three are missed the client under-reports connectivity until the next
+ * broadcast, which leaves the aircraft in its comms-loss failsafe — the
+ * conservative direction, and the correct one to fail in. Do not "fix" that by
+ * widening the signal to rtt_request.
+ *
+ * Every type is enumerated and there is no `default`, deliberately: under -Wall
+ * -Werror that makes a new message type fail to build until someone decides
+ * which side of this line it falls on. A `default: return false` would classify
+ * every future message as "not admission" silently, which is how a rule like
+ * this decays. */
+static auto admits_client(flight_safety_system::transport::fss_message_type type) -> bool
+{
+    switch (type)
+    {
+        case flight_safety_system::transport::message_type_command:
+        case flight_safety_system::transport::message_type_server_list:
+        case flight_safety_system::transport::message_type_smm_settings: return true;
+        case flight_safety_system::transport::message_type_unknown:
+        case flight_safety_system::transport::message_type_closed:
+        case flight_safety_system::transport::message_type_identity:
+        case flight_safety_system::transport::message_type_identity_non_aircraft:
+        case flight_safety_system::transport::message_type_identity_required:
+        case flight_safety_system::transport::message_type_version:
+        case flight_safety_system::transport::message_type_rtt_request:
+        case flight_safety_system::transport::message_type_rtt_response:
+        case flight_safety_system::transport::message_type_position_report:
+        case flight_safety_system::transport::message_type_system_status:
+        case flight_safety_system::transport::message_type_search_status:
+        case flight_safety_system::transport::message_type_command_ack: return false;
+    }
+    return false;
+}
+
 static auto status_for_server_count(size_t count) -> flight_safety_system::client_ssl::connection_status
 {
     switch (count)
@@ -1170,41 +1224,12 @@ void flight_safety_system::client_ssl::fss_server::processMessage(
          * spurious timeout. */
         this->last_message_received_time.store(this->clock->now_ms(), std::memory_order_relaxed);
         this->liveness_active.store(true, std::memory_order_release);
-        /* todo/79: connecting to a server is not the same as being admitted by
-         * one, and only the latter is service. These three are the messages a
-         * server sends *only* to a client it has identified and admitted, so
-         * the first of them to arrive is proof of admission — no new message
-         * type, and nothing to negotiate.
-         *
-         * Deliberately not keyed on the server list alone, as the item
-         * proposed: the identify path skips that send when the active-server
-         * read fails (client_session.cpp) and leaves the client to the 15 s
-         * periodic broadcast, so a server list on its own would report an
-         * admitted aircraft as DISCONNECTED for up to 15 s during exactly the
-         * database trouble this exists for.
-         *
-         * Deliberately NOT including RTT requests, which the server sends to
-         * every client in its list rather than to identified ones only: a
-         * rejected duplicate identity (todo/31) is admitted at the transport
-         * layer and can receive one in the window before its identify is
-         * refused. Counting that as service would reopen the flap for the
-         * duplicate case while closing it for the fail-safe case.
-         *
-         * If all three are missed the client under-reports connectivity until
-         * the next broadcast, which leaves the aircraft in its comms-loss
-         * failsafe — the conservative direction, and the correct one to fail
-         * in. Do not "fix" that by widening the signal to RTT. */
-        switch (msg->getType())
+        /* Before the handlers below run (see admits_client): admission is
+         * established the moment the message arrives, and an aircraft acting on
+         * a command should have seen comms come back first. */
+        if (admits_client(msg->getType()))
         {
-            case flight_safety_system::transport::message_type_command:
-            case flight_safety_system::transport::message_type_server_list:
-            case flight_safety_system::transport::message_type_smm_settings:
-                /* Before the handlers below run: admission is established the
-                 * moment the message arrives, and an aircraft acting on a
-                 * command should have seen comms come back first. */
-                this->getClient()->serverAdmitted(this);
-                break;
-            default: break;
+            this->getClient()->serverAdmitted(this);
         }
         switch (msg->getType())
         {
