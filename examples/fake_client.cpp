@@ -282,7 +282,10 @@ auto main(int argc, char *argv[]) -> int
             constexpr int vert_vel = 0;
             constexpr int squawk_code = 01200;
             constexpr int time_since_last_contact = 0;
-            constexpr int flags = 1 | 2 | 4 | 8 | 16 | 32;
+            /* ADS-B style validity bits: coords, altitude, heading, velocity,
+             * callsign, squawk. Only the coords bit has a name here because it
+             * is the only one the server reads (todo/76). */
+            constexpr int flags = fss::transport::FSS_POSITION_FLAG_VALID_COORDS | 2 | 4 | 8 | 16 | 32;
             constexpr int alt_type = 1;
             constexpr int emitter_type = 14;
             /* getSkewedTimestamp() (todo/33) rather than fss_current_timestamp()
