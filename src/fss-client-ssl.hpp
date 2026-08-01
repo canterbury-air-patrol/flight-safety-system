@@ -95,6 +95,10 @@ private:
      * Takes servers_lock itself, so callers must not already hold it. */
     void updateConfigured();
     void notifyConnectionStatus();
+    /* How many live servers have actually admitted this client (todo/79).
+     * Precondition: servers_lock held. This — not servers.size() — is what
+     * connectionStatusChange() reports; see serverAdmitted(). */
+    auto countAdmittedLocked() const -> size_t;
     virtual void connectionStatusChange(flight_safety_system::client_ssl::connection_status status);
 protected:
     void setAssetName(std::string t_asset_name);
@@ -183,6 +187,22 @@ public:
     virtual auto getSkewedTimestamp() const -> uint64_t;
     virtual auto isConfigured() const -> bool;
     virtual void serverRequiresReconnect(fss_server *server);
+    /* Record that `server` has admitted this client, and report the resulting
+     * connection status if that changed the admitted count (todo/79).
+     * Idempotent: only the first call for a given connection notifies.
+     *
+     * A server joins the live list when its TCP/TLS connect succeeds, but
+     * admission is a *later*, server-side decision — the server refuses a
+     * client while its DB fail-safe is degraded, and refuses a duplicate
+     * identity, both after the handshake the connect already counted as
+     * success. Reporting a connection the server severs milliseconds later as
+     * service made an aircraft leave its comms-loss failsafe and resume the
+     * previous command, then re-enter it when the drop landed. Counting
+     * admitted servers rather than connected ones is what stops that.
+     *
+     * Called from fss_server::processMessage() on the first message of a type
+     * the server sends only to a client it has admitted. */
+    void serverAdmitted(fss_server *server);
     virtual void updateServers(const std::shared_ptr<flight_safety_system::transport::fss_message_server_list> &msg);
     /* Called for every command, with the originating server (the connection the
      * command arrived on). A subclass that needs to reply to that specific
@@ -253,6 +273,13 @@ private:
      * therefore never expired. */
     bool learned{false};
     uint64_t last_seen_ms{0};
+    /* True once this connection has been admitted by the server, as distinct
+     * from merely connected to it (todo/79). Owned by the fss_client under
+     * servers_lock, like `learned` above. Cleared whenever the connection ends,
+     * so each new connection has to earn it again — a reconnect into a server
+     * that refuses the client must not inherit the previous session's
+     * admission. */
+    bool admitted{false};
     /* Per-server outbound writer
      * (docs/decisions/66-67-client-outbound-fanout.md). The caller's thread
      * schedules *what* to send; this worker performs the blocking socket
@@ -399,6 +426,11 @@ public:
      * into either list. */
     auto isLearned() const -> bool { return this->learned; }
     void setLearned(bool t_learned) { this->learned = t_learned; }
+    /* Admission state (todo/79). Same locking rule as the learned accessors
+     * above: fss_client::serverAdmitted() and the paths that end a connection
+     * are the only callers, and each holds servers_lock. */
+    auto isAdmitted() const -> bool { return this->admitted; }
+    void setAdmitted(bool t_admitted) { this->admitted = t_admitted; }
     auto getLastSeenMs() const -> uint64_t { return this->last_seen_ms; }
     void setLastSeenMs(uint64_t t_now_ms) { this->last_seen_ms = t_now_ms; }
     void setServerTimeoutMs(uint64_t ms) { this->server_timeout_ms = ms; }

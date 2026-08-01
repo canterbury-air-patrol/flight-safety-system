@@ -563,6 +563,36 @@ static auto status_for_server_count(size_t count) -> flight_safety_system::clien
     }
 }
 
+auto flight_safety_system::client_ssl::fss_client::countAdmittedLocked() const -> size_t
+{
+    return static_cast<size_t>(std::count_if(this->servers.begin(), this->servers.end(),
+                                             [](const auto &server) -> bool { return server->isAdmitted(); }));
+}
+
+void flight_safety_system::client_ssl::fss_client::serverAdmitted(flight_safety_system::client_ssl::fss_server *server)
+{
+    if (server == nullptr)
+    {
+        return;
+    }
+    /* Same shape as serverRequiresReconnect below: mutate and count under the
+     * lock, notify outside it. Notify only on the false->true edge — the
+     * signals that establish admission are ordinary traffic and keep arriving,
+     * and re-reporting an unchanged status on every one of them would be a
+     * callback storm for the application. */
+    size_t count = 0;
+    {
+        std::scoped_lock lock(this->servers_lock);
+        if (server->isAdmitted())
+        {
+            return;
+        }
+        server->setAdmitted(true);
+        count = this->countAdmittedLocked();
+    }
+    this->connectionStatusChange(status_for_server_count(count));
+}
+
 void flight_safety_system::client_ssl::fss_client::serverRequiresReconnect(
     flight_safety_system::client_ssl::fss_server *server)
 {
@@ -585,7 +615,15 @@ void flight_safety_system::client_ssl::fss_client::serverRequiresReconnect(
                 break;
             }
         }
-        count = this->servers.size();
+        /* The connection is over, so the admission it earned is over with it
+         * (todo/79). Cleared for the not-found case too: that server is still
+         * in reconnect_servers, and the connection it was admitted on is just
+         * as dead. */
+        if (server != nullptr)
+        {
+            server->setAdmitted(false);
+        }
+        count = this->countAdmittedLocked();
     }
     if (!found && server != nullptr)
     {
@@ -610,7 +648,7 @@ void flight_safety_system::client_ssl::fss_client::notifyConnectionStatus()
     size_t count = 0;
     {
         std::scoped_lock lock(this->servers_lock);
-        count = this->servers.size();
+        count = this->countAdmittedLocked();
     }
     this->connectionStatusChange(status_for_server_count(count));
 }
@@ -1132,6 +1170,42 @@ void flight_safety_system::client_ssl::fss_server::processMessage(
          * spurious timeout. */
         this->last_message_received_time.store(this->clock->now_ms(), std::memory_order_relaxed);
         this->liveness_active.store(true, std::memory_order_release);
+        /* todo/79: connecting to a server is not the same as being admitted by
+         * one, and only the latter is service. These three are the messages a
+         * server sends *only* to a client it has identified and admitted, so
+         * the first of them to arrive is proof of admission — no new message
+         * type, and nothing to negotiate.
+         *
+         * Deliberately not keyed on the server list alone, as the item
+         * proposed: the identify path skips that send when the active-server
+         * read fails (client_session.cpp) and leaves the client to the 15 s
+         * periodic broadcast, so a server list on its own would report an
+         * admitted aircraft as DISCONNECTED for up to 15 s during exactly the
+         * database trouble this exists for.
+         *
+         * Deliberately NOT including RTT requests, which the server sends to
+         * every client in its list rather than to identified ones only: a
+         * rejected duplicate identity (todo/31) is admitted at the transport
+         * layer and can receive one in the window before its identify is
+         * refused. Counting that as service would reopen the flap for the
+         * duplicate case while closing it for the fail-safe case.
+         *
+         * If all three are missed the client under-reports connectivity until
+         * the next broadcast, which leaves the aircraft in its comms-loss
+         * failsafe — the conservative direction, and the correct one to fail
+         * in. Do not "fix" that by widening the signal to RTT. */
+        switch (msg->getType())
+        {
+            case flight_safety_system::transport::message_type_command:
+            case flight_safety_system::transport::message_type_server_list:
+            case flight_safety_system::transport::message_type_smm_settings:
+                /* Before the handlers below run: admission is established the
+                 * moment the message arrives, and an aircraft acting on a
+                 * command should have seen comms come back first. */
+                this->getClient()->serverAdmitted(this);
+                break;
+            default: break;
+        }
         switch (msg->getType())
         {
             case flight_safety_system::transport::message_type_unknown:

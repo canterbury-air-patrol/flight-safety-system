@@ -362,7 +362,12 @@ TEST_CASE("timeout: successful reconnect restores cold-start liveness")
     client->attemptReconnect();
     REQUIRE(fss_test::wait_for([&]() -> bool { return server->reconnects.load() == 1; }));
     client->attemptReconnect();
-    REQUIRE(client->last_status == fss::client_ssl::CLIENT_CONNECTION_STATUS_CONNECTED_1_SERVER);
+    /* Harvested into the live list, but not yet reported as service: since
+     * todo/79 that needs the server to admit the client, and this case
+     * deliberately has nothing arrive on the new connection (see below), so
+     * there is no admission signal to have observed. The redial itself is
+     * asserted above. */
+    REQUIRE(client->last_status == fss::client_ssl::CLIENT_CONNECTION_STATUS_DISCONNECTED);
 
     /* Nothing has been received on the new connection: however long it stays
      * quiet, it must not be timed out on the old connection's stale clock. */
