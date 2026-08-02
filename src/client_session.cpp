@@ -846,6 +846,35 @@ void fss::server::fss_client::updateClockOffset(uint64_t client_timestamp, uint6
 
 void fss::server::fss_client::logGpsFixState(bool t_fix_valid, bool t_have_coords)
 {
+    /* Aircraft only. The state machine below holds ONE fix state per
+     * connection, which is only a truth when the connection carries one
+     * aircraft's own GPS. A non-aircraft client does not: an fss-adsb feeder
+     * relays reports for many arbitrary ICAO addresses down a single
+     * connection (todo/28, e2e/test_adsb_forwarding.py), so a mixed stream
+     * would flip the state between vehicles and log a loss/restore pair per
+     * alternation — the throttle only holds while the state is UNCHANGED, so
+     * the edges defeat it entirely — every line naming the feeder rather than
+     * the vehicle the report describes.
+     *
+     * Guarded here rather than at the call site so the invariant lives with
+     * the state it protects: the members are private to this class and this is
+     * their only writer, so one guard covers any future caller instead of each
+     * one having to restate it. The database write stays gated separately at
+     * the call site (`aircraft && asset_id != 0`) — it needs the asset id too,
+     * which the log line does not.
+     *
+     * No known feeder reaches the flip today, on either count: an older build
+     * advertises 0, so flags_meaningful is false and fix_valid just tracks
+     * have_coords; and per decision 76 fss-adsb always sets the coords-valid
+     * bit, because it only builds a report once a message carried a position.
+     * This guard is therefore defence for a relay that does forward an
+     * estimate or a position-less vehicle, not a fix for an observed flood —
+     * the defect being corrected is the scoping error itself, one fix state
+     * asserted over many vehicles. */
+    if (!this->aircraft)
+    {
+        return;
+    }
     /* The row is written for every report; the log is for the human reading
      * stderr, so it names only the edges plus a periodic reminder. An aircraft
      * streams position at up to 5 Hz, so an unthrottled per-report line would
