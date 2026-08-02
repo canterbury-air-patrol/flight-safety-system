@@ -31,10 +31,28 @@ namespace server {
  * A trip latches the degraded state: the caller severs every client
  * *and* gates new admissions (server_clients::setDegraded) so aircraft get one
  * clean comms-loss event instead of a disconnect/reconnect flap into the same
- * unhealthy server. Recovery requires the write queue fully drained AND more
- * than recovery_grace_secs with no new failure or drop; readmitted traffic is
- * then the health probe — if the fault persists, the next incident latches
- * again rather than flapping on the tick period.
+ * unhealthy server. Recovery requires the write queue fully drained, more than
+ * recovery_grace_secs with no new failure, drop or probe failure, AND a
+ * *successful health probe* observed on that very tick (todo/78).
+ *
+ * That last condition is the one field evidence forced. Drain-plus-quiet are
+ * both conditions about the ABSENCE of failure, and the trip's own action —
+ * disconnectAll() plus the admission gate — removes everything that could
+ * produce a failure: no telemetry arrives, nothing is queued, nothing fails.
+ * So they were satisfied by construction about recovery_grace_secs after every
+ * trip, whatever the database was doing. Against a permanently dead database
+ * (Path M m05: Postgres PANICked on a full disk and its crash recovery failed
+ * too) that made a ~20 s flap cycle forever, each cycle taking a connected
+ * aircraft out of and back into its comms-loss failsafe. The probe supplies the
+ * positive evidence the quiet window cannot: a real write, on the connection
+ * that failed, rolled back. It gates the quiet window rather than replacing it,
+ * so with the caller's 1 s cadence and the default 15 s grace, recovery needs a
+ * probe that keeps succeeding across the whole window, not one lucky moment: a
+ * failing probe restarts the quiet window, and the recovering tick must itself
+ * carry a fresh success. That freshness is the only thing that can see a probe
+ * which HANGS rather than fails — against a partitioned or frozen database it
+ * returns neither answer, so no counter moves and there is nothing else to
+ * notice.
  *
  * Thresholds are measured against an injectable IClock, not against a count of
  * tick() calls (todo/70). The caller drives this from a loop whose period is
@@ -62,6 +80,20 @@ public:
         write_failure,
         command_drop,
     };
+    /* One tick's worth of the write queue's cumulative counters plus its
+     * current backlog depth. A struct rather than five positional integers so
+     * a caller cannot silently transpose two of them (and so clang-tidy's
+     * easily-swappable-parameters check stays quiet as the set grows). */
+    struct db_health_counters {
+        uint64_t write_failures;
+        uint64_t command_drops;
+        /* Probes that wrote and rolled back a row. An *inconclusive* probe is
+         * neither counted here nor as a failure: it is the absence of evidence
+         * and must not readmit the fleet. */
+        uint64_t probe_successes;
+        uint64_t probe_failures;
+        std::size_t pending_writes;
+    };
 private:
     static constexpr uint64_t ms_per_sec = 1000;
     uint64_t disconnect_age_ms;
@@ -72,6 +104,13 @@ private:
     uint64_t last_event_ms{0}; // when a new failure or drop last arrived
     uint64_t last_write_failures{0};
     uint64_t last_command_drops{0};
+    uint64_t last_probe_failures{0};
+    uint64_t last_probe_successes{0};
+    /* The probe-success count as of the tick that latched the degraded state.
+     * Recovery requires the live count to differ from it, so successes banked
+     * before the trip — from a previous degraded episode — cannot pay for this
+     * one. Compared with !=, matching the counter idiom above. */
+    uint64_t probe_successes_at_trip{0};
     /* An explicit flag rather than incident_start_ms == 0. A monotonic clock
      * that has just started, and every test clock, legitimately reads 0, so a
      * zero sentinel would silently discard an incident that began at the
@@ -95,14 +134,21 @@ public:
      * about once a second, but nothing here depends on that: every threshold
      * is measured against the clock, so a slow or interrupted tick changes when
      * a decision is observed, never when it is due. */
-    auto tick(uint64_t write_failures, uint64_t command_drops, std::size_t pending_writes) -> event
+    auto tick(const db_health_counters &counters) -> event
     {
         this->now_ms = this->clock->now_ms();
-        bool new_write_failure = write_failures != this->last_write_failures;
-        bool new_command_drop = command_drops != this->last_command_drops;
-        this->last_write_failures = write_failures;
-        this->last_command_drops = command_drops;
-        if (new_write_failure || new_command_drop)
+        bool new_write_failure = counters.write_failures != this->last_write_failures;
+        bool new_command_drop = counters.command_drops != this->last_command_drops;
+        /* A probe failure resets the quiet window exactly like a write
+         * failure — it is a demonstrated write failure, just one this server
+         * provoked deliberately — but it is never a trip trigger: the probe
+         * only runs while already degraded, and re-tripping a latched state
+         * would only churn reason(). */
+        bool new_probe_failure = counters.probe_failures != this->last_probe_failures;
+        this->last_write_failures = counters.write_failures;
+        this->last_command_drops = counters.command_drops;
+        this->last_probe_failures = counters.probe_failures;
+        if (new_write_failure || new_command_drop || new_probe_failure)
         {
             this->last_event_ms = this->now_ms;
         }
@@ -112,9 +158,57 @@ public:
              * anything: while tasks are still draining against a broken sink
              * they keep producing failures, and a nonempty-but-quiet queue
              * (e.g. a wedged sink) is not health either. */
-            bool quiet = !new_write_failure && !new_command_drop &&
+            bool quiet = !new_write_failure && !new_command_drop && !new_probe_failure &&
                          (this->now_ms - this->last_event_ms) > this->recovery_grace_ms;
-            if (pending_writes == 0 && quiet)
+            /* The positive evidence (todo/78). Without it, drain and quiet are
+             * both guaranteed by the severance this state performed, so the
+             * degraded state ended on a timer no matter how dead the database
+             * was.
+             *
+             * The evidence must be FRESH, not merely on record: recovery
+             * happens on a tick that carries a probe success, not on a tick
+             * that remembers one. A probe that HANGS — a partition, a failover,
+             * a frozen host — returns neither answer, so no counter moves at
+             * all: a failing probe holds the latch by restarting the quiet
+             * window, but a hanging one can only be noticed by the absence of
+             * fresh evidence. A "has succeeded at some point since the trip"
+             * test lets a single early success pay for a recovery arbitrarily
+             * later, into a database that has answered nothing since.
+             *
+             * Deliberately edge-triggered rather than "a success within the
+             * last recovery_grace_ms", which sounds equivalent and is not: the
+             * quiet window is measured from the trip, which is itself an event,
+             * so recovery is first possible at trip + grace + one tick — and a
+             * success arriving one tick after the trip is then almost exactly
+             * grace old, i.e. still inside such a window. That formulation
+             * therefore admits the very case it is meant to exclude, by a
+             * margin of one tick. Requiring the success on the tick itself has
+             * no constant in it and no boundary to land on.
+             *
+             * Cost on a healthy database: none. The caller requests a probe on
+             * every degraded tick and the queue is empty while degraded, so
+             * each tick observes the previous tick's success and recovery lands
+             * on the same tick it always did. A database answering more slowly
+             * than the tick period delays recovery by at most one probe round
+             * trip — while it is answering that slowly, holding the gate up is
+             * the safer error.
+             *
+             * The at-trip baseline is implied by freshness (a success observed
+             * this tick is necessarily later than the trip's snapshot) and is
+             * kept because the two state different invariants: this one says
+             * "evidence now", that one says "evidence from THIS episode". A
+             * later change to either must not silently inherit the other's
+             * meaning.
+             *
+             * last_probe_successes is maintained here and at the two trip
+             * sites rather than on every tick: probes are only ever requested
+             * while degraded (wantsProbe()), so the counter cannot move in
+             * between, and keeping the update beside its only reader is what
+             * lets this flag live in the scope that uses it. */
+            bool new_probe_success = counters.probe_successes != this->last_probe_successes;
+            this->last_probe_successes = counters.probe_successes;
+            bool probed_healthy = new_probe_success && counters.probe_successes != this->probe_successes_at_trip;
+            if (counters.pending_writes == 0 && quiet && probed_healthy)
             {
                 this->degraded_ = false;
                 this->reason_ = trip_reason::none;
@@ -126,6 +220,8 @@ public:
         if (new_command_drop)
         {
             this->degraded_ = true;
+            this->probe_successes_at_trip = counters.probe_successes;
+            this->last_probe_successes = counters.probe_successes;
             this->reason_ = trip_reason::command_drop;
             /* No write-failure incident is implicated, so do not leave one
              * standing for incidentAgeSecs() to report against this trip. */
@@ -145,6 +241,8 @@ public:
             if ((this->now_ms - this->incident_start_ms) >= this->disconnect_age_ms)
             {
                 this->degraded_ = true;
+                this->probe_successes_at_trip = counters.probe_successes;
+                this->last_probe_successes = counters.probe_successes;
                 this->reason_ = trip_reason::write_failure;
                 /* Deliberately left active, unlike the command-drop path: the
                  * caller logs incidentAgeSecs() with the trip, and nothing
@@ -160,6 +258,12 @@ public:
         return event::none;
     }
     [[nodiscard]] auto degraded() const -> bool { return this->degraded_; }
+    /* Whether the caller should ask for a health probe this tick. True only
+     * while degraded: in normal operation this is one bool read per second, no
+     * enqueue, no atomic store and no database contact — the probe exists to
+     * end the degraded state, and real traffic is evidence enough while it is
+     * flowing. */
+    [[nodiscard]] auto wantsProbe() const -> bool { return this->degraded_; }
     [[nodiscard]] auto reason() const -> trip_reason { return this->reason_; }
     /* How long the write-failure incident had been running as of the last
      * tick, in seconds (0 if none is active), for the caller's trip log. Read

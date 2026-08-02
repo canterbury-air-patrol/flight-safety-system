@@ -1,4 +1,5 @@
-"""e2e: a write-only DB failure latches one fail-safe event, no flap (todo/45+47).
+"""e2e: a write-only DB failure latches the fail-safe until writes actually
+work again (todo/45+47, todo/78).
 
 The shipped todo/34 fail-safe severed every client on sustained DB write
 failure but left the listener ungated. If the failure is write-only — reads
@@ -11,19 +12,28 @@ read side dies too; see test_db_disk_full.py.)
 
 This test manufactures the write-only case with BEFORE INSERT triggers that
 raise on the telemetry tables (the server connects as a superuser here, so
-REVOKE would be bypassed; a trigger fires for any role). Reads are untouched.
-It asserts the todo/47 behaviour: exactly one trip, the reconnecting client
-is refused (never re-identified) while degraded, and once the fault is
-removed the fail-safe recovers on its own — the write queue drains and stays
-quiet for db_write_failure_recovery_grace_secs (15s default) — after which
-the same client is readmitted and telemetry stores again.
+REVOKE would be bypassed; a trigger fires for any role). Reads are untouched,
+which is exactly why a `SELECT 1`-style health check cannot be the fail-safe's
+recovery evidence: it stays green throughout this test.
 
-Timing note: while degraded no writes are attempted (all clients are severed
-and refused), so the quiet window elapses ~15s after the trip even with the
-triggers still installed — recovery deliberately readmits traffic as the
-health probe. The no-flap observation window must therefore stay well inside
-those 15s, and the triggers are dropped immediately after it so the probe
-succeeds; a persistent fault would simply re-latch on the incident timescale.
+What is asserted: exactly one trip; the reconnecting client is refused (never
+re-identified) while degraded; the degraded state HOLDS for as long as writes
+keep failing, not merely until a quiet timer expires; and once the fault is
+removed the fail-safe recovers on its own and the same client is readmitted
+and stores telemetry again.
+
+That middle property is todo/78, and it is what this file used to assert the
+opposite of. Recovery was "the write queue drained and stayed quiet for
+db_write_failure_recovery_grace_secs" — but the trip's own action (sever
+everything, refuse everything) removes all the traffic that could produce a
+failure, so drained-and-quiet was satisfied by construction ~15 s after every
+trip, whatever the database was doing. Against a permanently dead database
+that was a ~20 s flap forever (Path M m05 observed it live). The old version of
+this test could only observe the no-flap window for 6 s, because at ~15 s the
+server would have "recovered" into the still-broken database and the test would
+have been asserting the defect. Recovery now additionally requires a successful
+*probe write* — a real INSERT on the write connection, rolled back — which the
+triggers here fail, so the hold below can be as long as we like.
 """
 from __future__ import annotations
 
@@ -68,9 +78,20 @@ def _remove_write_failure(db_conn: psycopg2.extensions.connection) -> None:
         cur.execute("DROP FUNCTION IF EXISTS e2e_fail_write()")
 
 
+# Worst-case budget for the waits below, so the next person does not have to
+# re-derive it: 25 (baseline row) + 30 (trip) + 15 (first refusal) + 45 (the
+# degraded hold) + 40 (recovery once the fault is removed) + 20 (re-identify)
+# + 25 (telemetry resumes) = 200 s, plus this test's share of fixture setup
+# (postgis container, migration, cert generation, server + client spawn), which
+# pytest-timeout counts because it is not running in func_only mode. 300 s
+# leaves ~100 s of headroom. The hold was 6 s before todo/78: recovery used to
+# arrive on a ~15 s timer regardless of the database's state, so observing for
+# longer would have caught the server "recovering" into a still-broken database
+# — which is the defect, not the behaviour. e2e/pytest.ini's global 60 s default
+# is overridden by this decorator.
 @pytest.mark.requires_docker
 @pytest.mark.slow
-@pytest.mark.timeout(180)
+@pytest.mark.timeout(300)
 def test_write_only_db_failure_latches_one_failsafe_event(db_conn, fake_client, server_proc):
     """Write-only DB failure: one latched severance while degraded, refusal of
     reconnect attempts, autonomous recovery once writes heal, no flap."""
@@ -119,27 +140,41 @@ def test_write_only_db_failure_latches_one_failsafe_event(db_conn, fake_client, 
             "no reconnect attempt was refused while degraded\n" + log_text()
         )
 
-        # No-flap window. Pre-fix, the client re-identified within ~1-2s of
-        # the severance and was severed again ~5s later; 6s of observation
-        # catches that cycle while staying well inside the ~15s quiet window
-        # after which the (deliberate) autonomous recovery would readmit —
-        # see the module docstring.
-        time.sleep(6)
+        # No-flap window, and the todo/78 property: the degraded state must
+        # hold for as long as writes are broken. Three times the 15s recovery
+        # grace, checked continuously rather than only at the end — a recovery
+        # that happened and re-tripped would otherwise be invisible in the final
+        # snapshot. Pre-todo/78 this reached the first assert inside ~16s.
+        hold_secs = 45
+        deadline = time.monotonic() + hold_secs
+        while time.monotonic() < deadline:
+            snapshot = log_text()
+            assert "DB fail-safe recovered" not in snapshot, (
+                "fail-safe recovered while every write to the database was still failing "
+                f"({int(hold_secs - (deadline - time.monotonic()))}s into a {hold_secs}s hold)\n" + snapshot
+            )
+            assert snapshot.count("DB fail-safe tripped") == 1, (
+                "fail-safe tripped more than once while degraded (flap)\n" + snapshot
+            )
+            time.sleep(0.5)
+
         during_degraded = log_text()
-        assert during_degraded.count("DB fail-safe tripped") == 1, (
-            "fail-safe tripped more than once while degraded (flap)\n" + during_degraded
-        )
         assert during_degraded.count("Aircraft client identified: test1") == 1, (
             "client was re-admitted to identified operation while degraded\n" + during_degraded
         )
-        assert "DB fail-safe recovered" not in during_degraded, (
-            "fail-safe recovered while writes were still failing\n" + during_degraded
+        # The probe is what holds the latch shut, so it must be visibly running:
+        # a server that simply stopped probing would pass the asserts above for
+        # the wrong reason.
+        assert "fail-safe probe write failed" in during_degraded, (
+            "no failing probe write was logged while degraded — the fail-safe is holding on "
+            "silence rather than on evidence (todo/78)\n" + during_degraded
         )
     finally:
         _remove_write_failure(db_conn)
 
-    # With the fault removed, the queue is drained and quiet: recovery follows
-    # once the grace window (15s from the last failure) elapses.
+    # With the fault removed the probe succeeds within a cadence or two, and
+    # recovery follows once the grace window (15s from the last failure, which
+    # is the last failing probe) has also elapsed.
     assert _wait_for(lambda: "DB fail-safe recovered" in log_text(), timeout=40.0, poll=0.5), (
         "fail-safe never recovered after the write fault was removed\n" + log_text()
     )

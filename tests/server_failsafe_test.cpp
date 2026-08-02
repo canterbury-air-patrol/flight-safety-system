@@ -38,14 +38,23 @@ namespace {
  * That is also what the caller does: the main loop ticks the fail-safe once a
  * second. What the clock adds is that the tests can now say how much time a
  * tick spent — see the threshold-edge and slow-tick cases at the end, which
- * were not expressible against a call counter. */
+ * were not expressible against a call counter.
+ *
+ * The three-argument tick()/tickAfter() also supply a *fresh probe success* on
+ * every call (todo/78), because that is what the world those cases describe
+ * looks like: the database answers writes. Before todo/78 recovery needed no
+ * positive evidence at all, so leaving the probe counter still would silently
+ * rewrite every recovery case here into a no-recovery case. The cases that are
+ * about the probe itself use tickCounters() and drive all five counters
+ * explicitly. */
 class FailsafeHarness {
 public:
     FailsafeHarness(uint64_t t_disconnect_age_secs, uint64_t t_recovery_grace_secs)
         : f(t_disconnect_age_secs, t_recovery_grace_secs, clock)
     {
     }
-    /* One nominal second of the caller's loop. */
+    /* One nominal second of the caller's loop, against a database whose probe
+     * is succeeding. */
     auto tick(uint64_t write_failures, uint64_t command_drops, std::size_t pending_writes) -> db_failsafe::event
     {
         return this->tickAfter(1000, write_failures, command_drops, pending_writes);
@@ -55,15 +64,25 @@ public:
     auto tickAfter(uint64_t ms, uint64_t write_failures, uint64_t command_drops, std::size_t pending_writes)
         -> db_failsafe::event
     {
+        ++this->healthy_probe_successes;
+        return this->tickCounters(
+            ms, {write_failures, command_drops, this->healthy_probe_successes, this->probe_failures, pending_writes});
+    }
+    /* Full control of every counter the monitor reads. */
+    auto tickCounters(uint64_t ms, const db_failsafe::db_health_counters &counters) -> db_failsafe::event
+    {
         this->clock->advance(ms);
-        return this->f.tick(write_failures, command_drops, pending_writes);
+        return this->f.tick(counters);
     }
     [[nodiscard]] auto degraded() const -> bool { return this->f.degraded(); }
+    [[nodiscard]] auto wantsProbe() const -> bool { return this->f.wantsProbe(); }
     [[nodiscard]] auto reason() const -> db_failsafe::trip_reason { return this->f.reason(); }
     [[nodiscard]] auto incidentAgeSecs() const -> uint64_t { return this->f.incidentAgeSecs(); }
 private:
     std::shared_ptr<FakeClock> clock{std::make_shared<FakeClock>()};
     db_failsafe f;
+    uint64_t healthy_probe_successes{0};
+    uint64_t probe_failures{0};
 };
 
 } // namespace
@@ -250,7 +269,7 @@ TEST_CASE("db_failsafe: telemetry-only drops from a real queue never trip the fa
     };
 
     constexpr std::size_t depth = 3;
-    fss::server::db_write_queue q(depth, sink);
+    fss::server::db_write_queue q(depth, sink, []() -> bool { return true; });
     /* Park the worker on a first command so the queue fills predictably. */
     q.enqueue(fss::server::command_dispatch_write{1, 1});
     REQUIRE(fss_test::wait_for([&]() -> bool { return entered.load() >= 1; }));
@@ -395,4 +414,291 @@ TEST_CASE("db_failsafe: an incident starting at clock zero is not discarded (tod
     REQUIRE(f.tickAfter(1000, 2, 0, 0) == db_failsafe::event::none);
     REQUIRE(f.tickAfter(1000, 3, 0, 0) == db_failsafe::event::tripped); // 2s old
     REQUIRE(f.reason() == db_failsafe::trip_reason::write_failure);
+}
+
+/* ── Recovery needs positive evidence, not silence (todo/78) ─────────────── */
+
+TEST_CASE("db_failsafe: silence alone never recovers the degraded state (todo/78)")
+{
+    /* The m05 field regression, distilled. A 200 MB Postgres data directory
+     * filled until the instance PANICked and its crash recovery failed too, so
+     * the database was permanently gone — and the server announced "DB fail-safe
+     * recovered: write queue drained and quiet for 15s" sixteen seconds after
+     * the trip, readmitting the aircraft into a database that could not record
+     * a single thing about it.
+     *
+     * Both of the old conditions are about the ABSENCE of failure, and the
+     * trip's own action removes everything that could produce one: every client
+     * is severed and new ones refused, so nothing is queued and nothing fails.
+     * Drained and quiet were therefore satisfied by construction. Here they are
+     * satisfied for ten times the grace window with the probe never once
+     * succeeding, and the state must hold. */
+    FailsafeHarness f(0, 15);
+    REQUIRE(f.tickCounters(1000, {1, 0, 0, 0, 0}) == db_failsafe::event::tripped);
+    for (int i = 0; i < 150; i++)
+    {
+        REQUIRE(f.tickCounters(1000, {1, 0, 0, 0, 0}) == db_failsafe::event::none);
+        REQUIRE(f.degraded());
+        REQUIRE(f.reason() == db_failsafe::trip_reason::write_failure);
+    }
+}
+
+TEST_CASE("db_failsafe: a probe success after the quiet window recovers (todo/78)")
+{
+    FailsafeHarness f(0, 3);
+    REQUIRE(f.tickCounters(1000, {1, 0, 0, 0, 0}) == db_failsafe::event::tripped);
+    /* Drained and quiet, but no evidence: the window elapsing is not enough. */
+    REQUIRE(f.tickCounters(1000, {1, 0, 0, 0, 0}) == db_failsafe::event::none); // 1s
+    REQUIRE(f.tickCounters(1000, {1, 0, 0, 0, 0}) == db_failsafe::event::none); // 2s
+    REQUIRE(f.tickCounters(1000, {1, 0, 0, 0, 0}) == db_failsafe::event::none); // 3s
+    REQUIRE(f.tickCounters(1000, {1, 0, 0, 0, 0}) == db_failsafe::event::none); // 4s, quiet satisfied
+    REQUIRE(f.degraded());
+    /* The probe wrote a row (and rolled it back): the write path works. */
+    REQUIRE(f.tickCounters(1000, {1, 0, 1, 0, 0}) == db_failsafe::event::recovered);
+    REQUIRE(!f.degraded());
+    REQUIRE(f.reason() == db_failsafe::trip_reason::none);
+}
+
+TEST_CASE("db_failsafe: a probe success does not shortcut the quiet window (todo/78)")
+{
+    /* The probe gates the existing window, it does not replace it. A database
+     * that answers one probe in the middle of a failure burst has not shown it
+     * can carry the fleet's writes. */
+    FailsafeHarness f(0, 3);
+    REQUIRE(f.tickCounters(1000, {1, 0, 0, 0, 0}) == db_failsafe::event::tripped);
+    REQUIRE(f.tickCounters(1000, {1, 0, 1, 0, 0}) == db_failsafe::event::none); // 1s quiet
+    REQUIRE(f.tickCounters(1000, {1, 0, 2, 0, 0}) == db_failsafe::event::none); // 2s
+    REQUIRE(f.tickCounters(1000, {1, 0, 3, 0, 0}) == db_failsafe::event::none); // 3s
+    REQUIRE(f.degraded());
+    REQUIRE(f.tickCounters(1000, {1, 0, 4, 0, 0}) == db_failsafe::event::recovered); // 4s > grace
+}
+
+TEST_CASE("db_failsafe: a probe failure restarts the quiet window (todo/78)")
+{
+    FailsafeHarness f(0, 3);
+    REQUIRE(f.tickCounters(1000, {1, 0, 0, 0, 0}) == db_failsafe::event::tripped);
+    REQUIRE(f.tickCounters(1000, {1, 0, 1, 0, 0}) == db_failsafe::event::none); // a success banked
+    /* A probe failure is a demonstrated write failure, so it resets the window
+     * exactly as a real one does — recovery is deferred a full grace from here,
+     * not from the trip. */
+    REQUIRE(f.tickCounters(1000, {1, 0, 1, 1, 0}) == db_failsafe::event::none);
+    for (int i = 0; i < 3; i++)
+    {
+        REQUIRE(f.tickCounters(1000, {1, 0, 2, 1, 0}) == db_failsafe::event::none);
+        REQUIRE(f.degraded());
+    }
+    REQUIRE(f.tickCounters(1000, {1, 0, 3, 1, 0}) == db_failsafe::event::recovered);
+}
+
+TEST_CASE("db_failsafe: a permanently failing probe never recovers (todo/78)")
+{
+    /* Five simulated minutes against a database that is simply gone. Zero
+     * recovered events — which is what the aircraft in m05 needed: one latched
+     * comms-loss event, not one every twenty seconds. */
+    FailsafeHarness f(0, 15);
+    REQUIRE(f.tickCounters(1000, {1, 0, 0, 0, 0}) == db_failsafe::event::tripped);
+    uint64_t probe_failures = 0;
+    for (int i = 0; i < 300; i++)
+    {
+        REQUIRE(f.tickCounters(1000, {1, 0, 0, ++probe_failures, 0}) == db_failsafe::event::none);
+        REQUIRE(f.degraded());
+    }
+}
+
+TEST_CASE("db_failsafe: wantsProbe is true exactly while degraded (todo/78)")
+{
+    /* The cadence rule. Healthy operation must not pay for the probe at all:
+     * the caller's per-second block reads this one bool and does nothing else. */
+    FailsafeHarness f(0, 3);
+    REQUIRE(!f.wantsProbe());
+    REQUIRE(f.tickCounters(1000, {0, 0, 0, 0, 0}) == db_failsafe::event::none);
+    REQUIRE(!f.wantsProbe());
+    REQUIRE(f.tickCounters(1000, {1, 0, 0, 0, 0}) == db_failsafe::event::tripped);
+    for (int i = 0; i < 4; i++)
+    {
+        REQUIRE(f.wantsProbe());
+        REQUIRE(f.tickCounters(1000, {1, 0, 0, 0, 0}) == db_failsafe::event::none);
+    }
+    REQUIRE(f.wantsProbe());
+    REQUIRE(f.tickCounters(1000, {1, 0, 1, 0, 0}) == db_failsafe::event::recovered);
+    REQUIRE(!f.wantsProbe());
+}
+
+TEST_CASE("db_failsafe: probe successes banked before the trip do not count (todo/78)")
+{
+    /* The baseline is taken from the tick that latches, so a previous degraded
+     * episode's evidence cannot pay for this one — otherwise a server that
+     * recovered once would recover instantly forever after. */
+    FailsafeHarness f(0, 3);
+    REQUIRE(f.tickCounters(1000, {0, 0, 7, 0, 0}) == db_failsafe::event::none);
+    REQUIRE(f.tickCounters(1000, {1, 0, 7, 0, 0}) == db_failsafe::event::tripped);
+    for (int i = 0; i < 10; i++)
+    {
+        REQUIRE(f.tickCounters(1000, {1, 0, 7, 0, 0}) == db_failsafe::event::none);
+        REQUIRE(f.degraded());
+    }
+    REQUIRE(f.tickCounters(1000, {1, 0, 8, 0, 0}) == db_failsafe::event::recovered);
+}
+
+TEST_CASE("db_failsafe: a probe success does not recover while the queue holds a backlog (todo/78)")
+{
+    FailsafeHarness f(0, 2);
+    REQUIRE(f.tickCounters(1000, {1, 0, 0, 0, 5}) == db_failsafe::event::tripped);
+    uint64_t successes = 0;
+    for (int i = 0; i < 10; i++)
+    {
+        REQUIRE(f.tickCounters(1000, {1, 0, ++successes, 0, 5}) == db_failsafe::event::none);
+        REQUIRE(f.degraded());
+    }
+    REQUIRE(f.tickCounters(1000, {1, 0, ++successes, 0, 0}) == db_failsafe::event::recovered);
+}
+
+TEST_CASE("db_failsafe: a probe failure while degraded never re-trips (todo/78)")
+{
+    /* A probe failure feeds the quiet window and nothing else: the state is
+     * already latched, and re-reporting a trip would churn the caller's
+     * severance path and rewrite reason(). Checked with disconnect_age_secs 0,
+     * the setting that trips on any single write failure. */
+    FailsafeHarness f(0, 3);
+    REQUIRE(f.tickCounters(1000, {0, 1, 0, 0, 0}) == db_failsafe::event::tripped);
+    REQUIRE(f.reason() == db_failsafe::trip_reason::command_drop);
+    uint64_t probe_failures = 0;
+    for (int i = 0; i < 10; i++)
+    {
+        REQUIRE(f.tickCounters(1000, {0, 1, 0, ++probe_failures, 0}) == db_failsafe::event::none);
+        REQUIRE(f.degraded());
+        REQUIRE(f.reason() == db_failsafe::trip_reason::command_drop);
+    }
+}
+
+TEST_CASE("db_failsafe: a command-drop trip also requires a probe success (todo/78)")
+{
+    /* Both triggers share the one latch, so both share the one recovery rule.
+     * A dropped command write is known-destroyed audit state; readmitting the
+     * fleet on silence would be no better founded here than for a write
+     * failure. */
+    FailsafeHarness f(5, 3);
+    REQUIRE(f.tickCounters(1000, {0, 1, 0, 0, 0}) == db_failsafe::event::tripped);
+    for (int i = 0; i < 10; i++)
+    {
+        REQUIRE(f.tickCounters(1000, {0, 1, 0, 0, 0}) == db_failsafe::event::none);
+        REQUIRE(f.degraded());
+    }
+    REQUIRE(f.tickCounters(1000, {0, 1, 1, 0, 0}) == db_failsafe::event::recovered);
+    REQUIRE(f.reason() == db_failsafe::trip_reason::none);
+}
+
+TEST_CASE("db_failsafe: a stale probe success does not recover a hung database (todo/78)")
+{
+    /* The gap between "has ever succeeded since the trip" and "is succeeding".
+     * A *failing* probe holds the latch by restarting the quiet window. A
+     * probe that HANGS — a network partition, a failover, a frozen host —
+     * returns neither answer: no success, no failure, no counter movement, and
+     * requestProbe() coalesces so nothing accumulates behind it either. The only
+     * observable is that the last answer keeps getting older.
+     *
+     * Here one probe succeeds a second after the trip and the database then
+     * stops answering entirely. With an evidence test that had no recency
+     * requirement, that single success would still be paying for recovery ten
+     * grace windows later. */
+    FailsafeHarness f(0, 15);
+    REQUIRE(f.tickCounters(1000, {1, 0, 0, 0, 0}) == db_failsafe::event::tripped);
+    REQUIRE(f.tickCounters(1000, {1, 0, 1, 0, 0}) == db_failsafe::event::none); // the last answer ever given
+    for (int i = 0; i < 150; i++)
+    {
+        REQUIRE(f.tickCounters(1000, {1, 0, 1, 0, 0}) == db_failsafe::event::none);
+        REQUIRE(f.degraded());
+        REQUIRE(f.reason() == db_failsafe::trip_reason::write_failure);
+    }
+}
+
+TEST_CASE("db_failsafe: a probe that resumes answering recovers on that tick (todo/78)")
+{
+    /* The other half of the hung-database rule: holding the latch on missing
+     * evidence must not become holding it forever. Once the probe starts
+     * answering again the state ends on the tick that carries the answer —
+     * not before it (no credit for the silence) and not later (no extra
+     * penalty box). */
+    FailsafeHarness f(0, 15);
+    REQUIRE(f.tickCounters(1000, {1, 0, 0, 0, 0}) == db_failsafe::event::tripped);
+    REQUIRE(f.tickCounters(1000, {1, 0, 1, 0, 0}) == db_failsafe::event::none);
+    /* Sixty seconds of a hung probe: quiet has long since elapsed. */
+    for (int i = 0; i < 60; i++)
+    {
+        REQUIRE(f.tickCounters(1000, {1, 0, 1, 0, 0}) == db_failsafe::event::none);
+    }
+    REQUIRE(f.degraded());
+    REQUIRE(f.tickCounters(1000, {1, 0, 2, 0, 0}) == db_failsafe::event::recovered);
+}
+
+TEST_CASE("db_failsafe: an in-window but stale success is not evidence (todo/78)")
+{
+    /* Why the freshness test is edge-triggered rather than "a success within
+     * the last recovery_grace_ms". Those sound equivalent; they are not, and
+     * the difference is exactly the case this rule exists for.
+     *
+     * The quiet window runs from the trip, which is itself an event, so
+     * recovery is first possible one tick after trip + grace. A success
+     * arriving one tick AFTER the trip is, at that moment, almost exactly
+     * grace old — inside a "within the last grace" window by a whole tick. So
+     * that formulation would readmit the fleet here, having had one answer at
+     * t=2s and none since. Written against the clock so the arithmetic is
+     * visible: trip at 1s, sole success at 2s, quiet satisfied from 16.001s. */
+    FailsafeHarness f(0, 15);
+    REQUIRE(f.tickCounters(1000, {1, 0, 0, 0, 0}) == db_failsafe::event::tripped);
+    REQUIRE(f.tickCounters(1000, {1, 0, 1, 0, 0}) == db_failsafe::event::none);
+    REQUIRE(f.tickCounters(14001, {1, 0, 1, 0, 0}) == db_failsafe::event::none); // t=16.001s, quiet
+    REQUIRE(f.degraded());
+    REQUIRE(f.tickCounters(999, {1, 0, 1, 0, 0}) == db_failsafe::event::none); // t=17s
+    REQUIRE(f.degraded());
+}
+
+TEST_CASE("db_failsafe: the freshness rule does not delay a normal recovery (todo/78)")
+{
+    /* The freshness test must be free on a healthy database: the caller
+     * requests a probe on every degraded tick and the write queue is empty
+     * while degraded, so every tick carries the previous tick's success.
+     * Recovery lands on exactly the tick it landed on before the rule existed —
+     * compare with "recovery requires the full quiet window after the last
+     * failure" above, which is this same sequence driven through the harness's
+     * healthy-probe default. */
+    FailsafeHarness f(0, 3);
+    uint64_t successes = 0;
+    REQUIRE(f.tickCounters(1000, {1, 0, successes, 0, 0}) == db_failsafe::event::tripped);
+    REQUIRE(f.tickCounters(1000, {1, 0, ++successes, 0, 0}) == db_failsafe::event::none); // 1s quiet
+    REQUIRE(f.tickCounters(1000, {1, 0, ++successes, 0, 0}) == db_failsafe::event::none); // 2s
+    REQUIRE(f.tickCounters(1000, {1, 0, ++successes, 0, 0}) == db_failsafe::event::none); // 3s
+    REQUIRE(f.tickCounters(1000, {1, 0, ++successes, 0, 0}) == db_failsafe::event::recovered);
+    REQUIRE(!f.degraded());
+}
+
+TEST_CASE("db_failsafe: a probe slower than the tick delays recovery by at most one round trip (todo/78)")
+{
+    /* A database that answers, but slowly (a loaded instance, a long lock
+     * wait): probes complete every ~5s while the caller ticks every second, so
+     * most ticks carry no fresh success. Recovery must wait for one — and must
+     * not wait longer than the next one. The bound the state machine offers is
+     * therefore "quiet window plus at most one probe round trip", which is
+     * worth stating because it is the only case where this rule costs
+     * anything. */
+    FailsafeHarness f(0, 15);
+    uint64_t successes = 0;
+    REQUIRE(f.tickCounters(1000, {1, 0, successes, 0, 0}) == db_failsafe::event::tripped); // t=1s
+    /* Ticks 1..15 (t=2s..16s), an answer landing on every fifth. */
+    for (int i = 1; i <= 15; i++)
+    {
+        if (i % 5 == 0)
+        {
+            ++successes;
+        }
+        REQUIRE(f.tickCounters(1000, {1, 0, successes, 0, 0}) == db_failsafe::event::none);
+    }
+    /* t=17s: quiet is satisfied (16s since the trip) but the last answer landed
+     * at t=16s and this tick carries nothing new. */
+    REQUIRE(f.tickCounters(1000, {1, 0, successes, 0, 0}) == db_failsafe::event::none);
+    REQUIRE(f.degraded());
+    REQUIRE(f.tickCounters(1000, {1, 0, successes, 0, 0}) == db_failsafe::event::none); // t=18s
+    REQUIRE(f.tickCounters(1000, {1, 0, successes, 0, 0}) == db_failsafe::event::none); // t=19s
+    /* t=20s, the next completed probe: recovery, one round trip after quiet. */
+    REQUIRE(f.tickCounters(1000, {1, 0, ++successes, 0, 0}) == db_failsafe::event::recovered);
 }

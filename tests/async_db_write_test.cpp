@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <stdexcept>
 #include <thread>
 #include <vector>
 
@@ -87,12 +88,22 @@ struct CapturingSink {
     }
 };
 
+/* Every case that does not exercise the probe itself passes this. The
+ * constructor requires a probe function (todo/78) precisely so a server wired
+ * without one — which could never leave the degraded state — fails to compile
+ * rather than shipping. */
+auto healthy_probe() -> bool
+{
+    return true;
+}
+
 } // namespace
 
 TEST_CASE("db_write_queue: enqueue-then-drain preserves order")
 {
     auto cap = std::make_shared<CapturingSink>();
-    fss::server::db_write_queue q(100, [cap](const fss::server::db_write_task &t) -> void { (*cap)(t); });
+    fss::server::db_write_queue q(
+        100, [cap](const fss::server::db_write_task &t) -> void { (*cap)(t); }, healthy_probe);
 
     for (uint64_t i = 1; i <= 20; ++i)
     {
@@ -118,7 +129,8 @@ TEST_CASE("db_write_queue: bounded queue drops oldest when full")
     cap->delay = std::chrono::milliseconds(50);
 
     constexpr std::size_t depth = 5;
-    fss::server::db_write_queue q(depth, [cap](const fss::server::db_write_task &t) -> void { (*cap)(t); });
+    fss::server::db_write_queue q(
+        depth, [cap](const fss::server::db_write_task &t) -> void { (*cap)(t); }, healthy_probe);
 
     /* Worker will pick up task 1 and sleep. Fill 5 slots, then push 10 more;
      * older entries beyond depth must be dropped. */
@@ -147,7 +159,8 @@ TEST_CASE("db_write_queue: stop drains pending work")
     auto cap = std::make_shared<CapturingSink>();
     cap->delay = std::chrono::milliseconds(5);
 
-    fss::server::db_write_queue q(1000, [cap](const fss::server::db_write_task &t) -> void { (*cap)(t); });
+    fss::server::db_write_queue q(
+        1000, [cap](const fss::server::db_write_task &t) -> void { (*cap)(t); }, healthy_probe);
     for (uint64_t i = 1; i <= 50; ++i)
     {
         q.enqueue(fss::server::position_write{i, 0.0, 0.0, 0});
@@ -162,7 +175,8 @@ TEST_CASE("db_write_queue: stop drains pending work")
 TEST_CASE("db_write_queue: stop is idempotent")
 {
     auto cap = std::make_shared<CapturingSink>();
-    fss::server::db_write_queue q(100, [cap](const fss::server::db_write_task &t) -> void { (*cap)(t); });
+    fss::server::db_write_queue q(
+        100, [cap](const fss::server::db_write_task &t) -> void { (*cap)(t); }, healthy_probe);
     q.enqueue(fss::server::rtt_write{1, 1});
     REQUIRE(fss_test::wait_for([&]() -> bool { return cap->count.load() == 1; }));
     q.stop();
@@ -173,7 +187,8 @@ TEST_CASE("db_write_queue: stop is idempotent")
 TEST_CASE("db_write_queue: enqueue after stop is a no-op")
 {
     auto cap = std::make_shared<CapturingSink>();
-    fss::server::db_write_queue q(100, [cap](const fss::server::db_write_task &t) -> void { (*cap)(t); });
+    fss::server::db_write_queue q(
+        100, [cap](const fss::server::db_write_task &t) -> void { (*cap)(t); }, healthy_probe);
 
     q.enqueue(fss::server::rtt_write{1, 10});
     q.enqueue(fss::server::rtt_write{2, 20});
@@ -198,7 +213,8 @@ TEST_CASE("db_write_queue: slow sink does not block producers")
     auto cap = std::make_shared<CapturingSink>();
     cap->delay = std::chrono::milliseconds(200);
 
-    fss::server::db_write_queue q(10000, [cap](const fss::server::db_write_task &t) -> void { (*cap)(t); });
+    fss::server::db_write_queue q(
+        10000, [cap](const fss::server::db_write_task &t) -> void { (*cap)(t); }, healthy_probe);
 
     auto start = std::chrono::steady_clock::now();
     for (uint64_t i = 1; i <= 20; ++i)
@@ -229,7 +245,8 @@ TEST_CASE("db_write_queue: drop log message appears on stderr when queue fills")
     fss_test::capture_cerr cerr_capture;
 
     {
-        fss::server::db_write_queue q(3, [cap](const fss::server::db_write_task &t) -> void { (*cap)(t); });
+        fss::server::db_write_queue q(
+            3, [cap](const fss::server::db_write_task &t) -> void { (*cap)(t); }, healthy_probe);
         for (uint64_t i = 1; i <= 20; ++i)
         {
             q.enqueue(fss::server::rtt_write{i, 0});
@@ -254,7 +271,8 @@ TEST_CASE("db_write_queue: a command dispatch survives a telemetry overflow")
     cap->delay = std::chrono::milliseconds(50); /* slow sink so the queue stays full */
 
     constexpr std::size_t depth = 5;
-    fss::server::db_write_queue q(depth, [cap](const fss::server::db_write_task &t) -> void { (*cap)(t); });
+    fss::server::db_write_queue q(
+        depth, [cap](const fss::server::db_write_task &t) -> void { (*cap)(t); }, healthy_probe);
 
     constexpr uint64_t cmd_id = 1000000; /* distinct from any telemetry asset id below */
     for (uint64_t i = 1; i <= depth; ++i)
@@ -282,7 +300,8 @@ TEST_CASE("db_write_queue: a command ack survives a telemetry overflow")
     cap->delay = std::chrono::milliseconds(50);
 
     constexpr std::size_t depth = 5;
-    fss::server::db_write_queue q(depth, [cap](const fss::server::db_write_task &t) -> void { (*cap)(t); });
+    fss::server::db_write_queue q(
+        depth, [cap](const fss::server::db_write_task &t) -> void { (*cap)(t); }, healthy_probe);
 
     constexpr uint64_t ack_command_dbid = 2000000;
     for (uint64_t i = 1; i <= depth; ++i)
@@ -316,7 +335,8 @@ TEST_CASE("db_write_queue: command overload drops on a distinct command-specific
 
     {
         constexpr std::size_t depth = 3;
-        fss::server::db_write_queue q(depth, [cap](const fss::server::db_write_task &t) -> void { (*cap)(t); });
+        fss::server::db_write_queue q(
+            depth, [cap](const fss::server::db_write_task &t) -> void { (*cap)(t); }, healthy_probe);
         for (uint64_t i = 1; i <= 10; ++i)
         {
             q.enqueue(fss::server::command_dispatch_write{i, i});
@@ -343,7 +363,8 @@ TEST_CASE("db_write_queue: telemetry is rejected without evicting a command when
     cap->gate_open = false; /* the worker will park on the first task */
 
     constexpr std::size_t depth = 3;
-    fss::server::db_write_queue q(depth, [cap](const fss::server::db_write_task &t) -> void { (*cap)(t); });
+    fss::server::db_write_queue q(
+        depth, [cap](const fss::server::db_write_task &t) -> void { (*cap)(t); }, healthy_probe);
 
     /* Park the worker on a first command so the remaining slots fill predictably. */
     q.enqueue(fss::server::command_dispatch_write{1, 1});
@@ -381,7 +402,7 @@ TEST_CASE("db_write_queue: write_failure_count tracks sink exceptions")
         throw std::runtime_error("injected sink failure");
     };
 
-    fss::server::db_write_queue q(100, throwing_sink);
+    fss::server::db_write_queue q(100, throwing_sink, healthy_probe);
     for (uint64_t i = 1; i <= task_count; ++i)
     {
         q.enqueue(fss::server::rtt_write{i, 0});
@@ -397,7 +418,7 @@ TEST_CASE("db_write_queue: catch-all handler counts non-exception throws")
 {
     auto weird_sink = [](const fss::server::db_write_task &) -> void { throw 42; };
 
-    fss::server::db_write_queue q(100, weird_sink);
+    fss::server::db_write_queue q(100, weird_sink, healthy_probe);
     q.enqueue(fss::server::rtt_write{1, 0});
 
     REQUIRE(fss_test::wait_for([&]() -> bool { return q.write_failure_count() == 1; }));
@@ -412,7 +433,8 @@ TEST_CASE("db_write_queue: destructor without explicit stop drains pending work"
     cap->delay = std::chrono::milliseconds(5);
 
     {
-        fss::server::db_write_queue q(1000, [cap](const fss::server::db_write_task &t) -> void { (*cap)(t); });
+        fss::server::db_write_queue q(
+            1000, [cap](const fss::server::db_write_task &t) -> void { (*cap)(t); }, healthy_probe);
         for (uint64_t i = 1; i <= 30; ++i)
         {
             q.enqueue(fss::server::search_status_write{i, 0, 0, 0});
@@ -421,4 +443,185 @@ TEST_CASE("db_write_queue: destructor without explicit stop drains pending work"
     }
 
     REQUIRE(cap->count.load() == 30);
+}
+
+/* ── The fail-safe health probe (todo/78) ────────────────────────────────── */
+
+TEST_CASE("db_write_queue: a probe runs only once the queue has drained")
+{
+    /* The probe is the fail-safe's evidence that the write path works *now*,
+     * so it must describe the state after the backlog cleared, not race it.
+     * It is also deliberately not a queued task: a queued probe would make
+     * pending_count() non-zero, which the fail-safe reads as "not drained" —
+     * recovery would become unreachable and the fleet would stay severed. */
+    auto cap = std::make_shared<CapturingSink>();
+    {
+        std::lock_guard<std::mutex> guard(cap->gate_mtx);
+        cap->gate_open = false;
+    }
+    std::atomic<uint64_t> probes{0};
+    std::atomic<uint64_t> writes_seen_by_probe{0};
+    fss::server::db_write_queue q(
+        100, [cap](const fss::server::db_write_task &t) -> void { (*cap)(t); },
+        [&]() -> bool {
+            writes_seen_by_probe.store(cap->count.load());
+            probes.fetch_add(1);
+            return true;
+        });
+
+    constexpr uint64_t task_count = 5;
+    for (uint64_t i = 1; i <= task_count; ++i)
+    {
+        q.enqueue(fss::server::rtt_write{i, i});
+    }
+    /* The worker is parked inside the sink on the first task; the rest sit in
+     * the deque. */
+    REQUIRE(fss_test::wait_for([&]() -> bool { return cap->entered.load() >= 1; }));
+    const std::size_t pending_before = q.pending_count();
+    q.requestProbe();
+    /* Asking for a probe must not change the backlog the fail-safe measures. */
+    REQUIRE(q.pending_count() == pending_before);
+    REQUIRE(probes.load() == 0);
+
+    cap->open_gate();
+    REQUIRE(fss_test::wait_for([&]() -> bool { return probes.load() == 1; }));
+    q.stop();
+
+    REQUIRE(q.pending_count() == 0);
+    REQUIRE(writes_seen_by_probe.load() == task_count);
+    REQUIRE(q.probe_success_count() == 1);
+}
+
+TEST_CASE("db_write_queue: repeated probe requests coalesce into one probe")
+{
+    auto cap = std::make_shared<CapturingSink>();
+    {
+        std::lock_guard<std::mutex> guard(cap->gate_mtx);
+        cap->gate_open = false;
+    }
+    std::atomic<uint64_t> probes{0};
+    fss::server::db_write_queue q(
+        100, [cap](const fss::server::db_write_task &t) -> void { (*cap)(t); },
+        [&]() -> bool {
+            probes.fetch_add(1);
+            return true;
+        });
+
+    q.enqueue(fss::server::rtt_write{1, 1});
+    REQUIRE(fss_test::wait_for([&]() -> bool { return cap->entered.load() >= 1; }));
+    /* The caller asks once a second while degraded and never waits for an
+     * answer, so requests pile up behind a slow write; at most one probe may
+     * ever be outstanding. */
+    for (int i = 0; i < 20; i++)
+    {
+        q.requestProbe();
+    }
+
+    cap->open_gate();
+    REQUIRE(fss_test::wait_for([&]() -> bool { return probes.load() >= 1; }));
+    q.stop();
+
+    REQUIRE(probes.load() == 1);
+    REQUIRE(q.probe_success_count() == 1);
+}
+
+TEST_CASE("db_write_queue: a successful probe counts as a success, not a write")
+{
+    fss::server::db_write_queue q(100, [](const fss::server::db_write_task &) -> void {}, healthy_probe);
+    q.requestProbe();
+
+    REQUIRE(fss_test::wait_for([&]() -> bool { return q.probe_success_count() == 1; }));
+    q.stop();
+
+    REQUIRE(q.probe_success_count() == 1);
+    REQUIRE(q.probe_failure_count() == 0);
+    REQUIRE(q.probe_inconclusive_count() == 0);
+    REQUIRE(q.write_failure_count() == 0);
+}
+
+TEST_CASE("db_write_queue: a throwing probe counts as a probe failure, not a write failure")
+{
+    /* Kept off write_failure_count() on purpose: the caller logs that counter at
+     * ERROR on every change, so routing probe failures through it would emit one
+     * ERROR per second forever against a permanently dead database. */
+    fss::server::db_write_queue q(
+        100, [](const fss::server::db_write_task &) -> void {},
+        []() -> bool { throw std::runtime_error("probe boom"); });
+    q.requestProbe();
+
+    REQUIRE(fss_test::wait_for([&]() -> bool { return q.probe_failure_count() == 1; }));
+    q.stop();
+
+    REQUIRE(q.probe_failure_count() == 1);
+    REQUIRE(q.probe_success_count() == 0);
+    REQUIRE(q.write_failure_count() == 0);
+    REQUIRE(q.last_probe_error() == "probe boom");
+}
+
+TEST_CASE("db_write_queue: an inconclusive probe is neither a success nor a failure")
+{
+    /* An empty asset table makes the probe statement match no row: it fires no
+     * trigger and extends no heap page, so it proves nothing. Counting it as a
+     * success would readmit the fleet on the strength of a statement that did
+     * nothing. */
+    fss::server::db_write_queue q(
+        100, [](const fss::server::db_write_task &) -> void {}, []() -> bool { return false; });
+    q.requestProbe();
+
+    REQUIRE(fss_test::wait_for([&]() -> bool { return q.probe_inconclusive_count() == 1; }));
+    q.stop();
+
+    REQUIRE(q.probe_inconclusive_count() == 1);
+    REQUIRE(q.probe_success_count() == 0);
+    REQUIRE(q.probe_failure_count() == 0);
+}
+
+TEST_CASE("db_write_queue: stop with a probe outstanding does not hang")
+{
+    /* Shutdown must never wait on the database: an outstanding probe is
+     * abandoned, not run, once stopping is set and the queue is empty. */
+    auto cap = std::make_shared<CapturingSink>();
+    {
+        std::lock_guard<std::mutex> guard(cap->gate_mtx);
+        cap->gate_open = false;
+    }
+    std::atomic<uint64_t> probes{0};
+    {
+        fss::server::db_write_queue q(
+            100, [cap](const fss::server::db_write_task &t) -> void { (*cap)(t); },
+            [&]() -> bool {
+                probes.fetch_add(1);
+                return true;
+            });
+
+        q.enqueue(fss::server::rtt_write{1, 1});
+        REQUIRE(fss_test::wait_for([&]() -> bool { return cap->entered.load() >= 1; }));
+        q.requestProbe();
+
+        std::thread releaser([cap]() -> void {
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            cap->open_gate();
+        });
+        q.stop();
+        releaser.join();
+        /* Destructor runs on a stopped queue: stop() is idempotent. */
+    }
+
+    REQUIRE(probes.load() == 0);
+}
+
+TEST_CASE("db_write_queue: a probe requested after stop is ignored")
+{
+    std::atomic<uint64_t> probes{0};
+    fss::server::db_write_queue q(
+        100, [](const fss::server::db_write_task &) -> void {},
+        [&]() -> bool {
+            probes.fetch_add(1);
+            return true;
+        });
+    q.stop();
+    q.requestProbe();
+
+    REQUIRE(probes.load() == 0);
+    REQUIRE(q.probe_success_count() == 0);
 }

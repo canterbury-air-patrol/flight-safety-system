@@ -47,8 +47,8 @@ protected:
  * position_report, system_status, search_status), so a no-op sink suffices. */
 auto make_null_writer() -> std::shared_ptr<fss::server::db_write_queue>
 {
-    return std::make_shared<fss::server::db_write_queue>(std::size_t{64},
-                                                         [](const fss::server::db_write_task &) -> void {});
+    return std::make_shared<fss::server::db_write_queue>(
+        std::size_t{64}, [](const fss::server::db_write_task &) -> void {}, []() -> bool { return true; });
 }
 
 class NullClientHandler : public fss::server::fss_client_handler {

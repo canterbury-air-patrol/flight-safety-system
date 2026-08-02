@@ -9,8 +9,8 @@
 
 namespace flight_safety_system::server {
 
-db_write_queue::db_write_queue(std::size_t t_max_depth, db_write_sink t_sink)
-    : max_depth(std::max<std::size_t>(1, t_max_depth)), sink(std::move(t_sink))
+db_write_queue::db_write_queue(std::size_t t_max_depth, db_write_sink t_sink, db_probe_fn t_probe)
+    : max_depth(std::max<std::size_t>(1, t_max_depth)), sink(std::move(t_sink)), probe(std::move(t_probe))
 {
     this->worker = std::thread(&db_write_queue::run, this);
 }
@@ -110,6 +110,21 @@ void db_write_queue::enqueue(db_write_task task)
     }
 }
 
+void db_write_queue::requestProbe()
+{
+    {
+        std::scoped_lock guard(this->mtx);
+        if (this->stopping)
+        {
+            return;
+        }
+        /* Stored under mtx so the flag cannot be set between the worker
+         * evaluating its wait predicate and blocking on the cv. */
+        this->probe_requested.store(true);
+    }
+    this->cv.notify_one();
+}
+
 void db_write_queue::stop()
 {
     {
@@ -154,10 +169,85 @@ auto db_write_queue::write_failure_count() const -> uint64_t
     return this->write_failures.load();
 }
 
+auto db_write_queue::probe_success_count() const -> uint64_t
+{
+    return this->probe_successes.load();
+}
+
+auto db_write_queue::probe_failure_count() const -> uint64_t
+{
+    return this->probe_failures.load();
+}
+
+auto db_write_queue::probe_inconclusive_count() const -> uint64_t
+{
+    return this->probe_inconclusive.load();
+}
+
+auto db_write_queue::last_probe_error() const -> std::string
+{
+    std::scoped_lock guard(this->probe_error_mtx);
+    return this->probe_error;
+}
+
+/* pending_count() deliberately knows nothing about an outstanding probe: it is
+ * the fail-safe's drain check, and a probe must never read as a backlog. */
 auto db_write_queue::pending_count() const -> std::size_t
 {
     std::scoped_lock guard(this->mtx);
     return this->q.size();
+}
+
+void db_write_queue::run_probe()
+{
+    try
+    {
+        if (this->probe())
+        {
+            ++this->probe_successes;
+            return;
+        }
+        uint64_t inconclusive = ++this->probe_inconclusive;
+        constexpr uint64_t log_every = 60;
+        if (inconclusive == 1 || (inconclusive % log_every) == 0)
+        {
+            /* Not an error and not evidence: the fail-safe stays degraded on
+             * it, so say why rather than leaving the operator with a silent
+             * server that never recovers. */
+            FSS_LOG_WARN("db-writer", "fail-safe probe write was inconclusive -- no assets registered, so the probe "
+                                      "statement matched no row and proved nothing (total="
+                                          << inconclusive << ")");
+        }
+    }
+    catch (const std::exception &e)
+    {
+        uint64_t failures = ++this->probe_failures;
+        {
+            std::scoped_lock guard(this->probe_error_mtx);
+            this->probe_error = e.what();
+        }
+        constexpr uint64_t log_every = 60;
+        if (failures == 1 || (failures % log_every) == 0)
+        {
+            /* Rate-limited here and reported again, with elapsed time, by the
+             * caller's degraded-state line; the probe runs about once a second
+             * while degraded and could otherwise flood the log forever. */
+            FSS_LOG_WARN("db-writer", "fail-safe probe write failed (total=" << failures << "): " << e.what());
+        }
+    }
+    catch (...)
+    {
+        uint64_t failures = ++this->probe_failures;
+        {
+            std::scoped_lock guard(this->probe_error_mtx);
+            this->probe_error = "unknown exception";
+        }
+        constexpr uint64_t log_every = 60;
+        if (failures == 1 || (failures % log_every) == 0)
+        {
+            FSS_LOG_WARN("db-writer", "fail-safe probe write failed (total=" << failures << "): unknown exception");
+        }
+    }
 }
 
 void db_write_queue::run()
@@ -165,15 +255,40 @@ void db_write_queue::run()
     for (;;)
     {
         db_write_task task;
+        bool do_probe = false;
         {
             std::unique_lock<std::mutex> lock(this->mtx);
-            this->cv.wait(lock, [this]() -> bool { return this->stopping || !this->q.empty(); });
+            this->cv.wait(
+                lock, [this]() -> bool { return this->stopping || !this->q.empty() || this->probe_requested.load(); });
             if (this->stopping && this->q.empty())
             {
+                /* An outstanding probe is abandoned rather than run: shutdown
+                 * must not wait on the database, and nothing is left to
+                 * recover for. */
                 return;
             }
-            task = this->q.front();
-            this->q.pop_front();
+            if (this->q.empty())
+            {
+                /* Real writes take priority, and the probe only runs once the
+                 * deque is empty, so its result describes the state *after*
+                 * the backlog drained -- which is the state the fail-safe's
+                 * recovery rule asks about. */
+                do_probe = this->probe_requested.exchange(false);
+                if (!do_probe)
+                {
+                    continue;
+                }
+            }
+            else
+            {
+                task = this->q.front();
+                this->q.pop_front();
+            }
+        }
+        if (do_probe)
+        {
+            this->run_probe();
+            continue;
         }
         try
         {

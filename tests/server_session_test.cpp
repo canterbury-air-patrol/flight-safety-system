@@ -215,7 +215,8 @@ auto make_mock_writer(fss_test::MockDatabase &mock) -> std::shared_ptr<fss::serv
                    },
                    task);
     };
-    return std::make_shared<fss::server::db_write_queue>(std::size_t{1024}, sink);
+    return std::make_shared<fss::server::db_write_queue>(std::size_t{1024}, sink,
+                                                         [&mock]() -> bool { return mock.probeWrite(); });
 }
 
 class NullClientHandler : public fss::server::fss_client_handler {

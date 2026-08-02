@@ -54,7 +54,8 @@ auto make_writer(fss_test::MockDatabase &mock) -> std::shared_ptr<fss::server::d
                    },
                    task);
     };
-    return std::make_shared<fss::server::db_write_queue>(std::size_t{1024}, sink);
+    return std::make_shared<fss::server::db_write_queue>(std::size_t{1024}, sink,
+                                                         [&mock]() -> bool { return mock.probeWrite(); });
 }
 
 } // namespace

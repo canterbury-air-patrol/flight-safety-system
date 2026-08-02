@@ -276,6 +276,21 @@ def test_disk_full_fails_visibly_and_a_fresh_instance_recovers(certs_dir, tmp_pa
             + server["log"].read_text(errors="replace")
         )
 
+        # todo/78, and the m05 field observation verbatim: this Postgres is
+        # gone for good (it PANICked on the full WAL and its crash recovery
+        # could not write either), so the server must stay degraded for the
+        # rest of the run. Before todo/78 recovery needed only "write queue
+        # drained and quiet for 15s" — both of which the severance itself
+        # guarantees — so this instance produced a "DB fail-safe recovered"
+        # line ~16s after the trip and readmitted the aircraft into a database
+        # that could not record a single thing about it. The recovery rule now
+        # also requires a successful probe write, which a dead instance can
+        # never supply. Checked again at the end of the run, below.
+        assert "DB fail-safe recovered" not in server["log"].read_text(errors="replace"), (
+            "fail-safe recovered against a permanently dead Postgres\n"
+            + server["log"].read_text(errors="replace")
+        )
+
         # Fresh instance: a restart restores service (explicitly sanctioned
         # by the todo as an acceptable recovery path once the flooded
         # instance itself cannot recover in place -- see module docstring).
@@ -306,6 +321,15 @@ def test_disk_full_fails_visibly_and_a_fresh_instance_recovers(certs_dir, tmp_pa
             f"-- client log --\n{fresh_client['log'].read_text(errors='replace')}"
         )
         fresh_setup_conn.close()
+
+        # End of run: the server still attached to the dead instance never
+        # announced a recovery, however long the fresh-instance half took
+        # (container start, migration, server + client spawn — comfortably more
+        # than the 15s window that used to be sufficient on its own).
+        assert "DB fail-safe recovered" not in server["log"].read_text(errors="replace"), (
+            "fail-safe recovered against a permanently dead Postgres (todo/78)\n"
+            + server["log"].read_text(errors="replace")
+        )
     finally:
         for proc_dict in (client, fresh_client):
             if proc_dict is not None:
