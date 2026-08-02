@@ -321,7 +321,13 @@ private:
     /* Log the edges of this session's GPS-fix state (todo/76). Every report is
      * recorded to the database regardless; this only decides what reaches the
      * log, which is why it is edge-triggered and the storage is not. Recv
-     * thread only. */
+     * thread only.
+     *
+     * A no-op for a non-aircraft client, checked internally: its reports
+     * describe other vehicles (an fss-adsb feeder relays many ICAO addresses
+     * over one connection, todo/28), so a per-connection fix state would be
+     * meaningless and its edges would flood the log. Callers therefore need no
+     * guard of their own. */
     void logGpsFixState(bool gps_fix_valid, bool have_coords);
     uint64_t last_command_send_ts{0};
     uint64_t last_command_dbid{0};
@@ -402,7 +408,16 @@ private:
      * Session-scoped by design: a reconnect mid-outage genuinely has no prior
      * state and re-logs the loss, which is information rather than a duplicate.
      * Drives logging only — every report is recorded either way. Recv thread
-     * only. */
+     * only.
+     *
+     * All three are ALSO aircraft-only, and deliberately so: one fix state per
+     * connection is a truth only while the connection carries one aircraft's
+     * own GPS. An fss-adsb feeder relays reports for many arbitrary ICAO
+     * addresses down a single connection (todo/28), so letting its stream drive
+     * these would flip the state between vehicles and attribute every resulting
+     * log line to the feeder rather than to the vehicle. logGpsFixState() is the
+     * sole writer and holds the guard — see the comment there for why it sits
+     * inside rather than at the call site. */
     bool gps_fix_state_known{false};
     bool gps_fix_valid{true};
     /* Position staleness window in ms (0 disables the check). A report whose

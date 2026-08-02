@@ -2172,6 +2172,110 @@ TEST_CASE("session: a run of no-fix reports is recorded per report but logged on
     REQUIRE(count_occurrences(cap.str(), "no GPS fix") == 1);
 }
 
+namespace {
+/* A position report at fixed, valid coordinates whose only variable is the
+ * coords-valid flag. Alternating that bit is what an fss-adsb feeder's relayed
+ * stream looks like when the vehicles behind it disagree about their fixes. */
+auto make_flagged_position_msg(bool valid_coords) -> std::shared_ptr<fss::transport::fss_message_position_report>
+{
+    return std::make_shared<fss::transport::fss_message_position_report>(
+        -43.5, 172.6, 100U, 0U, 0U, int16_t{0}, 0U, std::string{}, 0U, uint8_t{0},
+        static_cast<uint16_t>(valid_coords ? fss::transport::FSS_POSITION_FLAG_VALID_COORDS : 0U), uint8_t{0},
+        uint8_t{0}, fss::fss_current_timestamp());
+}
+
+constexpr size_t alternating_report_count = 10;
+} // namespace
+
+TEST_CASE("session: a non-aircraft feeder's relayed positions never drive the GPS-fix state machine")
+{
+    /* The fix-state machine keeps one state per connection, which is only a
+     * truth for an aircraft reporting its own GPS. An fss-adsb feeder relays
+     * reports for many arbitrary ICAO addresses over a single connection
+     * (todo/28, e2e/test_adsb_forwarding.py), so a stream mixing vehicles with
+     * and without the coords-valid bit would flip the state on nearly every
+     * report. The throttle only holds while the state is UNCHANGED — the edges
+     * are always logged — so an alternating stream defeats it entirely and
+     * emits a WARN plus an INFO per alternation, each naming the feeder rather
+     * than the vehicle the report describes. */
+    fss_test::MockDatabase mock;
+    /* "adsb-feeder" absent from asset_ids — not an aircraft. */
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("adsb-feeder");
+    NullClientHandler handler;
+
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+
+    uint64_t next_id = 1;
+    auto version = std::make_shared<fss::transport::fss_message_version>(fss::transport::FSS_PROTOCOL_VERSION,
+                                                                         fss::transport::FSS_PROTOCOL_MIN_VERSION,
+                                                                         fss::transport::FSS_SUPPORTED_FEATURES);
+    version->setId(next_id++);
+    session->processMessage(version);
+    auto identity = std::make_shared<fss::transport::fss_message_identity_non_aircraft>();
+    identity->setId(next_id++);
+    session->processMessage(identity);
+    REQUIRE_FALSE(session->isAircraft());
+    /* The flags word is meaningful here — this is the rebuilt-feeder case, the
+     * one where the state machine would actually flip. */
+    REQUIRE((conn->getNegotiatedFeatureFlags() & fss::transport::FSS_FEATURE_POSITION_FLAGS) != 0U);
+
+    fss_test::capture_cerr cap;
+    for (size_t i = 0; i < alternating_report_count; ++i)
+    {
+        auto report = make_flagged_position_msg(i % 2 != 0);
+        report->setId(next_id++);
+        session->processMessage(report);
+    }
+
+    /* Not one fix-state line, in either direction. */
+    REQUIRE(count_occurrences(cap.str(), "no GPS fix") == 0);
+    REQUIRE(count_occurrences(cap.str(), "GPS fix restored") == 0);
+    REQUIRE(cap.str().find("dead-reckoned estimate") == std::string::npos);
+    /* Relay is untouched: forwarding a feeder's reports is the whole point of
+     * the non-aircraft client (todo/28), and nothing is stored against the
+     * feeder either — that write was already gated on being an aircraft. */
+    REQUIRE(handler.broadcasts.size() == alternating_report_count);
+    REQUIRE(mock.getPositions().empty());
+}
+
+TEST_CASE("session: an aircraft's alternating fix state still logs every edge")
+{
+    /* The counterpart to the feeder case above: the aircraft-only gate must
+     * narrow the state machine's scope, not disable it. One connection here
+     * really is one GPS, so each transition is a genuine event about that
+     * aircraft and every edge belongs in the log. */
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 1;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    uint64_t next_id = 1;
+    establish_v2_session(session, next_id);
+    REQUIRE(session->isAircraft());
+
+    fss_test::capture_cerr cap;
+    for (size_t i = 0; i < alternating_report_count; ++i)
+    {
+        auto report = make_flagged_position_msg(i % 2 != 0);
+        report->setId(next_id++);
+        session->processMessage(report);
+    }
+
+    /* Alternating from cleared: half the reports are loss edges and half are
+     * restores. The first report is a loss, so the unknown-state case (which
+     * logs the loss but no restore) costs neither count anything. */
+    REQUIRE(count_occurrences(cap.str(), "no GPS fix") == alternating_report_count / 2);
+    REQUIRE(count_occurrences(cap.str(), "GPS fix restored") == alternating_report_count / 2);
+    REQUIRE(fss_test::wait_for([&]() { return mock.getPositions().size() == alternating_report_count; }));
+}
+
 TEST_CASE("session: a cleared coords-valid flag records a dead-reckoned estimate without dropping it")
 {
     /* The user-visible gap todo/76 closes on the flags side: a client can send
