@@ -133,6 +133,20 @@ public:
      * fss_command_ack_outcome/fss_command_ack_reason ints. */
     virtual void recordCommandAck(uint64_t command_dbid, uint8_t ack_state, uint64_t ack_timestamp,
                                   uint8_t ack_reason) = 0;
+    /* Positive evidence that the write path works right now, for the DB
+     * fail-safe's recovery rule (todo/78): a real INSERT inside a transaction
+     * that is rolled back, so nothing is stored. Returns true when a row was
+     * written (and discarded), false when the probe was *inconclusive* — the
+     * asset table is empty, so the statement matched no row and exercised
+     * nothing. Throws database_error when the write failed, exactly as the
+     * record* writers do, so the caller counts it as a probe failure.
+     *
+     * "No failures" is not health while every client is severed: the fail-safe's
+     * own trip removes all the traffic that could produce a failure, so before
+     * this existed the degraded state ended ~15 s after every trip regardless of
+     * the database's actual state. Called only while degraded, from the write
+     * queue's worker thread. */
+    virtual auto probeWrite() -> bool = 0;
     /* The asset's newest pending command, or nullopt when the read failed.
      * nullopt is NOT "no pending command": that is an engaged null pointer.
      * The distinction matters most on this read — it carries TERM and DISARM,
@@ -215,6 +229,7 @@ public:
     void recordCommandDispatch(uint64_t command_dbid, uint64_t dispatch_id) override;
     void recordCommandAck(uint64_t command_dbid, uint8_t ack_state, uint64_t ack_timestamp,
                           uint8_t ack_reason) override;
+    auto probeWrite() -> bool override;
     auto getCommand(uint64_t asset_id) -> std::optional<std::shared_ptr<asset_command>> override;
     auto getCommands(const std::vector<uint64_t> &asset_ids)
         -> std::optional<std::unordered_map<uint64_t, std::shared_ptr<asset_command>>> override;

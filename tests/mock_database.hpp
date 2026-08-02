@@ -132,6 +132,23 @@ public:
         acks.push_back({command_dbid, ack_state, ack_timestamp, ack_reason});
     }
 
+    /* Health probe (todo/78). Healthy by default; set probe_write_fail to make
+     * it throw like the real writer does on a failed probe, or
+     * probe_write_inconclusive to return the "nothing to write against"
+     * answer, which is deliberately not a success. */
+    bool probe_write_fail{false};
+    bool probe_write_inconclusive{false};
+    std::atomic<int> probe_writes{0};
+    auto probeWrite() -> bool override
+    {
+        probe_writes++;
+        if (probe_write_fail)
+        {
+            throw flight_safety_system::server::database_error("mock probe write failed");
+        }
+        return !probe_write_inconclusive;
+    }
+
     /* Snapshot accessors: copy the sink under the lock so a test can inspect it
      * without racing the write-queue worker that fills it. */
     auto getPositions() const -> std::vector<recorded_pos>

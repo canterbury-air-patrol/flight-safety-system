@@ -108,6 +108,8 @@ public:
     void recordSearchStatus(uint64_t, uint64_t, uint64_t, uint64_t) override {}
     void recordCommandDispatch(uint64_t, uint64_t) override {}
     void recordCommandAck(uint64_t, uint8_t, uint64_t, uint8_t) override {}
+    /* Always healthy: nothing here exercises the fail-safe's probe (todo/78). */
+    auto probeWrite() -> bool override { return true; }
     auto getCommand(uint64_t) -> std::optional<std::shared_ptr<flight_safety_system::server::asset_command>> override
     {
         /* An engaged null pointer: no pending command, not a failed read. */
@@ -189,7 +191,7 @@ TEST_CASE("tsan: fss_client config precedes handler activation")
 
     stub_database db;
     srv::db_write_sink sink = [](const srv::db_write_task &) -> void {};
-    auto writer = std::make_shared<srv::db_write_queue>(std::size_t{1024}, sink);
+    auto writer = std::make_shared<srv::db_write_queue>(std::size_t{1024}, sink, []() -> bool { return true; });
     null_handler handler;
 
     auto client = std::make_shared<srv::fss_client>(conn, &db, writer, &handler);

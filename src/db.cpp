@@ -215,6 +215,23 @@ void flight_safety_system::server::db_connection::recordCommandAck(uint64_t comm
     }
 }
 
+auto flight_safety_system::server::db_connection::probeWrite() -> bool
+{
+    /* Under write_lock like every record* writer: the probe runs on the write
+     * queue's worker thread, which is the only thread that touches the write
+     * connection, but the lock is what that invariant is stated with. */
+    std::scoped_lock guard(this->write_lock);
+    const int result = db_probe_write(write_conn_name);
+    if (result == DB_PROBE_FAILED)
+    {
+        throw database_error("fail-safe probe write failed");
+    }
+    /* DB_PROBE_INCONCLUSIVE (no assets registered) is not a failure and not
+     * evidence: the caller counts it separately and the fail-safe stays
+     * degraded on it. */
+    return result == DB_PROBE_OK;
+}
+
 void flight_safety_system::server::db_connection::recordPosition(uint64_t asset_id, double latitude, double longitude,
                                                                  uint32_t altitude, bool gps_fix_valid)
 {

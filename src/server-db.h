@@ -8,6 +8,22 @@ int db_connect(const char *conn, const char *host, int port, const char *user, c
 void db_disconnect(const char *conn);
 int db_ping(const char *conn);
 
+/* db_probe_write() results. The three states are distinct on purpose: an
+ * INSERT that matched no row is not a demonstration that writes work (todo/78). */
+#define DB_PROBE_FAILED 0
+#define DB_PROBE_OK 1
+#define DB_PROBE_INCONCLUSIVE (-1)
+
+/* Health probe for the DB fail-safe's recovery evidence: performs a real
+ * INSERT on the given (write) connection inside an explicit transaction and
+ * rolls it back, so nothing is persisted. Returns DB_PROBE_OK when a row was
+ * inserted, DB_PROBE_INCONCLUSIVE when assets_asset is empty (the INSERT ...
+ * SELECT matched nothing, so it exercised no trigger, constraint or heap
+ * write), and DB_PROBE_FAILED on any SQL error. AUTOCOMMIT is restored before
+ * every return. Only called while the fail-safe is degraded, on the
+ * db_write_queue worker thread that owns the write connection. */
+int db_probe_write(const char *conn);
+
 /* Something this file's statements depend on that the database cannot serve.
  * SCHEMA_PROBLEM_MISSING (a column) and SCHEMA_PROBLEM_MISSING_EXTENSION are
  * fatal -- the statements using them can only ever fail.

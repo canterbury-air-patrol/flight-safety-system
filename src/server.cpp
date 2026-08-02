@@ -16,6 +16,7 @@
 #include <memory>
 #include <mutex>
 #include <atomic>
+#include <string>
 #include <thread>
 
 #pragma GCC diagnostic push
@@ -379,7 +380,13 @@ auto main(int argc, char *argv[]) -> int
             },
             task);
     };
-    auto writer = std::make_shared<flight_safety_system::server::db_write_queue>(db_queue_depth, sink);
+    /* The fail-safe's recovery evidence (todo/78). Runs on the write queue's
+     * worker thread — the only thread that touches the write connection, and
+     * one that is already allowed to block on it — so the main loop's
+     * no-synchronous-DB contract (decision 46) is untouched: it only ever sets
+     * a flag. */
+    flight_safety_system::server::db_probe_fn probe = [dbc]() -> bool { return dbc->probeWrite(); };
+    auto writer = std::make_shared<flight_safety_system::server::db_write_queue>(db_queue_depth, sink, probe);
 
     auto clients = std::make_shared<server_clients>();
     constexpr int msec_per_sec = 1000;
@@ -560,9 +567,16 @@ auto main(int argc, char *argv[]) -> int
                  * disconnect/reconnect flap into the same unhealthy server.
                  * Recovery logs at ERROR like the trip: supervision watching
                  * for the fail-safe must see both edges at one level. */
-                switch (failsafe.tick(current_failures, current_command_dropped, writer->pending_count()))
+                static uint64_t degraded_since_ms = 0;
+                static uint64_t last_degraded_report_ms = 0;
+                const db_failsafe::db_health_counters counters{current_failures, current_command_dropped,
+                                                               writer->probe_success_count(),
+                                                               writer->probe_failure_count(), writer->pending_count()};
+                switch (failsafe.tick(counters))
                 {
                     case db_failsafe::event::tripped: {
+                        degraded_since_ms = now_ms;
+                        last_degraded_report_ms = now_ms;
                         clients->setDegraded(true);
                         auto severed = clients->disconnectAll();
                         bool dropped = failsafe.reason() == db_failsafe::trip_reason::command_drop;
@@ -587,11 +601,51 @@ auto main(int argc, char *argv[]) -> int
                     }
                     case db_failsafe::event::recovered:
                         clients->setDegraded(false);
-                        FSS_LOG_ERROR("server", "DB fail-safe recovered: write queue drained and quiet for "
+                        /* States the evidence, not just the silence: a probe
+                         * write actually succeeded on the connection that
+                         * failed. The e2e suite matches this line on its
+                         * "DB fail-safe recovered" prefix only. */
+                        FSS_LOG_ERROR("server", "DB fail-safe recovered: write queue drained, quiet for "
                                                     << db_write_failure_recovery_grace_secs
-                                                    << "s; accepting sessions again");
+                                                    << "s, and a probe write succeeded; accepting sessions again");
                         break;
                     case db_failsafe::event::none: break;
+                }
+                if (failsafe.degraded())
+                {
+                    /* A permanently dead database now leaves the server
+                     * degraded indefinitely — correctly, but silently unless
+                     * this says so. Rate-limited to once a minute; the trip
+                     * line above is the loud edge. */
+                    constexpr uint64_t degraded_report_period_ms = 60 * ms_per_sec;
+                    if ((now_ms - last_degraded_report_ms) >= degraded_report_period_ms)
+                    {
+                        last_degraded_report_ms = now_ms;
+                        std::string probe_error = writer->last_probe_error();
+                        /* Reports the counters rather than diagnosing which
+                         * condition is unmet: the fail-safe owns that decision
+                         * and these are the numbers it decided on. */
+                        FSS_LOG_ERROR(
+                            "server",
+                            "DB fail-safe still degraded after "
+                                << (now_ms - degraded_since_ms) / ms_per_sec
+                                << "s; sessions stay refused until the write queue is drained, quiet for "
+                                << db_write_failure_recovery_grace_secs
+                                << "s and a probe write has succeeded (queue depth=" << writer->pending_count()
+                                << ", probe successes=" << writer->probe_success_count()
+                                << ", failures=" << writer->probe_failure_count()
+                                << ", inconclusive=" << writer->probe_inconclusive_count() << ", last probe error: "
+                                << (probe_error.empty() ? std::string{"none"} : probe_error) << ")");
+                    }
+                }
+                /* Ask for the next probe. Nothing happens here but a flag and a
+                 * notify; the write queue's worker runs it once its deque is
+                 * empty, so the answer describes the drained state the recovery
+                 * rule asks about. False whenever the server is healthy, which
+                 * is what keeps this free in normal operation. */
+                if (failsafe.wantsProbe())
+                {
+                    writer->requestProbe();
                 }
             }
             if (do_per_config_period)

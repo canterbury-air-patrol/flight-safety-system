@@ -503,6 +503,59 @@ auto get_command_column(uint64_t command_id, const std::string &column) -> std::
 
 } // namespace
 
+TEST_CASE("db_connection: probeWrite proves the write path without storing anything (todo/78)")
+{
+    /* The fail-safe's recovery evidence. Two properties, and the second is the
+     * one that needs a live database to check at all: the probe must exercise a
+     * real INSERT (so a write-only fault -- a BEFORE INSERT trigger, a full
+     * disk, a revoked grant -- fails it, unlike db_ping's SELECT 1), and it must
+     * leave nothing behind. A committed probe row would fabricate an rtt = 0
+     * telemetry sample for a disconnected aircraft in a table the operator
+     * reads. ECPG ends an open transaction by COMMITting it when AUTOCOMMIT is
+     * switched back on, so the explicit ROLLBACK in db_probe_write is what makes
+     * that true; this pins it. */
+    LIVE_DB_OR_SKIP(dbc);
+    const auto rows_before = psql_query("SELECT COUNT(*) FROM assets_assetrtt");
+    REQUIRE(dbc->probeWrite());
+    REQUIRE(psql_query("SELECT COUNT(*) FROM assets_assetrtt") == rows_before);
+}
+
+TEST_CASE("db_connection: probeWrite leaves AUTOCOMMIT restored on the write connection (todo/78)")
+{
+    /* The sharpest hazard in the probe: it is the only statement in
+     * server-db.pgc that turns AUTOCOMMIT off on the *write* connection, and if
+     * any exit path left it off, every subsequent telemetry INSERT would sit in
+     * an implicit transaction nothing ever commits -- telemetry would vanish
+     * with no error anywhere. A write after the probe must therefore be
+     * durable, and remain durable after a *failed* probe too. */
+    LIVE_DB_OR_SKIP(dbc);
+    auto asset_id = get_test_asset_id(*dbc);
+    REQUIRE(dbc->probeWrite());
+
+    const auto rows_before = std::stoull(psql_query("SELECT COUNT(*) FROM assets_assetrtt"));
+    dbc->recordRtt(asset_id, uint64_t{4242});
+    REQUIRE(std::stoull(psql_query("SELECT COUNT(*) FROM assets_assetrtt")) == rows_before + 1);
+}
+
+TEST_CASE("db_connection: probeWrite throws when the write connection is down (todo/78)")
+{
+    /* A failed probe must reach the write queue as an exception, exactly like a
+     * failed record* write, so it is counted as a probe failure and the
+     * fail-safe stays degraded. Recovery on silence is what todo/78 removed. */
+    LIVE_DB_OR_SKIP(dbc);
+    auto asset_id = get_test_asset_id(*dbc);
+    db_disconnect(flight_safety_system::server::db_connection::write_conn_name);
+    REQUIRE_THROWS_AS(dbc->probeWrite(), flight_safety_system::server::database_error);
+
+    /* And the connection is left in a state a reconnect can use: AUTOCOMMIT is
+     * restored on the error path too. */
+    dbc->tryReconnectIfNeeded();
+    REQUIRE(dbc->isConnected());
+    const auto rows_before = std::stoull(psql_query("SELECT COUNT(*) FROM assets_assetrtt"));
+    dbc->recordRtt(asset_id, uint64_t{4243});
+    REQUIRE(std::stoull(psql_query("SELECT COUNT(*) FROM assets_assetrtt")) == rows_before + 1);
+}
+
 TEST_CASE("db_connection: getCommands returns the newest command per asset and omits absent ones")
 {
     /* Exercises the batched read end-to-end: DISTINCT ON must pick the newest

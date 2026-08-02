@@ -74,6 +74,14 @@ def test_slow_db_does_not_stall(db_conn, fake_client, migrated_db, server_proc):
 
     # Hold the lock long enough for the server to buffer several position
     # reports in its write queue.
+    #
+    # Unaffected by todo/78's fail-safe probe, deliberately: no trip happens
+    # here (a lock wait is not a write failure — see decision 46 on why there is
+    # no statement_timeout), so no probe is ever requested. Even if one were,
+    # this EXCLUSIVE lock would *block* it rather than fail it, exactly as it
+    # blocks the position INSERTs — it cannot manufacture a probe failure, and a
+    # blocked probe simply never reports. The stall bound stays PGTCPUSERTIMEOUT
+    # at the socket.
     lock_hold_s = 12
     with hold_table_lock(migrated_db, "assets_assetposition"):
         time.sleep(lock_hold_s)

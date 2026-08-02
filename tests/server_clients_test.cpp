@@ -130,7 +130,8 @@ auto count_sent(const std::vector<std::shared_ptr<fss::transport::fss_message>> 
 
 auto make_null_writer() -> std::shared_ptr<fss::server::db_write_queue>
 {
-    return std::make_shared<fss::server::db_write_queue>(std::size_t{16}, [](const fss::server::db_write_task &) {});
+    return std::make_shared<fss::server::db_write_queue>(
+        std::size_t{16}, [](const fss::server::db_write_task &) {}, []() -> bool { return true; });
 }
 
 /* Build a client that has completed the identity handshake as an aircraft. */
