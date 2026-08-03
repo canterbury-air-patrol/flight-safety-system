@@ -307,4 +307,20 @@ inline auto make_framed_buffer(uint16_t type, uint64_t msg_id, const std::string
     return bl;
 }
 
+/* The probe function for every db_write_queue whose test does not exercise the
+ * probe itself (todo/78). The constructor takes one as a required argument on
+ * purpose — a server wired without a probe could never leave the degraded state,
+ * so that has to be a compile error rather than something to discover in the
+ * field — which means every construction site needs a probe even when the probe
+ * is beside the point. This is that probe, in one place, for the same reason
+ * FakeClock lives here: it was otherwise copy-pasted verbatim across five files.
+ *
+ * Deliberately NOT a default argument on the constructor: a default is exactly
+ * the silent mis-wiring the required parameter exists to prevent, and it would
+ * apply to production callers too, not just tests. */
+inline auto healthy_probe() -> bool
+{
+    return true;
+}
+
 } // namespace fss_test

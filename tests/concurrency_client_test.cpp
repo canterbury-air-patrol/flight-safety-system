@@ -24,6 +24,7 @@
 
 #include "fss-transport.hpp"
 #include "fss-server.hpp"
+#include "test_helpers.hpp"
 #include "db-write-queue.hpp"
 
 using flight_safety_system::transport::fss_connection;
@@ -191,7 +192,7 @@ TEST_CASE("tsan: fss_client config precedes handler activation")
 
     stub_database db;
     srv::db_write_sink sink = [](const srv::db_write_task &) -> void {};
-    auto writer = std::make_shared<srv::db_write_queue>(std::size_t{1024}, sink, []() -> bool { return true; });
+    auto writer = std::make_shared<srv::db_write_queue>(std::size_t{1024}, sink, fss_test::healthy_probe);
     null_handler handler;
 
     auto client = std::make_shared<srv::fss_client>(conn, &db, writer, &handler);

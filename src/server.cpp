@@ -567,7 +567,9 @@ auto main(int argc, char *argv[]) -> int
                  * disconnect/reconnect flap into the same unhealthy server.
                  * Recovery logs at ERROR like the trip: supervision watching
                  * for the fail-safe must see both edges at one level. */
-                static uint64_t degraded_since_ms = 0;
+                /* Only the report throttle lives here; how long the server has
+                 * been degraded is db_failsafe::degradedAgeSecs(), measured
+                 * against the same clock the decision was made on. */
                 static uint64_t last_degraded_report_ms = 0;
                 const db_failsafe::db_health_counters counters{current_failures, current_command_dropped,
                                                                writer->probe_success_count(),
@@ -575,7 +577,6 @@ auto main(int argc, char *argv[]) -> int
                 switch (failsafe.tick(counters))
                 {
                     case db_failsafe::event::tripped: {
-                        degraded_since_ms = now_ms;
                         last_degraded_report_ms = now_ms;
                         clients->setDegraded(true);
                         auto severed = clients->disconnectAll();
@@ -628,7 +629,7 @@ auto main(int argc, char *argv[]) -> int
                         FSS_LOG_ERROR(
                             "server",
                             "DB fail-safe still degraded after "
-                                << (now_ms - degraded_since_ms) / ms_per_sec
+                                << failsafe.degradedAgeSecs()
                                 << "s; sessions stay refused until the write queue is drained, quiet for "
                                 << db_write_failure_recovery_grace_secs
                                 << "s and a probe write has succeeded (queue depth=" << writer->pending_count()
