@@ -41,7 +41,7 @@ namespace server {
  * produce a failure: no telemetry arrives, nothing is queued, nothing fails.
  * So they were satisfied by construction about recovery_grace_secs after every
  * trip, whatever the database was doing. Against a permanently dead database
- * (Path M m05: Postgres PANICked on a full disk and its crash recovery failed
+ * (Path M m05: Postgres hit a PANIC on a full disk and its crash recovery failed
  * too) that made a ~20 s flap cycle forever, each cycle taking a connected
  * aircraft out of and back into its comms-loss failsafe. The probe supplies the
  * positive evidence the quiet window cannot: a real write, on the connection
@@ -111,6 +111,12 @@ private:
      * before the trip — from a previous degraded episode — cannot pay for this
      * one. Compared with !=, matching the counter idiom above. */
     uint64_t probe_successes_at_trip{0};
+    /* When the current degraded episode began, for degradedAgeSecs(). Owned
+     * here rather than by the caller because this is the class that knows when
+     * the transition happened, and because reading it against the tick's own
+     * clock keeps the age consistent with the decision it describes — the same
+     * reason incidentAgeSecs() exists. */
+    uint64_t degraded_since_ms{0};
     /* An explicit flag rather than incident_start_ms == 0. A monotonic clock
      * that has just started, and every test clock, legitimately reads 0, so a
      * zero sentinel would silently discard an incident that began at the
@@ -221,6 +227,7 @@ public:
         {
             this->degraded_ = true;
             this->probe_successes_at_trip = counters.probe_successes;
+            this->degraded_since_ms = this->now_ms;
             this->last_probe_successes = counters.probe_successes;
             this->reason_ = trip_reason::command_drop;
             /* No write-failure incident is implicated, so do not leave one
@@ -242,6 +249,7 @@ public:
             {
                 this->degraded_ = true;
                 this->probe_successes_at_trip = counters.probe_successes;
+                this->degraded_since_ms = this->now_ms;
                 this->last_probe_successes = counters.probe_successes;
                 this->reason_ = trip_reason::write_failure;
                 /* Deliberately left active, unlike the command-drop path: the
@@ -272,6 +280,16 @@ public:
     [[nodiscard]] auto incidentAgeSecs() const -> uint64_t
     {
         return this->incident_active ? (this->now_ms - this->incident_start_ms) / ms_per_sec : 0;
+    }
+    /* How long the current degraded episode has been running as of the last
+     * tick, in seconds (0 if not degraded), for the caller's periodic
+     * still-degraded log. Distinct from incidentAgeSecs(): an incident is a run
+     * of write failures, which a command-drop trip does not have at all, while
+     * this measures the severance itself — the number an operator reading
+     * "sessions are still being refused" actually wants. */
+    [[nodiscard]] auto degradedAgeSecs() const -> uint64_t
+    {
+        return this->degraded_ ? (this->now_ms - this->degraded_since_ms) / ms_per_sec : 0;
     }
 };
 

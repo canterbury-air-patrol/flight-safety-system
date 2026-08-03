@@ -88,22 +88,13 @@ struct CapturingSink {
     }
 };
 
-/* Every case that does not exercise the probe itself passes this. The
- * constructor requires a probe function (todo/78) precisely so a server wired
- * without one — which could never leave the degraded state — fails to compile
- * rather than shipping. */
-auto healthy_probe() -> bool
-{
-    return true;
-}
-
 } // namespace
 
 TEST_CASE("db_write_queue: enqueue-then-drain preserves order")
 {
     auto cap = std::make_shared<CapturingSink>();
     fss::server::db_write_queue q(
-        100, [cap](const fss::server::db_write_task &t) -> void { (*cap)(t); }, healthy_probe);
+        100, [cap](const fss::server::db_write_task &t) -> void { (*cap)(t); }, fss_test::healthy_probe);
 
     for (uint64_t i = 1; i <= 20; ++i)
     {
@@ -130,7 +121,7 @@ TEST_CASE("db_write_queue: bounded queue drops oldest when full")
 
     constexpr std::size_t depth = 5;
     fss::server::db_write_queue q(
-        depth, [cap](const fss::server::db_write_task &t) -> void { (*cap)(t); }, healthy_probe);
+        depth, [cap](const fss::server::db_write_task &t) -> void { (*cap)(t); }, fss_test::healthy_probe);
 
     /* Worker will pick up task 1 and sleep. Fill 5 slots, then push 10 more;
      * older entries beyond depth must be dropped. */
@@ -160,7 +151,7 @@ TEST_CASE("db_write_queue: stop drains pending work")
     cap->delay = std::chrono::milliseconds(5);
 
     fss::server::db_write_queue q(
-        1000, [cap](const fss::server::db_write_task &t) -> void { (*cap)(t); }, healthy_probe);
+        1000, [cap](const fss::server::db_write_task &t) -> void { (*cap)(t); }, fss_test::healthy_probe);
     for (uint64_t i = 1; i <= 50; ++i)
     {
         q.enqueue(fss::server::position_write{i, 0.0, 0.0, 0});
@@ -176,7 +167,7 @@ TEST_CASE("db_write_queue: stop is idempotent")
 {
     auto cap = std::make_shared<CapturingSink>();
     fss::server::db_write_queue q(
-        100, [cap](const fss::server::db_write_task &t) -> void { (*cap)(t); }, healthy_probe);
+        100, [cap](const fss::server::db_write_task &t) -> void { (*cap)(t); }, fss_test::healthy_probe);
     q.enqueue(fss::server::rtt_write{1, 1});
     REQUIRE(fss_test::wait_for([&]() -> bool { return cap->count.load() == 1; }));
     q.stop();
@@ -188,7 +179,7 @@ TEST_CASE("db_write_queue: enqueue after stop is a no-op")
 {
     auto cap = std::make_shared<CapturingSink>();
     fss::server::db_write_queue q(
-        100, [cap](const fss::server::db_write_task &t) -> void { (*cap)(t); }, healthy_probe);
+        100, [cap](const fss::server::db_write_task &t) -> void { (*cap)(t); }, fss_test::healthy_probe);
 
     q.enqueue(fss::server::rtt_write{1, 10});
     q.enqueue(fss::server::rtt_write{2, 20});
@@ -214,7 +205,7 @@ TEST_CASE("db_write_queue: slow sink does not block producers")
     cap->delay = std::chrono::milliseconds(200);
 
     fss::server::db_write_queue q(
-        10000, [cap](const fss::server::db_write_task &t) -> void { (*cap)(t); }, healthy_probe);
+        10000, [cap](const fss::server::db_write_task &t) -> void { (*cap)(t); }, fss_test::healthy_probe);
 
     auto start = std::chrono::steady_clock::now();
     for (uint64_t i = 1; i <= 20; ++i)
@@ -246,7 +237,7 @@ TEST_CASE("db_write_queue: drop log message appears on stderr when queue fills")
 
     {
         fss::server::db_write_queue q(
-            3, [cap](const fss::server::db_write_task &t) -> void { (*cap)(t); }, healthy_probe);
+            3, [cap](const fss::server::db_write_task &t) -> void { (*cap)(t); }, fss_test::healthy_probe);
         for (uint64_t i = 1; i <= 20; ++i)
         {
             q.enqueue(fss::server::rtt_write{i, 0});
@@ -272,7 +263,7 @@ TEST_CASE("db_write_queue: a command dispatch survives a telemetry overflow")
 
     constexpr std::size_t depth = 5;
     fss::server::db_write_queue q(
-        depth, [cap](const fss::server::db_write_task &t) -> void { (*cap)(t); }, healthy_probe);
+        depth, [cap](const fss::server::db_write_task &t) -> void { (*cap)(t); }, fss_test::healthy_probe);
 
     constexpr uint64_t cmd_id = 1000000; /* distinct from any telemetry asset id below */
     for (uint64_t i = 1; i <= depth; ++i)
@@ -301,7 +292,7 @@ TEST_CASE("db_write_queue: a command ack survives a telemetry overflow")
 
     constexpr std::size_t depth = 5;
     fss::server::db_write_queue q(
-        depth, [cap](const fss::server::db_write_task &t) -> void { (*cap)(t); }, healthy_probe);
+        depth, [cap](const fss::server::db_write_task &t) -> void { (*cap)(t); }, fss_test::healthy_probe);
 
     constexpr uint64_t ack_command_dbid = 2000000;
     for (uint64_t i = 1; i <= depth; ++i)
@@ -336,7 +327,7 @@ TEST_CASE("db_write_queue: command overload drops on a distinct command-specific
     {
         constexpr std::size_t depth = 3;
         fss::server::db_write_queue q(
-            depth, [cap](const fss::server::db_write_task &t) -> void { (*cap)(t); }, healthy_probe);
+            depth, [cap](const fss::server::db_write_task &t) -> void { (*cap)(t); }, fss_test::healthy_probe);
         for (uint64_t i = 1; i <= 10; ++i)
         {
             q.enqueue(fss::server::command_dispatch_write{i, i});
@@ -364,7 +355,7 @@ TEST_CASE("db_write_queue: telemetry is rejected without evicting a command when
 
     constexpr std::size_t depth = 3;
     fss::server::db_write_queue q(
-        depth, [cap](const fss::server::db_write_task &t) -> void { (*cap)(t); }, healthy_probe);
+        depth, [cap](const fss::server::db_write_task &t) -> void { (*cap)(t); }, fss_test::healthy_probe);
 
     /* Park the worker on a first command so the remaining slots fill predictably. */
     q.enqueue(fss::server::command_dispatch_write{1, 1});
@@ -402,7 +393,7 @@ TEST_CASE("db_write_queue: write_failure_count tracks sink exceptions")
         throw std::runtime_error("injected sink failure");
     };
 
-    fss::server::db_write_queue q(100, throwing_sink, healthy_probe);
+    fss::server::db_write_queue q(100, throwing_sink, fss_test::healthy_probe);
     for (uint64_t i = 1; i <= task_count; ++i)
     {
         q.enqueue(fss::server::rtt_write{i, 0});
@@ -418,7 +409,7 @@ TEST_CASE("db_write_queue: catch-all handler counts non-exception throws")
 {
     auto weird_sink = [](const fss::server::db_write_task &) -> void { throw 42; };
 
-    fss::server::db_write_queue q(100, weird_sink, healthy_probe);
+    fss::server::db_write_queue q(100, weird_sink, fss_test::healthy_probe);
     q.enqueue(fss::server::rtt_write{1, 0});
 
     REQUIRE(fss_test::wait_for([&]() -> bool { return q.write_failure_count() == 1; }));
@@ -434,7 +425,7 @@ TEST_CASE("db_write_queue: destructor without explicit stop drains pending work"
 
     {
         fss::server::db_write_queue q(
-            1000, [cap](const fss::server::db_write_task &t) -> void { (*cap)(t); }, healthy_probe);
+            1000, [cap](const fss::server::db_write_task &t) -> void { (*cap)(t); }, fss_test::healthy_probe);
         for (uint64_t i = 1; i <= 30; ++i)
         {
             q.enqueue(fss::server::search_status_write{i, 0, 0, 0});
@@ -527,7 +518,7 @@ TEST_CASE("db_write_queue: repeated probe requests coalesce into one probe")
 
 TEST_CASE("db_write_queue: a successful probe counts as a success, not a write")
 {
-    fss::server::db_write_queue q(100, [](const fss::server::db_write_task &) -> void {}, healthy_probe);
+    fss::server::db_write_queue q(100, [](const fss::server::db_write_task &) -> void {}, fss_test::healthy_probe);
     q.requestProbe();
 
     REQUIRE(fss_test::wait_for([&]() -> bool { return q.probe_success_count() == 1; }));

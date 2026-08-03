@@ -78,6 +78,7 @@ public:
     [[nodiscard]] auto wantsProbe() const -> bool { return this->f.wantsProbe(); }
     [[nodiscard]] auto reason() const -> db_failsafe::trip_reason { return this->f.reason(); }
     [[nodiscard]] auto incidentAgeSecs() const -> uint64_t { return this->f.incidentAgeSecs(); }
+    [[nodiscard]] auto degradedAgeSecs() const -> uint64_t { return this->f.degradedAgeSecs(); }
 private:
     std::shared_ptr<FakeClock> clock{std::make_shared<FakeClock>()};
     db_failsafe f;
@@ -269,7 +270,7 @@ TEST_CASE("db_failsafe: telemetry-only drops from a real queue never trip the fa
     };
 
     constexpr std::size_t depth = 3;
-    fss::server::db_write_queue q(depth, sink, []() -> bool { return true; });
+    fss::server::db_write_queue q(depth, sink, fss_test::healthy_probe);
     /* Park the worker on a first command so the queue fills predictably. */
     q.enqueue(fss::server::command_dispatch_write{1, 1});
     REQUIRE(fss_test::wait_for([&]() -> bool { return entered.load() >= 1; }));
@@ -701,4 +702,49 @@ TEST_CASE("db_failsafe: a probe slower than the tick delays recovery by at most 
     REQUIRE(f.tickCounters(1000, {1, 0, successes, 0, 0}) == db_failsafe::event::none); // t=19s
     /* t=20s, the next completed probe: recovery, one round trip after quiet. */
     REQUIRE(f.tickCounters(1000, {1, 0, ++successes, 0, 0}) == db_failsafe::event::recovered);
+}
+
+TEST_CASE("db_failsafe: degradedAgeSecs measures the severance, not the incident (todo/78)")
+{
+    /* The periodic still-degraded log reports this, and it is deliberately not
+     * incidentAgeSecs(): an incident is a run of write failures, which the
+     * command-drop path does not have at all, while this measures how long
+     * sessions have actually been refused. Read against the tick's own clock,
+     * for the same reason incidentAgeSecs() is — the number logged is the one
+     * the decision was made on. */
+    SECTION("zero before a trip, and again after recovery")
+    {
+        FailsafeHarness f(0, 15);
+        REQUIRE(f.degradedAgeSecs() == 0);
+        REQUIRE(f.tick(0, 0, 0) == db_failsafe::event::none);
+        REQUIRE(f.degradedAgeSecs() == 0);
+        REQUIRE(f.tick(1, 0, 0) == db_failsafe::event::tripped);
+        for (int i = 0; i < 16; i++)
+        {
+            f.tick(1, 0, 0);
+        }
+        REQUIRE_FALSE(f.degraded());
+        REQUIRE(f.degradedAgeSecs() == 0);
+    }
+    SECTION("counts from the trip while the state is latched")
+    {
+        FailsafeHarness f(0, 15);
+        REQUIRE(f.tickCounters(1000, {1, 0, 0, 0, 0}) == db_failsafe::event::tripped);
+        REQUIRE(f.degradedAgeSecs() == 0);
+        /* A hung probe: no counter moves, so the latch holds and the age runs. */
+        for (int i = 1; i <= 60; i++)
+        {
+            REQUIRE(f.tickCounters(1000, {1, 0, 0, 0, 0}) == db_failsafe::event::none);
+            REQUIRE(f.degradedAgeSecs() == static_cast<uint64_t>(i));
+        }
+    }
+    SECTION("a command-drop trip has no incident but still has a degraded age")
+    {
+        FailsafeHarness f(5, 15);
+        REQUIRE(f.tickCounters(1000, {0, 1, 0, 0, 0}) == db_failsafe::event::tripped);
+        REQUIRE(f.reason() == db_failsafe::trip_reason::command_drop);
+        REQUIRE(f.incidentAgeSecs() == 0);
+        REQUIRE(f.tickCounters(1000, {0, 1, 0, 0, 0}) == db_failsafe::event::none);
+        REQUIRE(f.degradedAgeSecs() == 1);
+    }
 }

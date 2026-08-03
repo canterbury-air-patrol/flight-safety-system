@@ -78,7 +78,7 @@ health probe" — the sentence this section replaces — describes a probe whose
 result arrives only after the fleet has already been let back in.
 
 Path M m05 showed what that costs. A 200 MB Postgres data directory was filled
-until the instance PANICked on its WAL, and its crash recovery could not write
+until the instance hit a `PANIC` on its WAL, and its crash recovery could not write
 either, so the instance was permanently gone:
 
 ```
