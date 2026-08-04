@@ -8,6 +8,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **A retired asset can no longer fly** (todo/80,
+  `docs/decisions/80-retired-asset-enforcement.md`). `fss-web` retires an asset
+  instead of deleting it, keeping its identity and audit history and letting the
+  retirement be undone; that removed the asset from fss-web's active APIs and
+  blocked new web commands, but FSS never read the column, so a retired aircraft
+  still identified, still wrote telemetry and still received the newest command.
+  Both halves are now covered. Identification skips retired assets, treating one
+  as an unknown name rather than as a read failure. Already-connected sessions
+  are covered too, which matters because a session caches its asset id at
+  identification and never looks it up again: the command poller checks the
+  identified fleet once a second in one batched query — off the session hot path
+  — and the main loop severs any session whose asset has been retired, within
+  about 1.1 seconds worst case. Reactivation needs no restart: clearing
+  `retired_at` lets the aircraft identify again under its original id, with the
+  history that was never deleted. A failed retirement read severs nobody rather
+  than reading as "all active". Requires `fss-web`'s `assets` migration 0013,
+  which is below the 0016 already required, so the deployment floor is
+  unchanged — but the startup schema check now covers `retired_at`, so an FSS
+  upgraded ahead of fss-web refuses to start and names the column instead of
+  silently ignoring retirement.
 - **A position report now records whether its coordinates are backed by a GPS
   fix** (todo/76, `docs/decisions/76-gps-fix-recording.md`). An aircraft that
   loses GPS keeps reporting and says so — cap-fmu clears the position report's
