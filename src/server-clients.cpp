@@ -292,6 +292,43 @@ auto server_clients::disconnectRevokedClients(const std::string &crl_file) -> st
     return disconnected_count;
 }
 
+/* docs/decisions/80-retired-asset-enforcement.md: severs the sessions
+ * pollRetiredAssets() observed to belong to a retired asset. Detection ran on
+ * the command poller (it is a DB read); this runs on the main loop, because
+ * disconnect() blocks on socket I/O and joins the recv thread and must not sit
+ * on the thread that dispatches commands to everyone else.
+ *
+ * Same disconnect()+clientDisconnected() pattern as disconnectRevokedClients()
+ * and disconnectAll(), and safe by the same reasoning: both calls are
+ * idempotent, so a client racing its own concurrent teardown between the poll
+ * and this drain is handled harmlessly. clientDisconnected() is what releases
+ * the asset_owners claim (see its todo/44 comment), which is what lets the
+ * asset identify again after reactivation without a server restart.
+ *
+ * The list is drained under `lock` and acted on outside it, like every other
+ * severing path in this class. */
+auto server_clients::disconnectRetiredClients() -> std::size_t
+{
+    std::vector<std::shared_ptr<flight_safety_system::server::fss_client>> retired{};
+    {
+        std::scoped_lock guard(this->lock);
+        retired.swap(this->pending_retirement);
+    }
+    std::size_t disconnected_count = 0;
+    for (const auto &client : retired)
+    {
+        /* Logged per session rather than as a count: retirement is an
+         * administrative act on one aircraft, and an operator who retires the
+         * wrong asset needs to see which session went. */
+        FSS_LOG_WARN("server", "Disconnecting session for retired asset_id " << client->getCachedAssetId()
+                                                                             << " (fss-web retired_at is set)");
+        client->disconnect();
+        this->clientDisconnected(client.get());
+        disconnected_count++;
+    }
+    return disconnected_count;
+}
+
 /* docs/decisions/34-45-47-db-failsafe-latch.md: unconditional version of
  * disconnectRevokedClients above, for the main loop's sustained-DB-write-
  * failure guard — every currently live session gets severed (CAP/test-plan's

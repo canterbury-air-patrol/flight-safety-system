@@ -6,8 +6,10 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "fss-server.hpp"
@@ -227,6 +229,53 @@ public:
         return res;
     }
 
+    auto getRetiredAssets(const std::vector<uint64_t> &ids) -> std::optional<std::unordered_set<uint64_t>> override
+    {
+        retired_reads++;
+        if (retired_read_fail)
+        {
+            return std::nullopt;
+        }
+        /* Under records_lock, unlike the other read-side maps: retirement is
+         * the one piece of state a test flips *while* the poller thread is
+         * running (that is the behaviour under test — an already-identified
+         * session being severed), so it cannot follow the set-up-before-threads
+         * pattern the asset_ids/commands maps use. */
+        const std::scoped_lock lock(records_lock);
+        std::unordered_set<uint64_t> res;
+        for (uint64_t asset_id : ids)
+        {
+            if (retired_assets.count(asset_id) > 0)
+            {
+                res.insert(asset_id);
+            }
+        }
+        return res;
+    }
+
+    /* Retire or reactivate an asset mid-test. Reactivation is the reversible
+     * half fss-web migration 0013 exists for, so the mock models both. */
+    void setAssetRetired(uint64_t asset_id, bool retired)
+    {
+        const std::scoped_lock lock(records_lock);
+        if (retired)
+        {
+            retired_assets.insert(asset_id);
+        }
+        else
+        {
+            retired_assets.erase(asset_id);
+        }
+    }
+
+    /* When set, getRetiredAssets returns nullopt: a failed read, which must
+     * sever nobody rather than reading as "all active" (todo/80). Atomic
+     * because it is flipped from the test thread while the poller reads it. */
+    std::atomic<bool> retired_read_fail{false};
+    /* Lets tests assert the poller actually issued the retirement read (and at
+     * what cadence) rather than inferring it from the severing alone. */
+    std::atomic<int> retired_reads{0};
+
     auto getActiveServers() -> std::optional<std::vector<flight_safety_system::server::fss_server_details>> override
     {
         if (active_servers_fail)
@@ -272,6 +321,9 @@ private:
     std::vector<recorded_search> searches{};
     std::vector<recorded_dispatch> dispatches{};
     std::vector<recorded_ack> acks{};
+    /* Guarded by records_lock — see getRetiredAssets above for why this one
+     * cannot be a bare public map like asset_ids. */
+    std::set<uint64_t> retired_assets{};
 };
 
 } // namespace fss_test

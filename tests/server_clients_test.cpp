@@ -1202,3 +1202,195 @@ TEST_CASE("server_clients: a failed batched read leaves pending commands intact 
     client1->sendCommand();
     REQUIRE(count_sent<fss::transport::fss_message_asset_command>(conn1->sentSnapshot()) == sent_before);
 }
+
+TEST_CASE("server_clients: retiring a live asset severs its session (todo/80)")
+{
+    /* The gap todo/80 closes. Filtering the identify query alone is not enough:
+     * a session caches its asset_id at identification and never repeats that
+     * lookup, so an aircraft that was active when it connected keeps flying,
+     * writing telemetry and receiving commands for as long as it stays
+     * connected. Enforcement has to reach the live session too. */
+    server_clients sc;
+    fss_test::MockDatabase mock;
+    auto client = make_aircraft_client("craft1", mock, sc);
+    sc.clientConnected(client);
+    const uint64_t asset_id = client->getCachedAssetId();
+    REQUIRE(asset_id != 0);
+    REQUIRE(sc.getTotalClients() == 1);
+
+    /* Held from here: fss_client releases its connection during teardown, so
+     * getConnection() is null by the time the severance has happened and the
+     * disconnect_calls counter has to be reached through a pointer taken while
+     * the session is still live. */
+    auto conn = std::dynamic_pointer_cast<FakeConnection>(client->getConnection());
+    REQUIRE(conn != nullptr);
+
+    /* While active, the poll finds nothing and severs nobody. */
+    sc.pollRetiredAssets(&mock);
+    REQUIRE(sc.disconnectRetiredClients() == 0);
+    REQUIRE(sc.getTotalClients() == 1);
+    REQUIRE(conn->disconnect_calls == 0);
+
+    mock.setAssetRetired(asset_id, true);
+    sc.pollRetiredAssets(&mock);
+    REQUIRE(sc.disconnectRetiredClients() == 1);
+    REQUIRE(conn->disconnect_calls > 0);
+    sc.cleanupRemovableClients();
+    REQUIRE(sc.getTotalClients() == 0);
+}
+
+TEST_CASE("server_clients: detection and severing are split across the two threads (todo/80)")
+{
+    /* pollRetiredAssets() runs on the command poller (it is a DB read);
+     * disconnect() blocks on socket I/O and joins the recv thread, so the
+     * severing is the main loop's. The poll must therefore stage the work and
+     * sever nobody itself -- if it ever disconnects inline, one black-holed
+     * peer stalls command polling for the whole fleet. */
+    server_clients sc;
+    fss_test::MockDatabase mock;
+    auto client = make_aircraft_client("craft1", mock, sc);
+    sc.clientConnected(client);
+    mock.setAssetRetired(client->getCachedAssetId(), true);
+    /* Held across the severance -- see the note in the test above. */
+    auto conn = std::dynamic_pointer_cast<FakeConnection>(client->getConnection());
+    REQUIRE(conn != nullptr);
+
+    sc.pollRetiredAssets(&mock);
+    REQUIRE(conn->disconnect_calls == 0); /* staged, not severed */
+    REQUIRE(sc.getTotalClients() == 1);
+
+    REQUIRE(sc.disconnectRetiredClients() == 1);
+    REQUIRE(conn->disconnect_calls > 0);
+}
+
+TEST_CASE("server_clients: repeated polls before a drain sever the session once (todo/80)")
+{
+    /* The poller observes the same retirement every second until the main loop
+     * drains. Severing is idempotent, so a duplicated hand-off would still be
+     * correct -- but it would log a second severance warning for a session that
+     * only ever existed once, which is exactly the sort of thing an operator
+     * reads as a second aircraft. */
+    server_clients sc;
+    fss_test::MockDatabase mock;
+    auto client = make_aircraft_client("craft1", mock, sc);
+    sc.clientConnected(client);
+    mock.setAssetRetired(client->getCachedAssetId(), true);
+
+    sc.pollRetiredAssets(&mock);
+    sc.pollRetiredAssets(&mock);
+    sc.pollRetiredAssets(&mock);
+    REQUIRE(sc.disconnectRetiredClients() == 1);
+    /* And the drain leaves nothing behind for the next tick. */
+    REQUIRE(sc.disconnectRetiredClients() == 0);
+}
+
+TEST_CASE("server_clients: a failed retirement read severs nobody (todo/80)")
+{
+    /* nullopt is not an empty set. An empty set means "every one of these is
+     * active"; a failed read means nothing is known. Both leave the fleet
+     * connected here, but only one of them is allowed to -- the distinction
+     * exists so that a *successful* read finding retirements still severs
+     * while a read outage never does. Asserting the read was attempted keeps
+     * this from passing for the wrong reason (a poll that never ran). */
+    server_clients sc;
+    fss_test::MockDatabase mock;
+    auto client = make_aircraft_client("craft1", mock, sc);
+    sc.clientConnected(client);
+    mock.setAssetRetired(client->getCachedAssetId(), true);
+
+    mock.retired_read_fail = true;
+    const int reads_before = mock.retired_reads.load();
+    sc.pollRetiredAssets(&mock);
+    REQUIRE(mock.retired_reads.load() > reads_before);
+    REQUIRE(sc.disconnectRetiredClients() == 0);
+    REQUIRE(sc.getTotalClients() == 1);
+
+    /* And once the read recovers, the retirement it could not see is enforced
+     * on the next pass rather than being lost. */
+    mock.retired_read_fail = false;
+    sc.pollRetiredAssets(&mock);
+    REQUIRE(sc.disconnectRetiredClients() == 1);
+}
+
+TEST_CASE("server_clients: retirement severs only the retired asset's session (todo/80)")
+{
+    /* The batched read answers for the whole identified fleet at once, so the
+     * failure that matters is a retirement severing its neighbours. */
+    server_clients sc;
+    fss_test::MockDatabase mock;
+    auto doomed = make_aircraft_client("craft1", mock, sc);
+    auto bystander = make_aircraft_client("craft2", mock, sc);
+    sc.clientConnected(doomed);
+    sc.clientConnected(bystander);
+    REQUIRE(doomed->getCachedAssetId() != bystander->getCachedAssetId());
+
+    mock.setAssetRetired(doomed->getCachedAssetId(), true);
+    sc.pollRetiredAssets(&mock);
+    REQUIRE(sc.disconnectRetiredClients() == 1);
+
+    auto *bystander_conn = dynamic_cast<FakeConnection *>(bystander->getConnection().get());
+    REQUIRE(bystander_conn != nullptr);
+    REQUIRE(bystander_conn->disconnect_calls == 0);
+    sc.cleanupRemovableClients();
+    REQUIRE(sc.getTotalClients() == 1);
+}
+
+TEST_CASE("server_clients: an unidentified client is never severed as retired (todo/80)")
+{
+    /* A client that has not identified has no asset_id, so it cannot be
+     * retired -- and must not be swept up by a poll that keys on 0 by
+     * accident. The identify timeout is what removes these, not this path. */
+    server_clients sc;
+    fss_test::MockDatabase mock;
+    auto conn = std::make_shared<FakeConnection>();
+    auto client = std::make_shared<fss::server::fss_client>(conn, &mock, make_null_writer(), &sc);
+    sc.clientConnected(client);
+    REQUIRE(client->getCachedAssetId() == 0);
+
+    /* Retire the id an unidentified client would report if 0 were ever
+     * treated as a real asset id. */
+    mock.setAssetRetired(0, true);
+    sc.pollRetiredAssets(&mock);
+    REQUIRE(sc.disconnectRetiredClients() == 0);
+    REQUIRE(conn->disconnect_calls == 0);
+    REQUIRE(sc.getTotalClients() == 1);
+}
+
+TEST_CASE("server_clients: reactivation lets the same asset identify again (todo/80)")
+{
+    /* Retirement is reversible, and the reversal has to work without a server
+     * restart. The trap is asset_owners: the severed session's claim on the
+     * asset_id is released by clientDisconnected(), and if any severing path
+     * skipped that, the id would stay unclaimable and the reactivated aircraft
+     * would be rejected as a duplicate of a session that no longer exists. */
+    server_clients sc;
+    fss_test::MockDatabase mock;
+    auto client = make_aircraft_client("craft1", mock, sc);
+    sc.clientConnected(client);
+    const uint64_t asset_id = client->getCachedAssetId();
+
+    mock.setAssetRetired(asset_id, true);
+    sc.pollRetiredAssets(&mock);
+    REQUIRE(sc.disconnectRetiredClients() == 1);
+    sc.cleanupRemovableClients();
+    REQUIRE(sc.getTotalClients() == 0);
+
+    /* Reactivated in fss-web: a fresh connection identifies under the original
+     * id, with the history that was never deleted still hanging off it. */
+    mock.setAssetRetired(asset_id, false);
+    auto conn2 = std::make_shared<FakeConnection>();
+    conn2->cert_names.push_back("craft1");
+    auto returned = std::make_shared<fss::server::fss_client>(conn2, &mock, make_null_writer(), &sc);
+    sc.clientConnected(returned);
+    returned->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft1"));
+
+    REQUIRE(returned->getCachedAssetId() == asset_id);
+    REQUIRE(returned->isAircraft());
+    REQUIRE(sc.getTotalClients() == 1);
+
+    /* And it stays connected through a poll, rather than being severed by a
+     * stale observation of the retirement it has just come back from. */
+    sc.pollRetiredAssets(&mock);
+    REQUIRE(sc.disconnectRetiredClients() == 0);
+    REQUIRE(sc.getTotalClients() == 1);
+}

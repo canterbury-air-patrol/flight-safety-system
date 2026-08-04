@@ -163,6 +163,29 @@ struct asset_command_row_s **db_asset_commands_get(const char *conn, const unsig
  * the rows or their command strings -- free those first (see Ownership above). */
 void db_free_asset_commands(struct asset_command_row_s **commands);
 
+/* Which of the given assets are retired (assets_asset.retired_at IS NOT NULL,
+ * fss-web migration 0013), in a single round-trip -- the batched read behind
+ * FSS's enforcement of retirement against sessions that identified while still
+ * active (todo/80). Writes the number of ids found to *out_count.
+ *
+ * The result is a SUBSET of asset_ids, ordered by id, so it is not positionally
+ * aligned with the input: an id absent from the result is active.
+ *
+ * error_out (may be NULL) is set to 1 on an allocation failure or a mid-cursor
+ * read error. Unlike db_asset_commands_get, a partial read is discarded here
+ * rather than returned: a retired asset missing from a truncated list reads as
+ * active, and this is the one query where failing that way keeps a retired
+ * aircraft flying. On failure the caller must change nothing and retry.
+ *
+ * NULL with *error_out == 0 means no id in the batch is retired. Ownership is
+ * whole: pass the array to db_free_retired_assets. count == 0 answers without
+ * querying. */
+unsigned long long *db_asset_retired_get(const char *conn, const unsigned long long *asset_ids, size_t count,
+                                         size_t *out_count, int *error_out);
+/* Frees the array returned by db_asset_retired_get, in full (no split
+ * ownership: the array holds scalars, not rows the caller took out of it). */
+void db_free_retired_assets(unsigned long long *asset_ids);
+
 struct smm_settings_s {
     char *address;
     char *username;

@@ -96,14 +96,26 @@ unsigned long long db_get_asset_id(const char *conn_arg, const char *asset_name_
     unsigned long long asset_id = 0;
     EXEC SQL END DECLARE SECTION;
 
-    EXEC SQL AT :conn SELECT id INTO :asset_id FROM assets_asset WHERE name = :asset_name;
+    /* retired_at IS NULL makes a retired asset an unknown identity rather than
+     * a recognised one that happens to be out of service (todo/80): fss-web
+     * migration 0013 retires assets instead of deleting them, so the row (and
+     * its history) stays behind, and without this clause a retired aircraft
+     * would still identify, still write telemetry and still be handed the
+     * newest command. Retirement is reversible -- clearing retired_at returns
+     * the same id to service on the next identify, with no state here to
+     * unwind. */
+    EXEC SQL AT :conn SELECT id INTO :asset_id FROM assets_asset
+        WHERE name = :asset_name AND retired_at IS NULL;
 
     if (sqlca.sqlcode < 0)
     {
         /* A query failure (connection down, etc.) still returns 0 for the id
          * like an unknown asset, but error_out lets the caller (todo/60) tell
          * the two apart instead of treating every read outage as a fleet of
-         * unregistered assets. Print the SQL error so the log tells the truth
+         * unregistered assets. A retired asset is deliberately NOT an error:
+         * it takes the unknown-asset path above (0 with *error_out left 0),
+         * because it is a policy answer the database gave successfully, not a
+         * failure to read one. Print the SQL error so the log tells the truth
          * about why identification failed. */
         sqlprint();
         if (error_out != NULL)
@@ -532,6 +544,135 @@ db_asset_commands_get(const char *conn_arg, const unsigned long long *asset_ids,
     return res;
 }
 
+unsigned long long *
+db_asset_retired_get(const char *conn_arg, const unsigned long long *asset_ids, size_t count, size_t *out_count,
+                     int *error_out)
+{
+    size_t len = 0;
+    if (error_out != NULL)
+    {
+        *error_out = 0;
+    }
+    if (out_count != NULL)
+    {
+        *out_count = 0;
+    }
+
+    /* No assets means nothing to ask about, and an empty set would build an
+     * invalid "IN ()" clause -- answer without touching the DB. NULL with
+     * *error_out == 0 is the empty answer; NULL with *error_out == 1 is a
+     * failure, which is the distinction the caller acts on. */
+    if (count == 0)
+    {
+        return NULL;
+    }
+
+    /* The result is a subset of the ids asked about, so the exact worst case is
+     * known up front: allocate once and never grow. That is the whole reason
+     * this function does not carry db_asset_commands_get's realloc-per-row
+     * dance -- there is no row payload to own, only ids we already hold. */
+    unsigned long long *res = (unsigned long long *)malloc(sizeof(unsigned long long) * count);
+    if (res == NULL)
+    {
+        if (error_out != NULL)
+        {
+            *error_out = 1;
+        }
+        return NULL;
+    }
+
+    /* Same id-concatenation as db_asset_commands_get above, and safe for the
+     * same reason: these are uint64s the server holds, never text from a
+     * client. Each id is at most 20 decimal digits plus a separator. */
+    static const char *sql_prefix = "SELECT id FROM assets_asset WHERE retired_at IS NOT NULL AND id IN (";
+    static const char *sql_suffix = ") ORDER BY id";
+    const size_t id_max = 21; /* up to 20 digits + ',' */
+    size_t buf_size = strlen(sql_prefix) + strlen(sql_suffix) + (count * id_max) + 1;
+    char *query_buf = (char *)malloc(buf_size);
+    if (query_buf == NULL)
+    {
+        free(res);
+        if (error_out != NULL)
+        {
+            *error_out = 1;
+        }
+        return NULL;
+    }
+    int written = snprintf(query_buf, buf_size, "%s", sql_prefix);
+    size_t off = (written < 0) ? 0 : (size_t)written;
+    for (size_t i = 0; i < count; i++)
+    {
+        written = snprintf(query_buf + off, buf_size - off, "%s%llu", (i == 0) ? "" : ",", asset_ids[i]);
+        off += (written < 0) ? 0 : (size_t)written;
+    }
+    snprintf(query_buf + off, buf_size - off, "%s", sql_suffix);
+
+    EXEC SQL BEGIN DECLARE SECTION;
+    const char *conn = conn_arg;
+    const char *query = query_buf;
+    unsigned long long r_asset_id = 0;
+    EXEC SQL END DECLARE SECTION;
+
+    /* Cursor over a dynamically-prepared statement, the same AUTOCOMMIT OFF /
+     * DECLARE / OPEN / FETCH / CLOSE idiom as db_asset_commands_get. Distinct
+     * statement and cursor names so the two can never collide on a tick that
+     * runs both. */
+    EXEC SQL AT :conn SET AUTOCOMMIT TO OFF;
+    EXEC SQL AT :conn PREPARE retstmt FROM :query;
+    EXEC SQL AT :conn DECLARE retcur CURSOR FOR retstmt;
+    EXEC SQL AT :conn OPEN retcur;
+
+    EXEC SQL WHENEVER NOT FOUND DO BREAK;
+    EXEC SQL WHENEVER SQLERROR DO BREAK;
+    while (1)
+    {
+        EXEC SQL AT :conn FETCH FROM retcur INTO :r_asset_id;
+        /* Cannot overrun: the server asked about `count` distinct ids and id is
+         * the primary key, so at most `count` rows can come back. The guard is
+         * here anyway because the allocation's safety depends on a property of
+         * the query text several lines away. */
+        if (len < count)
+        {
+            res[len] = r_asset_id;
+            len++;
+        }
+    }
+    EXEC SQL WHENEVER NOT FOUND CONTINUE;
+    EXEC SQL WHENEVER SQLERROR CONTINUE;
+
+    /* sqlca still reflects the FETCH that ended the loop; a negative sqlcode is
+     * a mid-cursor error rather than the normal NOT FOUND (100). Capture it
+     * before CLOSE / SET AUTOCOMMIT overwrite sqlca.
+     *
+     * A partial read here is worse than a partial command read: a retired asset
+     * missing from a truncated list reads as "still active", which is exactly
+     * the wrong way to fail for a safety boundary. Discard the whole thing and
+     * report failure -- the caller then changes nothing and retries next tick,
+     * leaving the fleet as it stands rather than acting on a list that cannot
+     * be told apart from a complete one. */
+    if (sqlca.sqlcode < 0)
+    {
+        if (error_out != NULL)
+        {
+            *error_out = 1;
+        }
+        free(res);
+        res = NULL;
+        len = 0;
+    }
+
+    EXEC SQL AT :conn CLOSE retcur;
+    EXEC SQL AT :conn DEALLOCATE PREPARE retstmt;
+    EXEC SQL AT :conn SET AUTOCOMMIT TO ON;
+
+    free(query_buf);
+    if (out_count != NULL)
+    {
+        *out_count = len;
+    }
+    return res;
+}
+
 #define HTTP_PORT 80
 #define HTTPS_PORT 443
 
@@ -882,6 +1023,14 @@ struct required_column_s {
  * that actually bite: they arrived with fss-web's assets migration 0008, and a
  * deployment missing it severs the whole fleet on the first command.
  *
+ * assets_asset.retired_at is the second such gate (fss-web migration 0013,
+ * todo/80). Listing it here is deliberate and load-bearing: retirement is a
+ * safety boundary, and a release that enforces it must refuse to start against
+ * a schema that cannot express it rather than run on happily and keep flying
+ * retired aircraft. An operator who upgrades FSS ahead of fss-web therefore
+ * gets a server that will not start and names the missing column -- which is
+ * the intended outcome, and is why the release note has to say so.
+ *
  * buffer_len is the sizeof() of the fixed host variable the column is fetched
  * into, so the widest value that survives is buffer_len - 1: ECPG fills the
  * buffer to capacity and leaves no room for a terminator, and the truncation
@@ -890,6 +1039,7 @@ struct required_column_s {
 static const struct required_column_s required_columns[] = {
     {"assets_asset", "id", 0},
     {"assets_asset", "name", 0},
+    {"assets_asset", "retired_at", 0},
     {"assets_assetposition", "asset_id", 0},
     {"assets_assetposition", "position", 0},
     {"assets_assetposition", "altitude", 0},
@@ -1164,4 +1314,11 @@ void db_free_asset_commands(struct asset_command_row_s **commands)
     /* Frees only the array; the caller frees each row (and its command string)
      * as it consumes them, as getActiveServers does for db_free_fss_servers. */
     free(commands);
+}
+
+void db_free_retired_assets(unsigned long long *asset_ids)
+{
+    /* One flat block of scalars, so unlike db_free_asset_commands there is no
+     * split ownership here: this frees everything the caller was given. */
+    free(asset_ids);
 }

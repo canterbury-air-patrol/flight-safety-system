@@ -122,6 +122,11 @@ public:
         /* An engaged empty map: nobody has a pending command, not a failed read. */
         return std::unordered_map<uint64_t, std::shared_ptr<flight_safety_system::server::asset_command>>{};
     }
+    auto getRetiredAssets(const std::vector<uint64_t> &) -> std::optional<std::unordered_set<uint64_t>> override
+    {
+        /* An engaged empty set: every asset is active, not a failed read. */
+        return std::unordered_set<uint64_t>{};
+    }
     auto getActiveServers() -> std::optional<std::vector<flight_safety_system::server::fss_server_details>> override
     {
         /* An engaged empty vector: no servers configured, not a failed read. */

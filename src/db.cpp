@@ -333,6 +333,46 @@ auto flight_safety_system::server::db_connection::getCommands(const std::vector<
     return res;
 }
 
+auto flight_safety_system::server::db_connection::getRetiredAssets(const std::vector<uint64_t> &asset_ids)
+    -> std::optional<std::unordered_set<uint64_t>>
+{
+    std::unordered_set<uint64_t> res;
+    if (asset_ids.empty())
+    {
+        return res;
+    }
+    /* Same host-type copy as getCommands: uint64_t may be a distinct type from
+     * the unsigned long long server-db.h uses, and the pointers do not convert. */
+    std::vector<unsigned long long> ids(asset_ids.begin(), asset_ids.end());
+    unsigned long long *retired = nullptr;
+    size_t retired_count = 0;
+    int fetch_error = 0;
+    {
+        std::scoped_lock guard(this->read_lock);
+        retired = db_asset_retired_get(read_conn_name, ids.data(), ids.size(), &retired_count, &fetch_error);
+    }
+    /* The C layer already discards a partial read rather than returning one, so
+     * there is nothing half-built to clean up here — but the array still has to
+     * be freed on both paths, since a successful read of zero retired assets
+     * also returns an allocation. */
+    if (fetch_error != 0)
+    {
+        db_free_retired_assets(retired);
+        FSS_LOG_ERROR("db", "retired-asset read failed; severing nobody this pass (todo/80)");
+        return std::nullopt;
+    }
+    if (retired != nullptr)
+    {
+        res.reserve(retired_count);
+        for (size_t i = 0; i < retired_count; i++)
+        {
+            res.insert(retired[i]);
+        }
+        db_free_retired_assets(retired);
+    }
+    return res;
+}
+
 auto flight_safety_system::server::db_connection::getSmmSettings(uint64_t asset_id)
     -> std::optional<std::shared_ptr<smm_settings>>
 {

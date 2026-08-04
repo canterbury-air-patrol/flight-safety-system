@@ -16,6 +16,7 @@
 #include <mutex>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -167,6 +168,21 @@ public:
      * and wait for the next tick (todo/69). */
     virtual auto getCommands(const std::vector<uint64_t> &asset_ids)
         -> std::optional<std::unordered_map<uint64_t, std::shared_ptr<asset_command>>> = 0;
+    /* Which of the given assets have been retired in fss-web (todo/80), so a
+     * session that identified while its asset was still active can be severed
+     * rather than flying on. An id absent from the set is active.
+     *
+     * nullopt is the read failing, and it is NOT an empty set: an empty set
+     * says "every one of these is active", which is the answer that keeps a
+     * retired aircraft connected. On nullopt the caller must sever nobody and
+     * retry on the next pass — the same leave-it-alone rule getCommands uses,
+     * for the sharper reason that here the misread direction is unsafe.
+     *
+     * Called from the command poller, off the session hot path: enforcement is
+     * eventually consistent within one poll interval by design, and that bound
+     * is stated in docs/decisions/80-retired-asset-enforcement.md. */
+    virtual auto getRetiredAssets(const std::vector<uint64_t> &asset_ids)
+        -> std::optional<std::unordered_set<uint64_t>> = 0;
     /* The complete set of active servers, or nullopt when the read was cut
      * short (mid-cursor error, truncated row) and could only produce a
      * partial, misleading list. nullopt is NOT an empty list: the caller must
@@ -191,8 +207,8 @@ private:
      * block a command/config read. Each connection is guarded by its own
      * mutex and therefore only ever used by one thread at a time — the
      * thread-safe usage pattern ECPG documents. read_lock covers getAssetId,
-     * getCommand, getCommands, getActiveServers and getSmmSettings; write_lock
-     * covers the record* telemetry inserts. */
+     * getCommand, getCommands, getRetiredAssets, getActiveServers and
+     * getSmmSettings; write_lock covers the record* telemetry inserts. */
     std::mutex read_lock;
     std::mutex write_lock;
     /* Read without holding either mutex by isConnected(), and written from
@@ -233,6 +249,8 @@ public:
     auto getCommand(uint64_t asset_id) -> std::optional<std::shared_ptr<asset_command>> override;
     auto getCommands(const std::vector<uint64_t> &asset_ids)
         -> std::optional<std::unordered_map<uint64_t, std::shared_ptr<asset_command>>> override;
+    auto getRetiredAssets(const std::vector<uint64_t> &asset_ids)
+        -> std::optional<std::unordered_set<uint64_t>> override;
     auto getActiveServers() -> std::optional<std::vector<fss_server_details>> override;
     auto getSmmSettings(uint64_t asset_id) -> std::optional<std::shared_ptr<smm_settings>> override;
     auto isConnected() const -> bool override;
