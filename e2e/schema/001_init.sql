@@ -8,10 +8,18 @@
 
 CREATE EXTENSION IF NOT EXISTS postgis;
 
+-- retired_at exists as of fss-web migration 0013: retirement replaces deletion,
+-- so an asset keeps its identity and audit history while ceasing to be flyable.
+-- Nullable and indexed, exactly as 0013 declares it. A non-NULL value makes the
+-- asset an unknown identity to FSS (todo/80); clearing it returns the asset to
+-- service under the same id.
 CREATE TABLE assets_asset (
     id          BIGSERIAL PRIMARY KEY,
-    name        VARCHAR(64) NOT NULL UNIQUE
+    name        VARCHAR(64) NOT NULL UNIQUE,
+    retired_at  TIMESTAMP WITH TIME ZONE
 );
+
+CREATE INDEX assets_asset_retired_at_idx ON assets_asset (retired_at);
 
 -- position is nullable and gps_fix_valid exists as of fss-web migration 0016:
 -- a report whose coordinates are not GPS-backed is still stored (the autopilot's

@@ -2,6 +2,7 @@
 
 #include "fss-server.hpp"
 
+#include <algorithm>
 #include <atomic>
 #include <list>
 #include <map>
@@ -46,6 +47,18 @@ private:
      * allowed to read the DB for it); broadcast by the main loop, which must
      * never perform a synchronous DB read. */
     std::shared_ptr<flight_safety_system::transport::fss_message_server_list> cached_server_list{};
+    /* Sessions the poller has observed to be retired, waiting for the main loop
+     * to sever them (todo/80). Guarded by lock.
+     *
+     * The hand-off exists because the two halves belong on different threads.
+     * Detection is a DB read, which may only happen on the command poller; the
+     * severing is disconnect(), which blocks on socket I/O and joins the recv
+     * thread, and running that on the poller would let one black-holed peer
+     * stall command polling for the whole fleet — the hazard todo/46 moved
+     * db_ping off that thread to avoid. The main loop already severs clients
+     * this way for CRL reloads and for the fail-safe, so this list is drained
+     * where that work already lives. */
+    std::vector<std::shared_ptr<flight_safety_system::server::fss_client>> pending_retirement{};
     /* Copy the client list under the lock so the caller can act on it
      * outside the lock: sends block on sockets and disconnect() joins recv
      * threads, and neither may ever run while holding it.  A client that is
@@ -178,6 +191,56 @@ public:
             client->setPendingCommand(found != commands->end() ? found->second : nullptr);
         }
     };
+    void pollRetiredAssets(flight_safety_system::server::IDatabase *dbc)
+    {
+        /* Same (client, asset_id) snapshot discipline as pollCommands above: a
+         * client that identifies mid-pass must not be queried under one id and
+         * severed under another. */
+        std::vector<std::pair<std::shared_ptr<flight_safety_system::server::fss_client>, uint64_t>> identified;
+        std::vector<uint64_t> asset_ids;
+        for (const auto &client : this->snapshotClients())
+        {
+            uint64_t asset_id = client->getCachedAssetId(); /* atomic */
+            if (asset_id != 0)
+            {
+                identified.emplace_back(client, asset_id);
+                asset_ids.push_back(asset_id);
+            }
+        }
+        if (identified.empty())
+        {
+            return;
+        }
+        auto retired = dbc->getRetiredAssets(asset_ids);
+        /* nullopt is the read failing. Sever nobody and retry next pass: an
+         * empty set would say "all active", and acting on a failed read in that
+         * direction is how a retired aircraft keeps flying (todo/80). The
+         * opposite direction — severing the fleet on a failed read — is worse
+         * still, which is why the failure is silent here beyond db.cpp's log. */
+        if (!retired.has_value() || retired->empty())
+        {
+            return;
+        }
+        std::scoped_lock guard(this->lock);
+        for (const auto &[client, asset_id] : identified)
+        {
+            if (retired->count(asset_id) == 0)
+            {
+                continue;
+            }
+            /* Deduplicate against a hand-off the main loop has not drained yet:
+             * the poller can observe the same retirement on consecutive passes.
+             * disconnect() is idempotent so a double entry would be harmless,
+             * but the log line it produces is not — an operator reading two
+             * severance warnings for one retirement would reasonably look for a
+             * second session that never existed. */
+            auto already = std::find(this->pending_retirement.begin(), this->pending_retirement.end(), client);
+            if (already == this->pending_retirement.end())
+            {
+                this->pending_retirement.push_back(client);
+            }
+        }
+    };
     void sendCommand()
     {
         /* Schedule on each client's outbound writer thread rather than sending
@@ -191,5 +254,6 @@ public:
     auto resolveDuplicateIdentity(flight_safety_system::server::fss_client *newcomer, uint64_t asset_id)
         -> bool override;
     auto disconnectRevokedClients(const std::string &crl_file) -> std::size_t;
+    auto disconnectRetiredClients() -> std::size_t;
     auto disconnectAll() -> std::size_t;
 };

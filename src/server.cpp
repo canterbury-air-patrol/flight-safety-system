@@ -456,6 +456,19 @@ auto main(int argc, char *argv[]) -> int
                     dbc->tryReconnectIfNeeded();
                 }
                 clients->pollCommands(dbc.get());
+                /* Retirement enforcement for already-identified sessions
+                 * (todo/80). Once a second, not every tick: retirement is an
+                 * administrative act, so a second of latency costs nothing,
+                 * and at 100 ms it would double this poller's query rate to
+                 * chase an event that happens a handful of times a year. The
+                 * severing itself is the main loop's job — pollRetiredAssets
+                 * only records who to sever, because disconnect() blocks.
+                 * Worst case observed-to-severed is therefore this second plus
+                 * the main loop's next 100 ms tick. */
+                if ((poll_counter % ticks_per_sec) == 0)
+                {
+                    clients->pollRetiredAssets(dbc.get());
+                }
                 /* Config reads share the poller so the main loop never
                  * touches the DB. First refresh happens immediately
                  * (counter 0) so the caches are primed at startup. */
@@ -535,6 +548,12 @@ auto main(int argc, char *argv[]) -> int
         const bool do_per_config_period = now_ms >= next_config_ms;
         tick_guard.run([&]() -> void {
             clients->sendCommand();
+            /* Every tick, not once a second (todo/80): the poller found these
+             * sessions up to a second ago, and the whole point of the split is
+             * that the blocking half runs promptly on the thread that can
+             * afford to block. Drains to nothing on the overwhelming majority
+             * of ticks, where it costs one uncontended mutex acquisition. */
+            clients->disconnectRetiredClients();
             if (do_per_second)
             {
                 clients->cleanupRemovableClients();

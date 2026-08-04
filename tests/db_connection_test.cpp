@@ -179,6 +179,50 @@ TEST_CASE("db_connection: getCommands returns nullopt when the read connection i
     REQUIRE_FALSE(dbc->getCommands({asset_id}).has_value());
 }
 
+TEST_CASE("db_connection: getAssetId treats a retired asset as unknown, not as an error (todo/80)")
+{
+    /* The three-way split retirement introduces. An active name resolves; a
+     * retired name is a *policy* miss -- an engaged 0, the same answer an
+     * unregistered CN gets, because the database answered successfully and the
+     * answer is "no flyable asset by that name"; and only a read failure is
+     * nullopt. Collapsing the middle case into either of the others is the bug:
+     * as an error it would trip the identify path's read-outage handling, and
+     * as a hit it would let a retired aircraft fly. */
+    LIVE_DB_OR_SKIP(dbc);
+
+    auto active = dbc->getAssetId("test-asset");
+    REQUIRE(active.has_value());
+    REQUIRE(*active != 0);
+
+    auto retired = dbc->getAssetId("retired-asset");
+    REQUIRE(retired.has_value()); /* engaged: the read worked */
+    REQUIRE(*retired == 0);       /* and its answer is "unknown" */
+}
+
+TEST_CASE("db_connection: getRetiredAssets short-circuits empty input without a round-trip (todo/80)")
+{
+    /* Mirrors the getCommands empty-input case: the poller calls this with no
+     * ids whenever nobody is identified, and an empty "IN ()" would be invalid
+     * SQL. Engaged and empty -- "nothing to sever" -- never a failed read. */
+    flight_safety_system::server::db_connection dbc(
+        "db.invalid", 5432, "user", flight_safety_system::secure_string(std::string_view{"pass"}), "db");
+    auto retired = dbc.getRetiredAssets({});
+    REQUIRE(retired.has_value());
+    REQUIRE(retired->empty());
+}
+
+TEST_CASE("db_connection: getRetiredAssets returns nullopt when the read connection is down (todo/80)")
+{
+    /* The direction that matters most on this read. An empty set means "every
+     * one of these is active" and would sever nobody -- indistinguishable from
+     * a successful all-active read, so a retired aircraft would keep flying
+     * through a read outage. The failure must be reported, not flattened. */
+    LIVE_DB_OR_SKIP(dbc);
+    auto asset_id = get_test_asset_id(*dbc);
+    db_disconnect(flight_safety_system::server::db_connection::read_conn_name);
+    REQUIRE_FALSE(dbc->getRetiredAssets({asset_id}).has_value());
+}
+
 TEST_CASE("db_connection: recordRtt writes a row without error")
 {
     LIVE_DB_OR_SKIP(dbc);
@@ -358,7 +402,87 @@ public:
     auto operator=(scoped_truncated_server_active &&) -> scoped_truncated_server_active & = delete;
     ~scoped_truncated_server_active() { CHECK(set_truncated_server_active(false) == 0); }
 };
+
+/* Creates an asset for one test to retire and reactivate, and removes it again
+ * however the test ends. A dedicated row rather than the shared 'retired-asset'
+ * fixture: a failed assertion partway through must not be able to leave that
+ * one active, which would silently turn it into a second flyable asset for
+ * every later test. Destructor uses CHECK, not REQUIRE, for the same
+ * noexcept-unwinding reason as scoped_truncated_server_active above. */
+class scoped_lifecycle_asset {
+public:
+    scoped_lifecycle_asset()
+    {
+        REQUIRE(run_psql("DELETE FROM assets_asset WHERE name = 'lifecycle-asset'") == 0);
+        REQUIRE(run_psql("INSERT INTO assets_asset (name) VALUES ('lifecycle-asset')") == 0);
+    }
+    scoped_lifecycle_asset(const scoped_lifecycle_asset &) = delete;
+    scoped_lifecycle_asset(scoped_lifecycle_asset &&) = delete;
+    auto operator=(const scoped_lifecycle_asset &) -> scoped_lifecycle_asset & = delete;
+    auto operator=(scoped_lifecycle_asset &&) -> scoped_lifecycle_asset & = delete;
+    ~scoped_lifecycle_asset() { CHECK(run_psql("DELETE FROM assets_asset WHERE name = 'lifecycle-asset'") == 0); }
+
+    static auto retire() -> int
+    {
+        return run_psql("UPDATE assets_asset SET retired_at = NOW() WHERE name = 'lifecycle-asset'");
+    }
+    static auto reactivate() -> int
+    {
+        return run_psql("UPDATE assets_asset SET retired_at = NULL WHERE name = 'lifecycle-asset'");
+    }
+};
 } // namespace
+
+TEST_CASE("db_connection: an asset survives retirement and reactivation under one id (todo/80)")
+{
+    /* The full reversible lifecycle against a real database, which is the part
+     * unit tests with a mock cannot pin: that retirement is a column on a row
+     * that stays put, so reactivation restores the *same* id and the history
+     * hanging off it. If retirement were ever implemented as a delete, this is
+     * the test that would fail.
+     *
+     * It also covers the batched read's subset contract in the same pass:
+     * active assets are absent from the result, not present-and-false. */
+    LIVE_DB_OR_SKIP(dbc);
+    scoped_lifecycle_asset fixture;
+    auto active_id = get_test_asset_id(*dbc);
+
+    /* Captured while active — the id under test for the rest of the case. */
+    auto original = dbc->getAssetId("lifecycle-asset");
+    REQUIRE(original.has_value());
+    REQUIRE(*original != 0);
+    {
+        auto retired = dbc->getRetiredAssets({active_id, *original});
+        REQUIRE(retired.has_value());
+        REQUIRE(retired->empty());
+    }
+
+    REQUIRE(scoped_lifecycle_asset::retire() == 0);
+    /* Identification now misses: engaged (the read worked) and 0 (no flyable
+     * asset by that name), never nullopt. */
+    auto while_retired = dbc->getAssetId("lifecycle-asset");
+    REQUIRE(while_retired.has_value());
+    REQUIRE(*while_retired == 0);
+    /* And the already-identified session's id is reported for severing, while
+     * the active asset alongside it in the same batch is not. */
+    {
+        auto retired = dbc->getRetiredAssets({active_id, *original});
+        REQUIRE(retired.has_value());
+        REQUIRE(retired->count(*original) == 1);
+        REQUIRE(retired->count(active_id) == 0);
+        REQUIRE(retired->size() == 1);
+    }
+
+    REQUIRE(scoped_lifecycle_asset::reactivate() == 0);
+    auto after = dbc->getAssetId("lifecycle-asset");
+    REQUIRE(after.has_value());
+    REQUIRE(*after == *original); /* the same row, not a new one */
+    {
+        auto retired = dbc->getRetiredAssets({active_id, *original});
+        REQUIRE(retired.has_value());
+        REQUIRE(retired->empty());
+    }
+}
 
 TEST_CASE("db_connection: getActiveServers fails the read when a server address is truncated (todo/41)")
 {
