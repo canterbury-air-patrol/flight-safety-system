@@ -40,7 +40,9 @@ The flight-safety-system server uses a [postgresql](https://www.postgresql.org/)
 
 The [web frontend](https://github.com/canterbury-air-patrol/flight-safety-system-web/) is a separate project and will need to be set up and connected to the database before the server is run.
 
-The tables belong to that project, and its migrations must be applied first. This release requires its `assets` migration **0016 or later**, which provides the command-acknowledgement columns (`dispatch_id`, `ack_state`, `ack_timestamp`, `ack_superseded_by`) on `assets_assetcommand`, and `gps_fix_valid` plus a nullable `position` on `assets_assetposition`. The server checks the schema when it starts and refuses to run against a database that is missing anything it needs, naming what is absent — so an un-migrated database is a startup failure you can read, rather than a fleet-wide disconnection some minutes later. See [docs/decisions/73](docs/decisions/73-startup-schema-verification.md).
+The tables belong to that project, and its migrations must be applied first. This release requires its `assets` migration **0016 or later**, which provides the command-acknowledgement columns (`dispatch_id`, `ack_state`, `ack_timestamp`, `ack_superseded_by`) on `assets_assetcommand`, `retired_at` on `assets_asset`, and `gps_fix_valid` plus a nullable `position` on `assets_assetposition`. The server checks the schema when it starts and refuses to run against a database that is missing anything it needs, naming what is absent — so an un-migrated database is a startup failure you can read, rather than a fleet-wide disconnection some minutes later. See [docs/decisions/73](docs/decisions/73-startup-schema-verification.md).
+
+Retiring an asset in the web frontend takes it out of service here too: it can no longer identify, and a session that is already connected is disconnected within about a second. Clearing the retirement puts it back, under the same asset id and with its history intact — no server restart needed. See [docs/decisions/80](docs/decisions/80-retired-asset-enforcement.md).
 
 Create a [server.json](examples/server.json) file with the correct port and database settings.
 

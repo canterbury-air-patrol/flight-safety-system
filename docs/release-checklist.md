@@ -64,11 +64,19 @@ and cannot recover, because the schema stays wrong
 
 **As of this release, FSS requires fss-web's `assets` migration 0016 or later**,
 which provides `dispatch_id`, `ack_state`, `ack_timestamp` and
-`ack_superseded_by` on `assets_assetcommand` (0008), and `gps_fix_valid` with a
-nullable `position` on `assets_assetposition` (0016). The server verifies this at
-startup and refuses to run against a database without them, so the failure is a
-restart rather than an outage — but the requirement still has to reach whoever
-does the deploy, in the release notes, ahead of it.
+`ack_superseded_by` on `assets_assetcommand` (0008), `retired_at` on
+`assets_asset` (0013), and `gps_fix_valid` with a nullable `position` on
+`assets_assetposition` (0016). The server verifies this at startup and refuses
+to run against a database without them, so the failure is a restart rather than
+an outage — but the requirement still has to reach whoever does the deploy, in
+the release notes, ahead of it.
+
+The floor is unchanged by the retirement work (todo/80): 0013 sits below the
+0016 this release already required. What the release notes must still say is
+what the gate *does* — an operator who upgrades FSS ahead of fss-web gets a
+server that will not start and names the missing column, not one that silently
+keeps flying retired aircraft. That is the intended behaviour, and it surprises
+people who expect a forward-compatible binary.
 
 If this release added or changed any column in `required_columns[]`
 (`src/server-db.pgc`), raise the minimum stated above, here and in the README's
