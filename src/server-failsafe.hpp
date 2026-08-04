@@ -32,7 +32,8 @@ namespace server {
  * *and* gates new admissions (server_clients::setDegraded) so aircraft get one
  * clean comms-loss event instead of a disconnect/reconnect flap into the same
  * unhealthy server. Recovery requires the write queue fully drained, more than
- * recovery_grace_secs with no new failure, drop or probe failure, AND a
+ * the *effective* recovery grace (recovery_grace_secs, backed off per re-trip —
+ * see recoveryGraceMs()) with no new failure, drop or probe failure, AND a
  * *successful health probe* observed on that very tick (todo/78).
  *
  * That last condition is the one field evidence forced. Drain-plus-quiet are
@@ -53,6 +54,19 @@ namespace server {
  * which HANGS rather than fails — against a partitioned or frozen database it
  * returns neither answer, so no counter moves and there is nothing else to
  * notice.
+ *
+ * The probe answers "does a write work right now?", which is the whole question
+ * against a database that is dead or persistently faulted. It is not the
+ * question an *intermittently* faulted one poses (todo/81): a fault whose good
+ * periods outlast the grace window lets every readmission be backed by evidence
+ * that was true when it was taken, and the fleet still moves in and out of its
+ * comms-loss state as the fault returns. So the recovery grace also backs off
+ * per re-trip — the second trip inside backoff_window_ms holds the gate twice as
+ * long, the third three times, capped at recovery_backoff_max. The first trip is
+ * unaffected, so nothing about a one-off incident changes; what grows is the
+ * cost of a fault that keeps coming back, which is what makes a flap a flap. A
+ * cap is required rather than optional: an unbounded multiplier would eventually
+ * refuse a fleet against a database that had genuinely recovered.
  *
  * Thresholds are measured against an injectable IClock, not against a count of
  * tick() calls (todo/70). The caller drives this from a loop whose period is
@@ -96,8 +110,15 @@ public:
     };
 private:
     static constexpr uint64_t ms_per_sec = 1000;
+    /* How close together two trips must be to count as the same run of trips
+     * for the back-off (todo/81). Fixed rather than configurable: it only has to
+     * be long enough that a fault which returns after one hold is still judged
+     * the same fault, and the longest hold the cap allows (at the defaults,
+     * 8 x 15 s) is two orders of magnitude below it. */
+    static constexpr uint64_t backoff_window_ms = 60ULL * 60ULL * ms_per_sec;
     uint64_t disconnect_age_ms;
     uint64_t recovery_grace_ms;
+    uint64_t recovery_backoff_max;
     std::shared_ptr<IClock> clock;
     uint64_t now_ms{0}; // the clock reading taken by the current tick
     uint64_t incident_start_ms{0};
@@ -117,6 +138,18 @@ private:
      * clock keeps the age consistent with the decision it describes — the same
      * reason incidentAgeSecs() exists. */
     uint64_t degraded_since_ms{0};
+    /* Trips in the current run (todo/81): 0 before the first, then 1 for a trip
+     * whose predecessor is older than backoff_window_ms and one more than the
+     * predecessor otherwise. Read only through recoveryGraceMs(), and updated
+     * only at a trip — so the multiplier an episode recovers against is the one
+     * its own trip established, and a run decays by a later trip finding the
+     * previous one stale rather than by anything ticking it down.
+     *
+     * The count doubles as the has-tripped-before flag, for the reason
+     * incident_active exists: last_trip_ms == 0 is a legitimate reading on a
+     * clock that has just started, so a zero timestamp cannot mean "never". */
+    uint64_t recent_trips{0};
+    uint64_t last_trip_ms{0};
     /* An explicit flag rather than incident_start_ms == 0. A monotonic clock
      * that has just started, and every test clock, legitimately reads 0, so a
      * zero sentinel would silently discard an incident that began at the
@@ -124,13 +157,50 @@ private:
     bool incident_active{false};
     bool degraded_{false};
     trip_reason reason_{trip_reason::none};
+    /* Latch the degraded state. Both trip sites route through here so the
+     * probe-counter bookkeeping recovery depends on cannot be updated on one
+     * path and forgotten on the other; what differs between them (whether a
+     * write-failure incident is left standing) stays at the call site. */
+    auto trip(trip_reason t_reason, const db_health_counters &counters) -> event
+    {
+        this->degraded_ = true;
+        this->probe_successes_at_trip = counters.probe_successes;
+        this->last_probe_successes = counters.probe_successes;
+        this->degraded_since_ms = this->now_ms;
+        this->reason_ = t_reason;
+        /* A trip within backoff_window_ms of the previous one continues that
+         * run and lengthens the hold; one after a quiet hour starts afresh at
+         * the configured grace (todo/81). */
+        bool continues_run = this->recent_trips > 0 && (this->now_ms - this->last_trip_ms) <= backoff_window_ms;
+        this->recent_trips = continues_run ? this->recent_trips + 1 : 1;
+        this->last_trip_ms = this->now_ms;
+        return event::tripped;
+    }
+    /* The quiet window this degraded episode must clear: the configured grace
+     * multiplied by the length of the current run of trips, capped (todo/81).
+     * Only the *recovery* role of recovery_grace_ms is backed off. Its other
+     * role — how long failures may pause and still chain into one incident — is
+     * about recognising a single incident, not about how much the fleet should
+     * pay for a repeat, and stretching it would make the trip itself later. */
+    [[nodiscard]] auto recoveryGraceMs() const -> uint64_t
+    {
+        uint64_t multiplier = this->recent_trips < 1 ? 1 : this->recent_trips;
+        return this->recovery_grace_ms *
+               (multiplier > this->recovery_backoff_max ? this->recovery_backoff_max : multiplier);
+    }
 public:
     /* Thresholds are given in seconds, as the config file states them, and held
      * in milliseconds because that is what IClock reports. A null clock falls
-     * back to MonotonicClock, matching fss_client::setClock. */
-    db_failsafe(uint64_t t_disconnect_age_secs, uint64_t t_recovery_grace_secs,
+     * back to MonotonicClock, matching fss_client::setClock.
+     *
+     * t_recovery_backoff_max is a multiplier cap, not a duration: 1 disables the
+     * per-re-trip back-off entirely (todo/81) and restores the behaviour that
+     * shipped with todo/78. 0 is meaningless and is read as 1 rather than as a
+     * grace of zero, which would readmit the fleet on the first quiet tick. */
+    db_failsafe(uint64_t t_disconnect_age_secs, uint64_t t_recovery_grace_secs, uint64_t t_recovery_backoff_max = 1,
                 std::shared_ptr<IClock> t_clock = nullptr)
         : disconnect_age_ms(t_disconnect_age_secs * ms_per_sec), recovery_grace_ms(t_recovery_grace_secs * ms_per_sec),
+          recovery_backoff_max(t_recovery_backoff_max < 1 ? 1 : t_recovery_backoff_max),
           clock(t_clock == nullptr ? std::make_shared<MonotonicClock>() : std::move(t_clock))
     {
     }
@@ -165,7 +235,7 @@ public:
              * they keep producing failures, and a nonempty-but-quiet queue
              * (e.g. a wedged sink) is not health either. */
             bool quiet = !new_write_failure && !new_command_drop && !new_probe_failure &&
-                         (this->now_ms - this->last_event_ms) > this->recovery_grace_ms;
+                         (this->now_ms - this->last_event_ms) > this->recoveryGraceMs();
             /* The positive evidence (todo/78). Without it, drain and quiet are
              * both guaranteed by the severance this state performed, so the
              * degraded state ended on a timer no matter how dead the database
@@ -225,15 +295,10 @@ public:
         }
         if (new_command_drop)
         {
-            this->degraded_ = true;
-            this->probe_successes_at_trip = counters.probe_successes;
-            this->degraded_since_ms = this->now_ms;
-            this->last_probe_successes = counters.probe_successes;
-            this->reason_ = trip_reason::command_drop;
             /* No write-failure incident is implicated, so do not leave one
              * standing for incidentAgeSecs() to report against this trip. */
             this->incident_active = false;
-            return event::tripped;
+            return this->trip(trip_reason::command_drop, counters);
         }
         if (new_write_failure)
         {
@@ -247,16 +312,11 @@ public:
              * check on its own tick. */
             if ((this->now_ms - this->incident_start_ms) >= this->disconnect_age_ms)
             {
-                this->degraded_ = true;
-                this->probe_successes_at_trip = counters.probe_successes;
-                this->degraded_since_ms = this->now_ms;
-                this->last_probe_successes = counters.probe_successes;
-                this->reason_ = trip_reason::write_failure;
-                /* Deliberately left active, unlike the command-drop path: the
-                 * caller logs incidentAgeSecs() with the trip, and nothing
-                 * consults the incident while degraded — the branch above
-                 * returns before reaching it. Recovery clears it. */
-                return event::tripped;
+                /* The incident is deliberately left active, unlike the
+                 * command-drop path: the caller logs incidentAgeSecs() with the
+                 * trip, and nothing consults the incident while degraded — the
+                 * branch above returns before reaching it. Recovery clears it. */
+                return this->trip(trip_reason::write_failure, counters);
             }
         }
         else if (this->incident_active && (this->now_ms - this->last_event_ms) > this->recovery_grace_ms)
@@ -291,6 +351,12 @@ public:
     {
         return this->degraded_ ? (this->now_ms - this->degraded_since_ms) / ms_per_sec : 0;
     }
+    /* The quiet window this episode actually has to clear, in seconds, for the
+     * caller's still-degraded log. The configured value is the right number to
+     * report only on the first trip of a run; after that, logging it would tell
+     * an operator watching a flapping database to expect a readmission several
+     * multiples of the hold too early (todo/81). */
+    [[nodiscard]] auto recoveryGraceSecs() const -> uint64_t { return this->recoveryGraceMs() / ms_per_sec; }
 };
 
 } // namespace server
