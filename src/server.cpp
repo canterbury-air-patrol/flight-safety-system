@@ -102,6 +102,11 @@ auto main(int argc, char *argv[]) -> int
      * While degraded: the quiet window that, once the write queue has also
      * drained, ends the degraded state and readmits sessions (todo/47). */
     constexpr uint64_t default_db_write_failure_recovery_grace_secs = 15;
+    /* todo/81: how many times the recovery grace above may be multiplied for a
+     * database that keeps failing (see server-failsafe.hpp). At the two defaults
+     * a first trip holds the gate for 15s and an eighth trip within the hour
+     * holds it for two minutes. 1 disables the back-off. */
+    constexpr uint64_t default_db_write_failure_recovery_backoff_max = 8;
     constexpr unsigned int default_tls_handshake_timeout_ms =
         flight_safety_system::transport_ssl::default_handshake_timeout_ms;
     constexpr std::size_t default_max_concurrent_handshakes = 64;
@@ -122,6 +127,7 @@ auto main(int argc, char *argv[]) -> int
     auto duplicate_identity_policy = default_duplicate_identity_policy;
     uint64_t db_write_failure_disconnect_secs = default_db_write_failure_disconnect_secs;
     uint64_t db_write_failure_recovery_grace_secs = default_db_write_failure_recovery_grace_secs;
+    uint64_t db_write_failure_recovery_backoff_max = default_db_write_failure_recovery_backoff_max;
     unsigned int tls_handshake_timeout_ms = default_tls_handshake_timeout_ms;
     std::size_t max_concurrent_handshakes = default_max_concurrent_handshakes;
     std::string ca_public_key;
@@ -298,6 +304,20 @@ auto main(int argc, char *argv[]) -> int
         if (config.isMember("db_write_failure_recovery_grace_secs"))
         {
             db_write_failure_recovery_grace_secs = config["db_write_failure_recovery_grace_secs"].asUInt64();
+        }
+        if (config.isMember("db_write_failure_recovery_backoff_max"))
+        {
+            db_write_failure_recovery_backoff_max = config["db_write_failure_recovery_backoff_max"].asUInt64();
+        }
+        if (db_write_failure_recovery_backoff_max == 0)
+        {
+            /* A multiplier of 0 would mean a recovery grace of 0 -- readmitting
+             * the fleet on the first quiet tick, which is the opposite of what
+             * this setting is for. 1, not 0, is how the back-off is disabled. */
+            FSS_LOG_WARN("server", "db_write_failure_recovery_backoff_max must be > 0 (1 disables the back-off); "
+                                   "using default "
+                                       << default_db_write_failure_recovery_backoff_max);
+            db_write_failure_recovery_backoff_max = default_db_write_failure_recovery_backoff_max;
         }
         if (config.isMember("tls_handshake_timeout_ms"))
         {
@@ -562,7 +582,8 @@ auto main(int argc, char *argv[]) -> int
                 using flight_safety_system::server::db_failsafe;
                 static uint64_t last_failure_count = 0;
                 static uint64_t last_command_dropped = 0;
-                static db_failsafe failsafe(db_write_failure_disconnect_secs, db_write_failure_recovery_grace_secs);
+                static db_failsafe failsafe(db_write_failure_disconnect_secs, db_write_failure_recovery_grace_secs,
+                                            db_write_failure_recovery_backoff_max);
                 uint64_t current_failures = writer->write_failure_count();
                 if (current_failures != last_failure_count)
                 {
@@ -625,8 +646,11 @@ auto main(int argc, char *argv[]) -> int
                          * write actually succeeded on the connection that
                          * failed. The e2e suite matches this line on its
                          * "DB fail-safe recovered" prefix only. */
+                        /* The window the episode actually cleared, which after a
+                         * repeat trip is a multiple of the configured grace
+                         * (todo/81), not the configured value itself. */
                         FSS_LOG_ERROR("server", "DB fail-safe recovered: write queue drained, quiet for "
-                                                    << db_write_failure_recovery_grace_secs
+                                                    << failsafe.recoveryGraceSecs()
                                                     << "s, and a probe write succeeded; accepting sessions again");
                         break;
                     case db_failsafe::event::none: break;
@@ -650,9 +674,8 @@ auto main(int argc, char *argv[]) -> int
                             "DB fail-safe still degraded after "
                                 << failsafe.degradedAgeSecs()
                                 << "s; sessions stay refused until the write queue is drained, quiet for "
-                                << db_write_failure_recovery_grace_secs
-                                << "s and a probe write has succeeded (queue depth=" << writer->pending_count()
-                                << ", probe successes=" << writer->probe_success_count()
+                                << failsafe.recoveryGraceSecs() << "s and a probe write has succeeded (queue depth="
+                                << writer->pending_count() << ", probe successes=" << writer->probe_success_count()
                                 << ", failures=" << writer->probe_failure_count()
                                 << ", inconclusive=" << writer->probe_inconclusive_count() << ", last probe error: "
                                 << (probe_error.empty() ? std::string{"none"} : probe_error) << ")");

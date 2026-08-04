@@ -49,8 +49,11 @@ namespace {
  * explicitly. */
 class FailsafeHarness {
 public:
-    FailsafeHarness(uint64_t t_disconnect_age_secs, uint64_t t_recovery_grace_secs)
-        : f(t_disconnect_age_secs, t_recovery_grace_secs, clock)
+    /* The back-off multiplier cap defaults to 1 — no back-off — so every case
+     * written before todo/81 measures the configured grace and reads unchanged.
+     * The cases that are about the back-off pass it explicitly. */
+    FailsafeHarness(uint64_t t_disconnect_age_secs, uint64_t t_recovery_grace_secs, uint64_t t_recovery_backoff_max = 1)
+        : f(t_disconnect_age_secs, t_recovery_grace_secs, t_recovery_backoff_max, clock)
     {
     }
     /* One nominal second of the caller's loop, against a database whose probe
@@ -74,7 +77,25 @@ public:
         this->clock->advance(ms);
         return this->f.tick(counters);
     }
+    /* Tick a degraded monitor against a database that is answering — healthy
+     * probe, no new failures, empty queue — until it recovers, and report how
+     * many nominal seconds that took. The bound is there so a regression that
+     * stops recovery altogether fails the case instead of hanging the suite; it
+     * is far above any window the cases below configure. */
+    auto secondsToRecover(uint64_t write_failures, uint64_t command_drops) -> uint64_t
+    {
+        constexpr uint64_t bound = 600;
+        for (uint64_t secs = 1; secs <= bound; secs++)
+        {
+            if (this->tick(write_failures, command_drops, 0) == db_failsafe::event::recovered)
+            {
+                return secs;
+            }
+        }
+        return 0;
+    }
     [[nodiscard]] auto degraded() const -> bool { return this->f.degraded(); }
+    [[nodiscard]] auto recoveryGraceSecs() const -> uint64_t { return this->f.recoveryGraceSecs(); }
     [[nodiscard]] auto wantsProbe() const -> bool { return this->f.wantsProbe(); }
     [[nodiscard]] auto reason() const -> db_failsafe::trip_reason { return this->f.reason(); }
     [[nodiscard]] auto incidentAgeSecs() const -> uint64_t { return this->f.incidentAgeSecs(); }
@@ -747,4 +768,126 @@ TEST_CASE("db_failsafe: degradedAgeSecs measures the severance, not the incident
         REQUIRE(f.tickCounters(1000, {0, 1, 0, 0, 0}) == db_failsafe::event::none);
         REQUIRE(f.degradedAgeSecs() == 1);
     }
+}
+
+TEST_CASE("db_failsafe: a repeated trip holds the gate proportionally longer (todo/81)")
+{
+    /* The intermittent-fault case todo/78 left open. Every readmission below is
+     * backed by evidence that was true when it was taken — a fresh probe
+     * success after a full quiet window — and the fault still comes back, so
+     * without the back-off the aircraft would keep cycling in and out of its
+     * comms-loss state at the incident timescale. What grows is the cost of the
+     * repetition; the first trip is untouched. */
+    FailsafeHarness f(0, 3, 4);
+    uint64_t failures = 0;
+    /* First trip of the run: the configured grace, so recovery lands on the
+     * first tick strictly past it. */
+    REQUIRE(f.tick(++failures, 0, 0) == db_failsafe::event::tripped);
+    REQUIRE(f.recoveryGraceSecs() == 3);
+    REQUIRE(f.secondsToRecover(failures, 0) == 4);
+    /* The fault returns as soon as the readmitted fleet writes again. */
+    REQUIRE(f.tick(++failures, 0, 0) == db_failsafe::event::tripped);
+    REQUIRE(f.recoveryGraceSecs() == 6);
+    REQUIRE(f.secondsToRecover(failures, 0) == 7);
+    REQUIRE(f.tick(++failures, 0, 0) == db_failsafe::event::tripped);
+    REQUIRE(f.recoveryGraceSecs() == 9);
+    REQUIRE(f.secondsToRecover(failures, 0) == 10);
+}
+
+TEST_CASE("db_failsafe: the recovery back-off is capped (todo/81)")
+{
+    /* Unbounded growth would eventually refuse a fleet against a database that
+     * had genuinely recovered — the fail-safe's own failure mode, arrived at
+     * from the cautious side. */
+    FailsafeHarness f(0, 3, 2);
+    uint64_t failures = 0;
+    REQUIRE(f.tick(++failures, 0, 0) == db_failsafe::event::tripped);
+    REQUIRE(f.secondsToRecover(failures, 0) == 4);
+    REQUIRE(f.tick(++failures, 0, 0) == db_failsafe::event::tripped);
+    REQUIRE(f.secondsToRecover(failures, 0) == 7); // 2x, the cap
+    for (int i = 0; i < 3; i++)
+    {
+        REQUIRE(f.tick(++failures, 0, 0) == db_failsafe::event::tripped);
+        REQUIRE(f.recoveryGraceSecs() == 6);
+        REQUIRE(f.secondsToRecover(failures, 0) == 7);
+    }
+}
+
+TEST_CASE("db_failsafe: a cap of 1 disables the back-off (todo/81)")
+{
+    /* The escape hatch, and the pre-todo/81 behaviour: a deployment that would
+     * rather readmit early every time can say so. A cap of 0 is read as 1 by
+     * the constructor rather than as a grace of zero, which would readmit on
+     * the first quiet tick. */
+    for (uint64_t cap : {uint64_t{1}, uint64_t{0}})
+    {
+        FailsafeHarness f(0, 3, cap);
+        uint64_t failures = 0;
+        for (int i = 0; i < 4; i++)
+        {
+            REQUIRE(f.tick(++failures, 0, 0) == db_failsafe::event::tripped);
+            REQUIRE(f.recoveryGraceSecs() == 3);
+            REQUIRE(f.secondsToRecover(failures, 0) == 4);
+        }
+    }
+}
+
+TEST_CASE("db_failsafe: a trip after a quiet hour starts a fresh run (todo/81)")
+{
+    /* The back-off is about a fault that keeps coming back, not a tally kept
+     * for the life of the process: an unrelated incident tomorrow must cost the
+     * fleet no more than today's first one did. */
+    FailsafeHarness f(0, 3, 4);
+    uint64_t failures = 0;
+    REQUIRE(f.tick(++failures, 0, 0) == db_failsafe::event::tripped);
+    REQUIRE(f.secondsToRecover(failures, 0) == 4);
+    REQUIRE(f.tick(++failures, 0, 0) == db_failsafe::event::tripped);
+    REQUIRE(f.recoveryGraceSecs() == 6);
+    REQUIRE(f.secondsToRecover(failures, 0) == 7);
+    /* Two hours of a healthy database, then a new fault. */
+    constexpr uint64_t two_hours_ms = 2 * 60 * 60 * 1000;
+    REQUIRE(f.tickAfter(two_hours_ms, failures, 0, 0) == db_failsafe::event::none);
+    REQUIRE(f.tick(++failures, 0, 0) == db_failsafe::event::tripped);
+    REQUIRE(f.recoveryGraceSecs() == 3);
+    REQUIRE(f.secondsToRecover(failures, 0) == 4);
+}
+
+TEST_CASE("db_failsafe: the back-off applies to a command-drop trip too (todo/81)")
+{
+    /* Both trip triggers latch the same degraded state and both are readmitted
+     * by the same window, so a database dropping command writes intermittently
+     * flaps exactly as a write-failing one does. */
+    FailsafeHarness f(5, 3, 4);
+    uint64_t drops = 0;
+    REQUIRE(f.tick(0, ++drops, 0) == db_failsafe::event::tripped);
+    REQUIRE(f.reason() == db_failsafe::trip_reason::command_drop);
+    REQUIRE(f.secondsToRecover(0, drops) == 4);
+    REQUIRE(f.tick(0, ++drops, 0) == db_failsafe::event::tripped);
+    REQUIRE(f.recoveryGraceSecs() == 6);
+    REQUIRE(f.secondsToRecover(0, drops) == 7);
+}
+
+TEST_CASE("db_failsafe: the back-off does not stretch the trip threshold (todo/81)")
+{
+    /* recovery_grace_secs has a second role outside a degraded episode: how
+     * long failures may pause and still chain into one incident. Backing that
+     * off too would make each successive trip *later* as well as longer — the
+     * fleet would keep writing into a database already known to be failing. */
+    FailsafeHarness f(5, 3, 4);
+    uint64_t failures = 0;
+    for (int age = 0; age < 5; age++)
+    {
+        REQUIRE(f.tick(++failures, 0, 0) == db_failsafe::event::none);
+    }
+    REQUIRE(f.tick(++failures, 0, 0) == db_failsafe::event::tripped);
+    REQUIRE(f.secondsToRecover(failures, 0) == 4);
+    /* Second incident, same shape: the trip still needs failures spanning
+     * exactly disconnect_age_secs, and the incident-chaining window is still
+     * the configured 3s — only the hold that follows is doubled. */
+    for (int age = 0; age < 5; age++)
+    {
+        REQUIRE(f.tick(++failures, 0, 0) == db_failsafe::event::none);
+    }
+    REQUIRE(f.tick(++failures, 0, 0) == db_failsafe::event::tripped);
+    REQUIRE(f.secondsToRecover(failures, 0) == 7);
 }
