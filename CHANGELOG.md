@@ -288,6 +288,16 @@ not a fleet-wide disconnection some minutes later.
   where a mismatch falls.
 
 ### Fixed
+- **The shipped systemd unit now retries the startup refusals this release
+  introduces.** The server deliberately exits rather than run against a
+  database that is unreachable, cannot be introspected, or is missing the
+  required fss-web migration — a design that leans on the supervisor retrying —
+  but the installed `fss-server.service` had no `Restart=` line, so a host that
+  booted before PostgreSQL (or an FSS upgraded ahead of fss-web) stayed down
+  until someone noticed. The unit now sets `Restart=on-failure` with a
+  `RestartSec` chosen to stay inside systemd's default start-rate limit, and
+  orders itself after `network-online.target` and a co-hosted
+  `postgresql.service` so the common boot race never needs the retry at all.
 - **The DB fail-safe no longer recovers on silence** (todo/78,
   `docs/decisions/34-45-47-db-failsafe-latch.md`). Recovery required the write
   queue drained and no failure for the recovery grace — two statements about the
