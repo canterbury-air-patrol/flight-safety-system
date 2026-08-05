@@ -1,7 +1,7 @@
 # 25 — Transport callbacks run with the connection's message lock released
 
-**Standing constraint on the transport API.** Decided and shipped 2026-07-25.
-Carries an ABI break: sonames `.so.3` → `.so.4`.
+**Standing constraint on the transport API.** Decided and shipped 2026-07-25,
+released in 1.3.0. Carries an ABI break: sonames `.so.3` → `.so.4`.
 
 ## The constraint
 

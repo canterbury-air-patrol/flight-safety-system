@@ -1,6 +1,6 @@
 # 80 — Enforcing fss-web asset retirement
 
-Status: implemented. Requires fss-web `assets` migration 0013 or later, which is
+Status: implemented, shipped in 1.3.0. Requires fss-web `assets` migration 0013 or later, which is
 already below the deployed floor (0016, decision 76) — so this raises no minimum
 and needs no deployment coordination beyond the note at the end.
 

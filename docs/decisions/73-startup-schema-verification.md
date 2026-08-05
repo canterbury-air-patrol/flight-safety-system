@@ -1,6 +1,6 @@
 # 73 — The server verifies the database schema at startup and refuses to run without it
 
-**Decided** 2026-07-28. Unreleased.
+**Decided** 2026-07-28. Shipped in 1.3.0.
 
 ## Context
 

@@ -1,6 +1,6 @@
 # 66/67 — the client fans out through per-server workers, and prunes what it learns
 
-**Decided** 2026-07-26. Config fields `learned_server_expiry_ms` and
+**Decided** 2026-07-26. Shipped in 1.3.0. Config fields `learned_server_expiry_ms` and
 `max_learned_servers` in the client JSON; defaults
 `default_learned_server_expiry_ms` (60 s) and `default_max_learned_servers`
 (16) in `src/fss-client-ssl.hpp`. Broke the ABI of `libfss-client-ssl`; all

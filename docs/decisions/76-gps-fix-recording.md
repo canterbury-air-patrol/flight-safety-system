@@ -1,6 +1,6 @@
 # 76 — Recording whether a reported position is GPS-backed
 
-Status: implemented. Supersedes the transition-table shape sketched in
+Status: implemented, shipped in 1.3.0. Supersedes the transition-table shape sketched in
 `todo/76`; fss-web chose to carry the state on the position row instead.
 
 ## The problem
