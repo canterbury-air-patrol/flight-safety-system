@@ -1,8 +1,23 @@
 [Unit]
 Description=Flight-Safety-System Server
+# The server refuses to start rather than run degraded: an unreachable
+# database, a failed schema introspection, or a missing fss-web migration all
+# exit(1) on the expectation that the supervisor retries
+# (docs/decisions/73-startup-schema-verification.md). These orderings make the
+# common transient case — booting before the network or a co-hosted PostgreSQL
+# is up — not require a retry at all; postgresql.service is ignored where the
+# database is remote.
+Wants=network-online.target
+After=network-online.target postgresql.service
 
 [Service]
 ExecStart=@PREFIX@/fss-server
+# The retry the refuse-to-start design leans on. 5 s keeps two starts inside
+# systemd's default 10 s rate-limit window (StartLimitBurst=5), so a database
+# that stays down — or an fss-web migration not yet applied — is retried
+# indefinitely instead of tripping the start limit and staying down after it.
+Restart=on-failure
+RestartSec=5
 
 [Install]
 WantedBy=multi-user.target

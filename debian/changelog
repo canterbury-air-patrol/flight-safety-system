@@ -40,6 +40,11 @@ flight-safety-system (1.3.0) stable; urgency=medium
     db_write_failure_disconnect_ticks is renamed to _secs (the old key is
     still accepted, with a warning).
   * secure_string equality is now constant-time.
+  * fss-server.service now sets Restart=on-failure and orders itself after
+    network-online.target and a co-hosted postgresql.service: the startup
+    refusals above lean on the supervisor retrying, and the previous unit
+    never did, leaving the service down after a boot-order race or an
+    upgrade applied ahead of fss-web's migrations.
 
  -- Scott Parlane <sjp@canterburyairpatrol.org>  Wed, 05 Aug 2026 10:00:00 +1200
 
