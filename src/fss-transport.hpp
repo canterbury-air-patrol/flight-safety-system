@@ -456,10 +456,11 @@ public:
 
 /* NOTE (todo/12 C7): a listen socket is-a fss_connection only to reuse the fd +
  * recv-thread lifecycle; it inherits sendMsg/getMsg/message-queue members that
- * are meaningless for it. The clean shape is a small fd_owner base shared by
- * sibling fss_listen / fss_connection. Deferred deliberately: it is an ABI break
- * (a -version-info bump — all four libs export this header) not worth doing on
- * its own; fold it into the next transport rework. */
+ * are meaningless for it. Nothing calls them on a listener. The clean shape (a
+ * small fd_owner base shared by sibling fss_listen / fss_connection) is
+ * deliberately deferred to the next transport rework, NOT merely to the next
+ * release that breaks the ABI — see
+ * docs/decisions/12-listen-socket-is-a-connection.md. */
 class fss_listen : public fss_connection {
 private:
     uint16_t port;

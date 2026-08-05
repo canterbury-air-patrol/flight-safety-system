@@ -52,6 +52,34 @@ several `todo/` items is filed under all of them (`34-45-47-…`).
 | [76 — a position report records whether it is GPS-backed](decisions/76-gps-fix-recording.md) | Safety visibility |
 | [80 — a retired asset cannot fly](decisions/80-retired-asset-enforcement.md) | Server policy |
 
+## Comments and decisions: which carries what
+
+Both are load-bearing and neither replaces the other, but they answer different
+questions and should stop holding two copies of the same argument (todo/75).
+
+- **A code comment** is read by someone holding the function signature, usually
+  mid-edit. It carries the **invariant or constraint they could get wrong**:
+  lock ordering, lifetime proofs, "this must not be called with X held", the
+  claim plus a citation. The test for keeping text inline is *would someone
+  editing this line get it wrong without it?*
+- **A decision file** is read by someone asking why the code is shaped this way,
+  possibly years later, holding only the repository. It carries the
+  **argument**: the context, the alternatives, the evidence behind each
+  rejection, and what would justify revisiting.
+
+Two consequences, both applied **opportunistically** — whenever a file is
+touched for other reasons, never as a sweep or a dedicated churn commit:
+
+1. Where a decision file exists, a header comment that restates its argument
+   shrinks to the invariant plus `see docs/decisions/NN-…`. Motivation,
+   alternatives and history go; invariants and proofs stay.
+2. Rationale found existing **only** as a comment gets promoted to a decision
+   file. This is the direction with independent value: an argument that lives in
+   one comment is one refactor away from being lost, and unlike a duplicate it
+   cannot be recovered from anywhere else.
+   [12 (C7)](decisions/12-listen-socket-is-a-connection.md) was promoted exactly
+   this way.
+
 ## Citing a decision
 
 New code comments, `CHANGELOG.md` entries and commit messages should cite the
