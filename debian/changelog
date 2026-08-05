@@ -1,3 +1,48 @@
+flight-safety-system (1.3.0) stable; urgency=medium
+
+  * SONAME bump: all four libraries move .so.3 -> .so.4. Consumers must be
+    rebuilt; a same-soname mix of an old library and the new headers
+    corrupts object layout at runtime rather than failing to link.
+  * Deployments now require fss-web's assets migration 0016 or later. The
+    server verifies the database schema before the listener binds and
+    refuses to start against a database missing anything it uses, naming
+    what is absent -- previously an un-migrated deployment started cleanly,
+    accepted every aircraft, and then severed the whole fleet on the first
+    command dispatch, permanently.
+  * A retired asset can no longer fly: identification refuses one, and a
+    session whose asset is retired mid-flight is severed within about 1.1
+    seconds. Clearing retired_at readmits the aircraft under its original
+    id without a restart.
+  * A position report now records whether its coordinates are backed by a
+    GPS fix, instead of being discarded: a dead-reckoned estimate keeps its
+    coordinates and is marked, a report carrying none stores NULL geometry.
+  * The DB fail-safe no longer recovers on silence. Recovery needs a health
+    probe -- a real write on the failing connection, rolled back -- to have
+    succeeded on the recovering tick, so a dead database no longer cycles
+    aircraft in and out of comms-loss every ~20 seconds. A database that
+    keeps failing intermittently now holds the admission gate longer on
+    each repeat trip, capped by the new
+    db_write_failure_recovery_backoff_max setting.
+  * A command issued once no longer destroys and rewrites its own stored
+    acknowledgement every 10 seconds; acks are matched on the command row's
+    primary key and redelivery stops at a terminal ack, scoped to the
+    connection.
+  * Database read failures on the command and SMM paths are no longer
+    indistinguishable from an empty result, so a transient outage cannot
+    clear an aircraft's pending command or wipe its cached settings.
+  * The client library's sendMsgAll() and attemptReconnect() are now
+    non-blocking -- each server has its own outbound worker -- so one
+    black-holed server can no longer hold telemetry to every healthy one.
+    Clients also expire and cap the servers they learn from broadcasts, and
+    count a server as service only once it has admitted them.
+  * The fail-safe's thresholds are measured against a clock rather than
+    counted loop iterations; the config key
+    db_write_failure_disconnect_ticks is renamed to _secs (the old key is
+    still accepted, with a warning).
+  * secure_string equality is now constant-time.
+
+ -- Scott Parlane <sjp@canterburyairpatrol.org>  Wed, 05 Aug 2026 10:00:00 +1200
+
 flight-safety-system (1.2.1) stable; urgency=medium
 
   * Stop a two-server client from tearing down and redialling both healthy

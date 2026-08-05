@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-08-05
+
+**Consumers must rebuild.** All four library sonames bump `.so.3` → `.so.4`
+(`-version-info 4:0:0`); see the ABI break note under *Changed*. A same-soname
+mix of an old library and the new headers corrupts object layout at runtime
+rather than failing to link.
+
+**Deployments require `fss-web`'s `assets` migration 0016 or later.** The
+server verifies this at startup and refuses to run without it, naming what is
+missing — an FSS upgraded ahead of `fss-web` is a startup failure you can read,
+not a fleet-wide disconnection some minutes later.
+
 ### Added
 - **A retired asset can no longer fly** (todo/80,
   `docs/decisions/80-retired-asset-enforcement.md`). `fss-web` retires an asset
@@ -80,8 +92,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   an ABI break reached a tag unbumped. Open work items stay in `todo/`.
   Citations in the public headers and the fail-safe monitor now point at the
   tracked documents; the rest are retargeted as those files are next touched.
+- Two further design records, both documentation-only (todo/71, todo/75).
+  **The client does not validate the server's v2 message sequence, and that is
+  deliberate** (`docs/decisions/71-client-sequence-not-enforced.md`): the server
+  enforces the in-order/duplicate check on what it receives and disconnects on a
+  mismatch, the client checks nothing, and until now nothing said whether that
+  asymmetry was a decision or an oversight. It is a decision — TLS provides the
+  real reorder and replay guarantee, and an aircraft that dropped its server
+  connection over one bad sequence number would trade a diagnostic for a
+  control-link outage — so mirroring the server, disconnect included, is
+  recorded as explicitly rejected. Third-party client implementations are free
+  to add a check of their own. **And the `fss_listen`-is-a-`fss_connection`
+  wart** (`docs/decisions/12-listen-socket-is-a-connection.md`) is now recorded
+  where it can be found: a listening socket inherits a send/receive surface that
+  is meaningless for it, the clean shape is a shared `fd_owner` base, and the
+  refactor is deferred to a transport rework rather than to the next release
+  that happens to break the ABI. `docs/README.md` gains the convention that
+  produced both: a comment carries the invariant someone mid-edit could get
+  wrong, a decision file carries the argument, and rationale found living only
+  in a comment gets promoted.
 
 ### Changed
+- **A database that keeps failing now holds the admission gate longer each
+  time** (todo/81, `docs/decisions/34-45-47-db-failsafe-latch.md`). The health
+  probe below answers "does a write work right now?", which is the whole
+  question against a database that is dead or persistently faulted — it never
+  answers yes, so the fail-safe holds. An *intermittently* faulted one answers
+  yes honestly, over and over: the queue drains, the window goes quiet, a probe
+  succeeds, the fleet is readmitted, real telemetry resumes, the fault returns,
+  and the fail-safe trips again. Every readmission is backed by evidence that
+  was true when it was taken, and an aircraft is still being moved in and out of
+  its comms-loss state by a fault the server has already seen. The recovery
+  grace is now multiplied by the length of the current run of trips, capped: a
+  trip within an hour of the previous one continues that run, a trip after a
+  quiet hour starts afresh. The first trip of a run is unaffected, so a one-off
+  incident behaves exactly as before; what grows is the cost of a fault that
+  keeps coming back. The new config field
+  **`db_write_failure_recovery_backoff_max`** (default 8) caps the multiplier,
+  so at the default 15 s grace a first trip holds the gate for 15 s and an
+  eighth within the hour holds it for two minutes; `1` disables the back-off
+  entirely. Only the recovery role of `db_write_failure_recovery_grace_secs` is
+  backed off — its other role, how long failures may pause and still chain into
+  one incident, is untouched, since stretching that would make each successive
+  trip later as well as longer. The still-degraded and recovered log lines now
+  report the effective window rather than the configured one.
 - **The DB fail-safe's thresholds are measured in real time, not in loop
   iterations** (todo/70). `db_failsafe` opened each tick with `elapsed_secs++`
   and compared every threshold against that counter, but the caller advances it
@@ -234,6 +288,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   where a mismatch falls.
 
 ### Fixed
+- **The DB fail-safe no longer recovers on silence** (todo/78,
+  `docs/decisions/34-45-47-db-failsafe-latch.md`). Recovery required the write
+  queue drained and no failure for the recovery grace — two statements about the
+  *absence* of failure, both of which the trip's own action guarantees:
+  severing every session and refusing new ones removes everything that could
+  produce a failure, so no telemetry arrives, nothing is queued and nothing
+  fails. Drained-and-quiet was therefore satisfied by construction about 15 s
+  after every trip, whatever the database was doing. Against a permanently dead
+  database — observed in the field: PostgreSQL hit a `PANIC` on a full disk and
+  its own crash recovery could not write either — that made a ~20 second cycle
+  forever, each turn taking a connected aircraft out of and back into its
+  comms-loss failsafe, which is the opposite of the one clean latched event the
+  fail-safe exists to produce. Recovery now additionally requires a **health
+  probe** to have succeeded: a real INSERT on the write connection that failed,
+  rolled back so nothing fictional is stored. The probe gates the quiet window
+  rather than replacing it, and the success must be observed on the recovering
+  tick itself — a probe that *hangs*, against a partitioned or frozen database,
+  returns neither answer, so the absence of fresh evidence is the only thing
+  that can see it. A read-based check (`SELECT 1`) would not do: a write-only
+  fault leaves reads perfectly healthy, which is precisely the fault class this
+  exists for. The probe runs on the write queue's worker thread, so no
+  synchronous database work reaches the main loop. While degraded, the server
+  now also logs once a minute naming the elapsed time, the probe counters and
+  the last probe error, since silence is now the *correct* outcome against a
+  dead database and silence is what an operator cannot act on.
+- **A server that refuses the client no longer counts as a working server**
+  (todo/79). `fss_client` counted a server as service once the TCP connection
+  and TLS handshake completed, but admission is a later, server-side decision:
+  a server that is degraded (or that rejects the identity) accepts the
+  connection and then refuses the session. A client locked out by every server
+  it knew therefore reported itself connected, and the connection-status
+  callback — the aircraft's own signal that it has a control link — said so too.
+  A server now counts only once it has admitted us, cleared whenever the
+  connection ends so a reconnect into a refusing server cannot inherit the
+  previous session's admission. This is the client half of the same reconnect
+  flap todo/78 fixes on the server.
 - **A database read failure is no longer reported as an empty result on the
   command and SMM paths** (todo/69, extending
   `docs/decisions/24-database-read-error-control-flow.md`). Two of the four
@@ -890,6 +980,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.12.3] - 2025-11-07
 
+[1.3.0]: https://github.com/canterbury-air-patrol/flight-safety-system/compare/1.2.1...1.3.0
+[1.2.1]: https://github.com/canterbury-air-patrol/flight-safety-system/compare/1.2.0...1.2.1
 [1.2.0]: https://github.com/canterbury-air-patrol/flight-safety-system/compare/1.1.1...1.2.0
 [1.1.1]: https://github.com/canterbury-air-patrol/flight-safety-system/compare/1.1.0...1.1.1
 [1.1.0]: https://github.com/canterbury-air-patrol/flight-safety-system/compare/1.0.3...1.1.0
