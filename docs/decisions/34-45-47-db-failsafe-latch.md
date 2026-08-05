@@ -219,10 +219,80 @@ fault) all fail the probe as it stands, and the upgrade path is named below.
   probe; it cannot manufacture one. The stall bound stays `PGTCPUSERTIMEOUT`
   (25 s) at the socket.
 
-**Still open (todo/81):** an *intermittent* write fault can still flap. The
-probe can catch a good moment, recovery readmits the fleet, real traffic fails,
-and the fail-safe re-trips. Closing that needs K-consecutive-successes or a
-grace multiplier that backs off per re-trip within a window.
+### The recovery grace backs off per re-trip (revised 2026-08-05, todo/81)
+
+The probe answers "does a write work **right now**?", and that is the whole
+question against a database which is dead or persistently faulted: it never
+answers yes, so the latch holds. An *intermittently* faulted one answers yes
+honestly, over and over. A fault whose good periods outlast the grace window
+gives: queue drained, window quiet, probe succeeds, fleet readmitted, real
+telemetry resumes, fault returns, incident ages past
+`db_write_failure_disconnect_secs`, trip — round again. Every readmission is
+backed by evidence that was true when it was taken. The cycle is much slower
+than the pre-78 one, a full incident timescale rather than a fixed ~20 s timer,
+but an aircraft is still being moved in and out of its comms-loss state by a
+fault the server has already seen.
+
+The missing question is not "does a write work now?" but "**has this database
+been reliable long enough to trust it with the fleet?**", which is about a
+history rather than a moment.
+
+**Decision.** The recovery grace is multiplied by the length of the current run
+of trips, capped:
+
+```
+effective grace  =  db_write_failure_recovery_grace_secs
+                 ×  min(trips in the current run, db_write_failure_recovery_backoff_max)
+```
+
+A trip within an hour of the previous one continues that run; a trip after a
+quiet hour starts a new one at 1. At the defaults (15 s grace, cap 8) a first
+trip holds the admission gate for 15 s and an eighth within the hour holds it
+for two minutes.
+
+- **The first trip of a run is untouched**, so a one-off incident — the common
+  case, and the one the field reports are about — behaves exactly as it did.
+  What grows is the cost of a fault that keeps coming back, which is what makes
+  a flap a flap.
+- **The cap is required, not optional.** An unbounded multiplier would
+  eventually refuse a fleet against a database that had genuinely recovered:
+  the fail-safe's own failure mode, arrived at from the cautious side. `1`
+  disables the back-off and restores the todo/78 behaviour exactly; `0` is read
+  as `1` rather than as a grace of zero, which would readmit the fleet on the
+  first quiet tick.
+- **Only the recovery role of the grace is backed off.** The same config value
+  also decides how long failures may pause and still chain into one incident.
+  Stretching that would make each successive trip *later* as well as longer,
+  i.e. leave the fleet writing into a database already known to be failing.
+  A unit case pins the separation.
+- **The run count doubles as the has-tripped-before flag**, for the same reason
+  `incident_active` exists (todo/70): `last_trip_ms == 0` is a legitimate
+  reading on a clock that has just started, so a zero timestamp cannot mean
+  "never".
+- **The still-degraded and recovered log lines report the effective window**,
+  not the configured one. After a repeat trip the configured value would tell an
+  operator watching a flapping database to expect readmission several multiples
+  of the hold too early.
+- **The one-hour window is fixed rather than configurable.** It only has to be
+  long enough that a fault returning after one hold is judged the same fault,
+  and the longest hold the cap allows is two orders of magnitude below it. One
+  configuration field for the cap is the whole surface this adds.
+
+**Rejected: K consecutive probe successes** (option 1 in the item). The grace
+window already delivers an approximation of it for free — any probe failure
+restarts the window, so recovery in the default configuration already implies
+roughly fifteen consecutive successes. The real gap was never the count within
+an episode; it was that the count restarts from zero after each recovery no
+matter how many times the same fault has come back. K-consecutive answers the
+within-episode question that was already answered, and leaves the across-episode
+one open.
+
+`e2e/test_db_failsafe_backoff.py` drives the flap end to end: install the fault,
+let it trip, heal the database, watch the gate come down, let the fault return,
+and assert the second episode holds for twice as long — measured from the moment
+the database became healthy again, so the number is the window and not the
+duration of the fault. The negative case was run: with the cap forced to 1 the
+second episode recovers on the configured 15 s window and the test fails.
 
 ## Alternatives deliberately not taken
 
