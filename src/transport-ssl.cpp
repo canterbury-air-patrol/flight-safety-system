@@ -442,9 +442,29 @@ auto flight_safety_system::transport_ssl::fss_connection::sendMsg(
         }
         catch (gnutls::exception &ex)
         {
+            /* AGAIN/INTERRUPTED are resumable, not fatal: the server's signal
+             * handlers install with sa_flags = 0 (no SA_RESTART — the main
+             * loop's CRL reload depends on interrupting its sleep), and a
+             * process-directed SIGHUP is delivered to whichever thread the
+             * kernel picks, including one blocked in gnutls_record_send. GnuTLS
+             * requires the interrupted send to be re-issued with the same
+             * arguments (it caches the pending record internally), and `sent`
+             * has not advanced, so retrying here is exactly that. Treating it
+             * as fatal made every CRL reload a dice roll that could sever a
+             * healthy session mid-send. Mirrors recvBytes() below. */
+            if (ex.get_code() == GNUTLS_E_AGAIN || ex.get_code() == GNUTLS_E_INTERRUPTED)
+            {
+                continue;
+            }
             FSS_LOG_ERROR("ssl", "send: caught gnutls exception: " << ex.get_code() << ", " << ex.what());
             this->usable.store(false);
             return false;
+        }
+        /* Some C++ wrapper variants return AGAIN/INTERRUPTED rather than
+         * throwing (same variance recvBytes() handles). */
+        if (transferred == GNUTLS_E_AGAIN || transferred == GNUTLS_E_INTERRUPTED)
+        {
+            continue;
         }
         if (transferred <= 0)
         {

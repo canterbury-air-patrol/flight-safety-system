@@ -298,6 +298,15 @@ not a fleet-wide disconnection some minutes later.
   `RestartSec` chosen to stay inside systemd's default start-rate limit, and
   orders itself after `network-online.target` and a co-hosted
   `postgresql.service` so the common boot race never needs the retry at all.
+- **A signal landing on a sending thread no longer severs the session.** The
+  TLS send path treated every GnuTLS error as fatal, including
+  `GNUTLS_E_INTERRUPTED` — which a process-directed signal produces on
+  whichever thread the kernel delivers it to, because the handlers install
+  without `SA_RESTART` (the main loop's CRL reload depends on that). A SIGHUP
+  CRL reload could therefore sever a healthy aircraft session mid-send,
+  surfacing as an unexplained comms-loss event. Interrupted sends are resumable
+  by re-issuing the same call, which the receive path already did; the send
+  path now retries the same way.
 - **The DB fail-safe no longer recovers on silence** (todo/78,
   `docs/decisions/34-45-47-db-failsafe-latch.md`). Recovery required the write
   queue drained and no failure for the recovery grace — two statements about the
