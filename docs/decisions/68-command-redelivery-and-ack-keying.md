@@ -1,6 +1,6 @@
 # 68 — Command acks name the row; redelivery ends at a terminal ack
 
-**Decided** 2026-07-31. Implemented in `src/client_session.cpp`
+**Decided** 2026-07-31. Shipped in 1.3.0. Implemented in `src/client_session.cpp`
 (`sendCommand`, the `command_ack` handler) and `src/server-db.pgc`
 (`db_command_record_ack`). Revises the fencing argument in
 [48](48-command-ack-terminal-finality.md) and a factual claim in
