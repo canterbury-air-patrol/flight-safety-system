@@ -390,6 +390,18 @@ public:
     auto operator=(fss_server &) -> fss_server & = delete;
     auto operator=(fss_server &&) -> fss_server & = delete;
     ~fss_server() override;
+    /* Note for anyone writing a third-party client, or reading this next to
+     * client_session.cpp's expected_seq check and wondering which side is
+     * wrong: this client deliberately does NOT validate the v2 per-connection
+     * sequence on messages it receives (docs/decisions/71-client-sequence-not-
+     * enforced.md). The server enforces it on the client→server direction and
+     * disconnects on a mismatch; the server→client direction is unchecked. TLS
+     * provides the real reorder/replay guarantee at the record layer, the
+     * server is the side that must defend against many peers of unknown
+     * quality, and an aircraft dropping its command link over one bad sequence
+     * would trade a diagnostic for a safety regression. Mirroring the server,
+     * disconnect included, is recorded as rejected there — the asymmetry is
+     * the decision, not an oversight. */
     void processMessage(std::shared_ptr<flight_safety_system::transport::fss_message> message) override;
     /* Queue a pre-packed frame for this server's outbound worker instead of
      * sending it inline (docs/decisions/66-67-client-outbound-fanout.md).
