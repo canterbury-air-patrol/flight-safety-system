@@ -40,6 +40,9 @@ flight-safety-system (1.3.0) stable; urgency=medium
     db_write_failure_disconnect_ticks is renamed to _secs (the old key is
     still accepted, with a warning).
   * secure_string equality is now constant-time.
+  * A signal delivered to a thread mid-TLS-send (e.g. the SIGHUP CRL
+    reload) no longer severs that session: interrupted sends are resumed,
+    as interrupted receives already were.
   * fss-server.service now sets Restart=on-failure and orders itself after
     network-online.target and a co-hosted postgresql.service: the startup
     refusals above lean on the supervisor retrying, and the previous unit
