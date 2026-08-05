@@ -28,6 +28,19 @@ dropped dispatch or ack write is known-destroyed audit state, with no threshold
 to age through. A write-*failure* incident trips only when a **new** failure
 arrives while the incident is already `db_write_failure_disconnect_secs` old.
 
+The immediate trip covers *enqueue-time* drops only: a command write that
+reaches the sink and **fails there** counts as a generic write failure and
+takes the sustained-incident path, even though the audit state it carried is
+just as destroyed. That asymmetry is deliberate, not an oversight. An
+enqueue-time command drop means the queue is full — sustained pressure the
+server can already see, so severing on it acts on established evidence. A sink
+failure can be a single blip on an otherwise healthy database, and severing the
+whole fleet for one lost ack write trades a recoverable audit gap (the command
+row keeps its dispatch state; fss-web shows the command unacknowledged) for a
+guaranteed fleet-wide comms-loss event — the wrong side of the trade. The blip
+is still logged at ERROR on first occurrence, and a real outage fails more
+than one write inside the disconnect window and trips normally.
+
 That second condition also fixed a defect in the shipped 34 tracker: a *single*
 transient failure kept the incident active through the recovery grace and
 tripped at the age threshold with no further failure — one blipped INSERT

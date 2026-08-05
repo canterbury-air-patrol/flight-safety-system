@@ -26,7 +26,11 @@ namespace server {
  * - Any command dispatch/ack drop: trips immediately on the first
  *   counter increase. A dropped command write is known-destroyed audit state
  *   (the command/ack link, or the aircraft's reported outcome), so there is
- *   no threshold to age through.
+ *   no threshold to age through. "Drop" means an enqueue-time drop under
+ *   queue pressure; a command write that reaches the sink and fails there
+ *   counts as a generic write failure and takes the sustained-incident path
+ *   instead — deliberately, see the trigger discussion in
+ *   docs/decisions/34-45-47-db-failsafe-latch.md.
  *
  * A trip latches the degraded state: the caller severs every client
  * *and* gates new admissions (server_clients::setDegraded) so aircraft get one
