@@ -96,6 +96,26 @@ auto get_test_asset_id(flight_safety_system::server::db_connection &dbc) -> uint
     return *id;
 }
 
+/* Hand-rolled rather than REQUIRE_THROWS_AS: Catch 1.x -- what the Debian
+ * package build pulls in (debian/control Build-Depends on `catch`, not
+ * `catch2`) -- expands that macro to `catch(exceptionType)` by value, which
+ * -Wall's -Wcatch-value rejects for a polymorphic type under -Werror. A plain
+ * try/catch is version-independent. Any *other* exception type propagates out
+ * and Catch reports it as an unexpected throw, so this stays a real check on
+ * the type. */
+template<typename F> auto threw_database_error(F &&call) -> bool
+{
+    try
+    {
+        call();
+    }
+    catch (const flight_safety_system::server::database_error &)
+    {
+        return true;
+    }
+    return false;
+}
+
 } // namespace
 
 /* Catch2's SKIP() macro arrived in 3.3; distro packages can be older (Debian
@@ -285,18 +305,6 @@ TEST_CASE("db_connection: write methods throw database_error when the write conn
     LIVE_DB_OR_SKIP(dbc);
     auto asset_id = get_test_asset_id(*dbc);
     db_disconnect(flight_safety_system::server::db_connection::write_conn_name);
-
-    auto threw_database_error = [](auto &&write_call) -> bool {
-        try
-        {
-            write_call();
-        }
-        catch (const flight_safety_system::server::database_error &)
-        {
-            return true;
-        }
-        return false;
-    };
 
     REQUIRE(threw_database_error([&] { dbc->recordPosition(asset_id, -43.5, 172.6, uint32_t{100}, true); }));
     REQUIRE(threw_database_error([&] { dbc->recordRtt(asset_id, uint64_t{42}); }));
@@ -669,7 +677,7 @@ TEST_CASE("db_connection: probeWrite throws when the write connection is down (t
     LIVE_DB_OR_SKIP(dbc);
     auto asset_id = get_test_asset_id(*dbc);
     db_disconnect(flight_safety_system::server::db_connection::write_conn_name);
-    REQUIRE_THROWS_AS(dbc->probeWrite(), flight_safety_system::server::database_error);
+    REQUIRE(threw_database_error([&] { dbc->probeWrite(); }));
 
     /* And the connection is left in a state a reconnect can use: AUTOCOMMIT is
      * restored on the error path too. */
