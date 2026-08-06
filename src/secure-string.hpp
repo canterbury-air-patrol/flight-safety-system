@@ -1,6 +1,10 @@
 #pragma once
 
-#include <strings.h>
+/* <cstring>, not <strings.h>: glibc declares explicit_bzero in <string.h>
+ * (which includes <strings.h>, not the reverse). This header compiled only
+ * because every TU that reached it happened to pull <cstring> in first; a
+ * standalone include failed. */
+#include <cstring>
 #include <string>
 #include <string_view>
 #include <vector>
