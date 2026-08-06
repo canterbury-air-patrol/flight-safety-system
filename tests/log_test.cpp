@@ -112,6 +112,18 @@ TEST_CASE("log: concurrent writers produce no interleaved lines")
     auto out = cap.str();
     std::regex line(R"(^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z \[INFO \] \[thr\] tid=\d+ i=\d+$)");
 
+    /* capture_cerr swaps std::cerr's rdbuf process-wide, so this buffer also
+     * collects anything *other* threads write while the test runs -- a
+     * transport thread that outlived an earlier TEST_CASE, or ECPG's
+     * sqlprint() writing "SQL error: ..." straight to stderr. Those are not
+     * what this case is about, and requiring the buffer to hold nothing else
+     * made it fail intermittently (seen in CI under valgrind, which is slow
+     * enough to widen the window a great deal).
+     *
+     * Skip lines this test's writers did not emit, and assert on the rest.
+     * Tearing is still caught both ways: a corrupted line that kept its tag
+     * fails the regex outright, and one that lost the tag is skipped here but
+     * leaves the final count short of thread_count * lines_per_thread. */
     size_t start_off = 0;
     size_t count = 0;
     while (start_off < out.size())
@@ -122,6 +134,11 @@ TEST_CASE("log: concurrent writers produce no interleaved lines")
             break;
         }
         std::string ln = out.substr(start_off, nl - start_off);
+        if (ln.find("[thr]") == std::string::npos)
+        {
+            start_off = nl + 1;
+            continue;
+        }
         REQUIRE(std::regex_match(ln, line));
         ++count;
         start_off = nl + 1;
