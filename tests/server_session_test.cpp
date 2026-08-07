@@ -2120,9 +2120,15 @@ TEST_CASE("session: no-fix (NaN) position report is discarded, not stored or bro
      * geometry rather than Null Island. */
     REQUIRE(fss_test::wait_for([&]() { return mock.getPositions().size() == 1; }));
     auto stored = mock.getPositions();
-    REQUIRE_FALSE(stored[0].gps_fix_valid);
-    REQUIRE(std::isnan(stored[0].latitude));
-    REQUIRE(std::isnan(stored[0].longitude));
+    /* at(), not [], on every snapshot in these fix tests. The wait above proves
+     * the row landed, but the compiler only sees a vector copy that may be
+     * empty -- and an empty one has a null data pointer, so plain indexing is a
+     * null dereference on that path. It is -Werror=null-dereference in the
+     * package build, which compiles with LTO. at()'s bounds check rules the
+     * empty case out before the dereference. */
+    REQUIRE_FALSE(stored.at(0).gps_fix_valid);
+    REQUIRE(std::isnan(stored.at(0).latitude));
+    REQUIRE(std::isnan(stored.at(0).longitude));
     /* Still never relayed: a NaN coordinate is a hazard to a receiving
      * aircraft, not information. */
     REQUIRE(handler.broadcasts.empty());
@@ -2135,7 +2141,7 @@ TEST_CASE("session: no-fix (NaN) position report is discarded, not stored or bro
     REQUIRE(handler.broadcasts.size() == 1);
     REQUIRE(fss_test::wait_for([&]() { return mock.getPositions().size() == 2; }));
     stored = mock.getPositions();
-    REQUIRE(stored[1].gps_fix_valid);
+    REQUIRE(stored.at(1).gps_fix_valid);
     /* The restore edge is logged too -- before todo/76 the log said an
      * aircraft had lost its fix and then never mentioned it again. */
     REQUIRE(cap.str().find("GPS fix restored") != std::string::npos);
@@ -2306,9 +2312,9 @@ TEST_CASE("session: a cleared coords-valid flag records a dead-reckoned estimate
 
     REQUIRE(fss_test::wait_for([&]() { return mock.getPositions().size() == 1; }));
     auto stored = mock.getPositions();
-    REQUIRE(stored[0].latitude == -43.5);
-    REQUIRE(stored[0].longitude == 172.6);
-    REQUIRE_FALSE(stored[0].gps_fix_valid);
+    REQUIRE(stored.at(0).latitude == -43.5);
+    REQUIRE(stored.at(0).longitude == 172.6);
+    REQUIRE_FALSE(stored.at(0).gps_fix_valid);
     REQUIRE(handler.broadcasts.size() == 1);
     REQUIRE(cap.str().find("dead-reckoned estimate") != std::string::npos);
 
@@ -2320,7 +2326,7 @@ TEST_CASE("session: a cleared coords-valid flag records a dead-reckoned estimate
     session->processMessage(fixed);
     REQUIRE(fss_test::wait_for([&]() { return mock.getPositions().size() == 2; }));
     stored = mock.getPositions();
-    REQUIRE(stored[1].gps_fix_valid);
+    REQUIRE(stored.at(1).gps_fix_valid);
 }
 
 TEST_CASE("session: a peer that never negotiated the capability keeps its flags word ignored")
@@ -2349,7 +2355,7 @@ TEST_CASE("session: a peer that never negotiated the capability keeps its flags 
 
     REQUIRE(fss_test::wait_for([&]() { return mock.getPositions().size() == 1; }));
     auto stored = mock.getPositions();
-    REQUIRE(stored[0].gps_fix_valid);
+    REQUIRE(stored.at(0).gps_fix_valid);
     REQUIRE(handler.broadcasts.size() == 1);
 }
 
@@ -2379,7 +2385,7 @@ TEST_CASE("session: a no-coordinate report outranks a flags word claiming a vali
 
     REQUIRE(fss_test::wait_for([&]() { return mock.getPositions().size() == 1; }));
     auto stored = mock.getPositions();
-    REQUIRE_FALSE(stored[0].gps_fix_valid);
+    REQUIRE_FALSE(stored.at(0).gps_fix_valid);
     REQUIRE(handler.broadcasts.empty());
 }
 
