@@ -7,6 +7,7 @@ extern "C" {
 #include <string.h>
 }
 
+#include <algorithm>
 #include <limits>
 #include <mutex>
 #include <string>
@@ -298,8 +299,14 @@ auto flight_safety_system::server::db_connection::getCommands(const std::vector<
     res.reserve(asset_ids.size());
     /* db_asset_commands_get takes the C asset-id type (unsigned long long) used
      * throughout server-db.h; copy into it because uint64_t may be a distinct
-     * type (unsigned long here) whose pointer will not implicitly convert. */
-    std::vector<unsigned long long> ids(asset_ids.begin(), asset_ids.end());
+     * type (unsigned long here) whose pointer will not implicitly convert.
+     * Sized first and then copied into, rather than built from the iterator
+     * range: where uint64_t is already unsigned long long (32-bit targets such
+     * as armhf) the range constructor's inlined copy is one GCC 13 and 14 cannot
+     * prove runs against a non-null allocation, so -Wnull-dereference — -Werror
+     * in the distro package builds — fires inside <bits/stl_algobase.h>. */
+    std::vector<unsigned long long> ids(asset_ids.size());
+    std::copy(asset_ids.begin(), asset_ids.end(), ids.begin());
     struct asset_command_row_s **rows = nullptr;
     int fetch_error = 0;
     {
@@ -341,9 +348,11 @@ auto flight_safety_system::server::db_connection::getRetiredAssets(const std::ve
     {
         return res;
     }
-    /* Same host-type copy as getCommands: uint64_t may be a distinct type from
-     * the unsigned long long server-db.h uses, and the pointers do not convert. */
-    std::vector<unsigned long long> ids(asset_ids.begin(), asset_ids.end());
+    /* Same host-type copy as getCommands, filled the same way and for the same
+     * -Wnull-dereference reason: uint64_t may be a distinct type from the
+     * unsigned long long server-db.h uses, and the pointers do not convert. */
+    std::vector<unsigned long long> ids(asset_ids.size());
+    std::copy(asset_ids.begin(), asset_ids.end(), ids.begin());
     unsigned long long *retired = nullptr;
     size_t retired_count = 0;
     int fetch_error = 0;
