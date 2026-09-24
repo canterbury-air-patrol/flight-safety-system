@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Keep command polling independent of stalled telemetry writes by checking
+  write-connection health on the write worker, including during fail-safe recovery.
+
 ## [1.3.0] - 2026-08-05
 
 **Consumers must rebuild.** All four library sonames bump `.so.3` → `.so.4`

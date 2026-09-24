@@ -68,3 +68,12 @@ Two findings from that verification worth remembering:
 - The network-partition e2e variant (a dedicated container on a user-defined
   docker network) that would exercise `PGTCPUSERTIMEOUT` and the fail-safe trip
   end to end was deferred, not done.
+
+## Correction: independent connection health checks
+
+The command poller now checks only the read connection. Write health checks
+run on the write worker before a task or recovery probe, at most once a
+second. Checking both from the poller reacquired the write mutex and blocked
+new commands behind a telemetry lock wait, defeating the connection split.
+The write-stall e2e test now observes a blocked INSERT in `pg_stat_activity`
+before inserting a command, instead of assuming a fixed sleep establishes it.
