@@ -29,13 +29,12 @@ from test_slow_db_does_not_stall import hold_table_lock
 # receipt, so the same string drives the SQL INSERT and the log assertion.
 COMMAND = "RTL"
 
-# Time budgets (seconds), kept generous so the test is not brittle on slower
-# CI. WARMUP and COMMAND_DELIVERY are polled, not slept; WRITER_SETTLE is the
-# one short fixed wait — long enough for a position INSERT to reach the locked
-# table so a write is genuinely in flight (the write path being blocked cannot
-# be observed precisely from the test side).
+# Observe the actual blocked INSERT before testing command delivery. The fake
+# client's position cadence exceeds two seconds, so a fixed sleep after its
+# first position can otherwise test an idle writer and miss the regression.
 CLIENT_WARMUP_TIMEOUT_S = 15.0
-WRITER_SETTLE_S = 2.0
+WRITER_BLOCK_TIMEOUT_S = 12.0
+HEALTH_CHECK_SETTLE_S = 2.0
 COMMAND_DELIVERY_TIMEOUT_S = 8.0
 
 
@@ -67,9 +66,16 @@ def test_command_read_not_blocked_by_write_stall(db_conn, fake_client, migrated_
     assert client["proc"].poll() is None, "client exited before the stall test"
 
     with hold_table_lock(migrated_db, "assets_assetposition"):
-        # Let a position INSERT reach the now-locked table so a telemetry write
-        # is genuinely stalled (holding the write connection).
-        time.sleep(WRITER_SETTLE_S)
+        blocked = wait_for_row(
+            db_conn,
+            "SELECT pid FROM pg_stat_activity WHERE wait_event_type = 'Lock' "
+            "AND query ILIKE %s LIMIT 1",
+            params=("insert into assets_assetposition%",),
+            timeout=WRITER_BLOCK_TIMEOUT_S,
+        )
+        assert blocked is not None, "writer never reached the table lock"
+        # Span the poller's one-second health-check cadence as well.
+        time.sleep(HEALTH_CHECK_SETTLE_S)
 
         # Queue a command while the write is stalled.
         with db_conn.cursor() as cur:

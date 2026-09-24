@@ -377,8 +377,21 @@ auto main(int argc, char *argv[]) -> int
         return 1;
     }
 
+    /* Shared by sink and probe, both called only on the write worker. Keep
+     * recovery alive while degraded (only probes remain), without making the
+     * command poller wait for the write connection or its mutex. */
+    auto next_write_check = std::chrono::steady_clock::time_point{};
+    auto check_write_connection = [dbc, &next_write_check]() -> void {
+        auto now = std::chrono::steady_clock::now();
+        if (now >= next_write_check)
+        {
+            dbc->tryReconnectWriteIfNeeded();
+            next_write_check = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+        }
+    };
     flight_safety_system::server::db_write_sink sink =
-        [dbc](const flight_safety_system::server::db_write_task &task) -> void {
+        [dbc, check_write_connection](const flight_safety_system::server::db_write_task &task) -> void {
+        check_write_connection();
         std::visit(
             flight_safety_system::server::overloaded{
                 [&](const flight_safety_system::server::rtt_write &w) -> void { dbc->recordRtt(w.asset_id, w.rtt_ms); },
@@ -405,7 +418,10 @@ auto main(int argc, char *argv[]) -> int
      * one that is already allowed to block on it — so the main loop's
      * no-synchronous-DB contract (decision 46) is untouched: it only ever sets
      * a flag. */
-    flight_safety_system::server::db_probe_fn probe = [dbc]() -> bool { return dbc->probeWrite(); };
+    flight_safety_system::server::db_probe_fn probe = [dbc, check_write_connection]() -> bool {
+        check_write_connection();
+        return dbc->probeWrite();
+    };
     auto writer = std::make_shared<flight_safety_system::server::db_write_queue>(db_queue_depth, sink, probe);
 
     auto clients = std::make_shared<server_clients>();
@@ -473,7 +489,7 @@ auto main(int argc, char *argv[]) -> int
                  * recovered connection serves this same tick. */
                 if ((poll_counter % ticks_per_sec) == 0)
                 {
-                    dbc->tryReconnectIfNeeded();
+                    dbc->tryReconnectReadIfNeeded();
                 }
                 clients->pollCommands(dbc.get());
                 /* Retirement enforcement for already-identified sessions

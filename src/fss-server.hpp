@@ -255,6 +255,10 @@ public:
     auto getSmmSettings(uint64_t asset_id) -> std::optional<std::shared_ptr<smm_settings>> override;
     auto isConnected() const -> bool override;
     void tryReconnectIfNeeded() override;
+    /* Production schedules each check on its connection's worker, so a
+     * stalled write never holds up command polling through health checks. */
+    void tryReconnectReadIfNeeded();
+    void tryReconnectWriteIfNeeded();
     /* Startup gate: checks the connected database carries every column
      * server-db.pgc reads or writes, logging each problem it finds. Returns
      * false if the server must not start — a missing column, or a check that

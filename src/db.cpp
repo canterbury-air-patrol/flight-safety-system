@@ -73,14 +73,20 @@ void flight_safety_system::server::db_connection::reconnectOne(const char *conn_
 
 void flight_safety_system::server::db_connection::tryReconnectIfNeeded()
 {
-    {
-        std::scoped_lock guard(this->read_lock);
-        reconnectOne(read_conn_name, this->read_connected_);
-    }
-    {
-        std::scoped_lock guard(this->write_lock);
-        reconnectOne(write_conn_name, this->write_connected_);
-    }
+    this->tryReconnectReadIfNeeded();
+    this->tryReconnectWriteIfNeeded();
+}
+
+void flight_safety_system::server::db_connection::tryReconnectReadIfNeeded()
+{
+    std::scoped_lock guard(this->read_lock);
+    reconnectOne(read_conn_name, this->read_connected_);
+}
+
+void flight_safety_system::server::db_connection::tryReconnectWriteIfNeeded()
+{
+    std::scoped_lock guard(this->write_lock);
+    reconnectOne(write_conn_name, this->write_connected_);
 }
 
 auto flight_safety_system::server::db_connection::verifySchema() -> bool
