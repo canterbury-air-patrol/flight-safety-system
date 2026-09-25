@@ -2892,6 +2892,73 @@ TEST_CASE("session: system_status message is forwarded to db writer")
     REQUIRE(statuses.front().bat_percent == 80);
 }
 
+TEST_CASE("session: fast command ACK waits for successful dispatch publication")
+{
+    bool fail_send = false;
+    SECTION("successful send records dispatch before terminal ACK") {}
+    SECTION("failed send records neither dispatch nor ACK")
+    {
+        fail_send = true;
+    }
+
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 1;
+    NullClientHandler handler;
+    std::vector<fss::server::db_write_task> writes;
+    auto writer = std::make_shared<fss::server::db_write_queue>(
+        16, [&](const fss::server::db_write_task &task) -> void { writes.push_back(task); },
+        []() -> bool { return true; });
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    conn->setNegotiatedFeatureFlags(fss::transport::FSS_FEATURE_COMMAND_ACK);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    auto clock = std::make_shared<FakeClock>();
+    session->setClock(clock);
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+    session->setPendingCommand(std::make_shared<fss::server::asset_command>(42, 500, "RTL", 0.0, 0.0, 0));
+    conn->fail_sends = fail_send;
+    conn->setBlocked(true);
+    std::thread sender([&]() -> void { session->sendCommand(); });
+    bool reached_send = fss_test::wait_for([&]() -> bool { return conn->inFlightMessage() != nullptr; });
+    auto in_flight = conn->inFlightMessage();
+    uint64_t dispatch_id = in_flight != nullptr ? in_flight->getId() : 0;
+    std::atomic<bool> ack_started{false};
+    std::atomic<bool> ack_done{false};
+    std::thread receiver([&]() -> void {
+        ack_started = true;
+        session->processMessage(std::make_shared<fss::transport::fss_message_command_ack>(
+            dispatch_id, fss::transport::asset_command_rtl, fss::transport::command_ack_actioned, uint64_t{1}));
+        ack_done = true;
+    });
+    bool started = fss_test::wait_for([&]() -> bool { return ack_started.load(); });
+    bool ack_overtook_send =
+        fss_test::wait_for([&]() -> bool { return ack_done.load(); }, std::chrono::milliseconds(100));
+    // Always release and join before assertions, including on a regression.
+    conn->setBlocked(false);
+    sender.join();
+    receiver.join();
+    writer->stop();
+    REQUIRE(reached_send);
+    REQUIRE(started);
+    REQUIRE_FALSE(ack_overtook_send);
+    if (fail_send)
+    {
+        REQUIRE(writes.empty());
+    }
+    else
+    {
+        REQUIRE(writes.size() == 2);
+        REQUIRE(std::holds_alternative<fss::server::command_dispatch_write>(writes[0]));
+        REQUIRE(std::holds_alternative<fss::server::command_ack_write>(writes[1]));
+        REQUIRE(std::get<fss::server::command_dispatch_write>(writes[0]).dispatch_id == dispatch_id);
+        REQUIRE(std::get<fss::server::command_ack_write>(writes[1]).command_dbid == 42);
+        REQUIRE(std::get<fss::server::command_ack_write>(writes[1]).ack_state == fss::transport::command_ack_actioned);
+        clock->advance(10001);
+        session->sendCommand();
+        REQUIRE(count_sent<fss::transport::fss_message_asset_command>(conn->sentSnapshot()) == 1);
+    }
+}
+
 TEST_CASE("session: command_ack is stored when the capability is negotiated")
 {
     fss_test::MockDatabase mock;
