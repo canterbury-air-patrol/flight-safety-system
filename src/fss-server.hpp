@@ -336,6 +336,11 @@ private:
     std::shared_ptr<smm_settings> cached_smm_settings{nullptr};
     std::string name{};
     std::mutex client_lock{};
+    /* Serializes command sends through dispatch publication and DB enqueue
+     * with ACK processing. Always acquired before client_lock. Unlike
+     * client_lock, this may span socket I/O: main-loop liveness checks never
+     * acquire it. Socket shutdown releases a blocked sender during teardown. */
+    std::mutex command_delivery_lock{};
     std::list<std::shared_ptr<fss_client_rtt>> outstanding_rtt_requests{};
     /* Responses that arrived before sendRTTRequest() could push its matching
      * outstanding entry (todo/35 — see the rtt_response handler and

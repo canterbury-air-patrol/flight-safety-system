@@ -182,3 +182,16 @@ E2e (`e2e/test_command_ack.py`): collisions across a seeded band of
 again and re-acks; and a steady state spanning two resend windows shows the ack
 columns never moving and exactly one dispatch logged — todo/68's acceptance
 criterion, measured.
+
+## Dispatch and ACK ordering
+
+A per-session command-delivery mutex covers the send, dispatch-map publication,
+and dispatch-write enqueue. The ACK handler takes it before resolving the id
+and enqueueing its write. This prevents a fast ACK from arriving before the
+map entry exists, or before the dispatch write that clears old ACK state. A
+failed send publishes neither a mapping nor a dispatch write.
+
+The mutex is separate from the liveness mutex and is always acquired first.
+An ACK may wait for that session's socket send to finish; other sessions and
+main-loop timeout checks do not wait on it. Teardown shuts the socket down
+before joining the sender, so a blocked ACK cannot prevent shutdown.

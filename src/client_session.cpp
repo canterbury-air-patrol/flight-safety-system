@@ -445,6 +445,7 @@ void fss::server::fss_client::setPendingCommand(std::shared_ptr<fss::server::ass
 
 void fss::server::fss_client::sendCommand()
 {
+    std::scoped_lock delivery_guard(this->command_delivery_lock);
     /* todo/35: the dbid/resend-window checks and validation run under
      * client_lock, but the send itself must not — a black-holed peer can
      * block sendMsg() for up to TCP_USER_TIMEOUT, and isTimedOut() (called
@@ -1530,6 +1531,10 @@ void fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss
                 {
                     break;
                 }
+                /* A reply can arrive before sendMsg returns. Wait until the
+                 * successful send has published its mapping AND queued the
+                 * dispatch reset before accepting any ACK for it. */
+                std::scoped_lock delivery_guard(this->command_delivery_lock);
                 auto ack_msg = std::dynamic_pointer_cast<fss::transport::fss_message_command_ack>(msg);
                 /* Resolve the acked id against what this session actually
                  * dispatched (todo/68). The wire id is only per-connection
