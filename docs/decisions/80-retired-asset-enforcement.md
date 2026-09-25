@@ -76,24 +76,18 @@ severs nobody and retries.
 
 Detection and severing run on different threads, and that split is the point.
 
-Detection is a database read, so it may only happen on the command poller — the
-main loop never performs a synchronous DB read. Severing is `disconnect()`,
-which blocks on socket I/O and joins the recv thread. Running that on the poller
-would let one black-holed peer stall command polling for the entire fleet, which
-is the hazard todo/46 moved `db_ping` off that thread to avoid.
+Detection is a database read, so it runs on the command poller.
+`pollRetiredAssets()` records who to sever and the main loop drains that list
+through `disconnectRetiredClients()`. Removal releases the asset identity claim,
+stops outbound scheduling, and shuts down the socket immediately. A cleanup
+worker retains the session and performs blocking thread joins; neither command
+polling nor the main loop waits for a DB-backed callback to finish. See the
+teardown correction in [46](46-no-statement-timeout.md).
 
-So `pollRetiredAssets()` records who to sever and returns; the main loop drains
-the list through `disconnectRetiredClients()`, where `disconnectRevokedClients`
-and the fail-safe's `disconnectAll` already do the same work. The hand-off list
-is deduplicated, because the poller re-observes a retirement on every pass until
-the drain happens — severing is idempotent, but a second severance warning in
-the log reads to an operator as a second session that never existed.
-
-Severing reuses the `disconnect()` + `clientDisconnected()` pair rather than
-anything new. That matters for reactivation: `clientDisconnected()` is what
-releases the `asset_owners` claim (todo/44), and a severing path that skipped it
-would leave the id unclaimable, so the reactivated aircraft would be rejected as
-a duplicate of a session that no longer exists — until a server restart.
+The hand-off list is deduplicated because the poller can re-observe retirement
+before the drain. All severing paths use `clientDisconnected()` so the identity
+claim is released and a reactivated asset can identify without restarting the
+server.
 
 ## The bound
 

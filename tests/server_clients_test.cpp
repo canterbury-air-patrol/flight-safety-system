@@ -77,6 +77,7 @@ public:
      * releases. */
     void shutdownSocket() override
     {
+        this->shutdown_calls++;
         this->setBlocked(false);
         fss::transport::fss_connection::shutdownSocket();
     }
@@ -90,6 +91,7 @@ public:
      * again, so tests assert `> 0` at the moment of interest rather than an
      * exact count. Atomic: disconnect can run on another thread. */
     std::atomic<int> disconnect_calls{0};
+    std::atomic<int> shutdown_calls{0};
 protected:
     auto sendMsg(const std::shared_ptr<fss::transport::buf_len> &bl) -> bool override
     {
@@ -111,6 +113,34 @@ private:
     std::condition_variable block_cv{};
     bool blocked{false};
     std::vector<std::shared_ptr<fss::transport::fss_message>> sent{};
+};
+
+/* Models a receive thread that cannot finish until its database read returns.
+ * Socket shutdown deliberately does not release this wait. */
+class SlowDisconnectConnection : public FakeConnection {
+public:
+    std::atomic<bool> joining{false};
+    void release()
+    {
+        {
+            std::scoped_lock guard(this->mutex);
+            this->released = true;
+        }
+        this->cv.notify_all();
+    }
+    void disconnect() override
+    {
+        this->joining = true;
+        {
+            std::unique_lock guard(this->mutex);
+            this->cv.wait(guard, [this]() -> bool { return this->released; });
+        }
+        FakeConnection::disconnect();
+    }
+private:
+    std::mutex mutex{};
+    std::condition_variable cv{};
+    bool released{false};
 };
 
 /* Count how many messages in `sent` decoded to a T. */
@@ -143,6 +173,7 @@ auto make_aircraft_client(const std::string &name, fss_test::MockDatabase &mock,
     conn->cert_names.push_back(name);
     auto writer = make_null_writer();
     auto client = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    handler.clientConnected(client);
     client->processMessage(std::make_shared<fss::transport::fss_message_identity>(name));
     return client;
 }
@@ -159,6 +190,46 @@ TEST_CASE("server_clients: clientConnected increments client count")
     sc.clientConnected(client);
     // No direct count accessor; verify cleanupRemovableClients runs without crash
     sc.cleanupRemovableClients();
+}
+
+TEST_CASE("server_clients: cleanup retains a stalled session without blocking fleet work")
+{
+    fss_test::MockDatabase mock;
+    server_clients sc;
+    auto conn = std::make_shared<SlowDisconnectConnection>();
+    auto client = std::make_shared<fss::server::fss_client>(conn, &mock, make_null_writer(), &sc);
+    sc.clientConnected(client);
+    std::weak_ptr<fss::server::fss_client> lifetime = client;
+    sc.clientDisconnected(client.get());
+    client.reset();
+
+    std::atomic<bool> cleanup_returned{false};
+    std::thread main_loop([&]() -> void {
+        sc.cleanupRemovableClients();
+        cleanup_returned = true;
+    });
+    bool joining = fss_test::wait_for([&]() -> bool { return conn->joining.load(); });
+    bool returned =
+        fss_test::wait_for([&]() -> bool { return cleanup_returned.load(); }, std::chrono::milliseconds(500));
+    bool retained = !lifetime.expired();
+    bool socket_shut_down = conn->shutdown_calls > 0;
+
+    auto healthy_conn = std::make_shared<FakeConnection>();
+    auto healthy = std::make_shared<fss::server::fss_client>(healthy_conn, &mock, make_null_writer(), &sc);
+    sc.clientConnected(healthy);
+    sc.sendRTTRequest();
+    bool heartbeat = fss_test::wait_for([&]() -> bool {
+        return count_sent<fss::transport::fss_message_rtt_request>(healthy_conn->sentSnapshot()) > 0;
+    });
+    conn->release();
+    main_loop.join();
+    bool released = fss_test::wait_for([&]() -> bool { return lifetime.expired(); });
+    REQUIRE(joining);
+    REQUIRE(returned);
+    REQUIRE(retained);
+    REQUIRE(socket_shut_down);
+    REQUIRE(heartbeat);
+    REQUIRE(released);
 }
 
 TEST_CASE("server_clients: cleanupRemovableClients decrements total count and is idempotent")
@@ -231,7 +302,6 @@ TEST_CASE("server_clients: broadcastMsg reaches aircraft clients only")
 
     // Aircraft client
     auto aircraft = make_aircraft_client("craft1", mock, sc);
-    sc.clientConnected(aircraft);
 
     // Non-aircraft client (no identity sent → isAircraft() == false)
     auto conn2 = std::make_shared<FakeConnection>();
@@ -267,15 +337,15 @@ TEST_CASE("server_clients: broadcastMsg does not block on one black-holed client
     stuck_conn->cert_names.push_back("stuck");
     auto stuck_writer = make_null_writer();
     auto stuck_client = std::make_shared<fss::server::fss_client>(stuck_conn, &mock, stuck_writer, &sc);
-    stuck_client->processMessage(std::make_shared<fss::transport::fss_message_identity>("stuck"));
     sc.clientConnected(stuck_client);
+    stuck_client->processMessage(std::make_shared<fss::transport::fss_message_identity>("stuck"));
 
     auto healthy_conn = std::make_shared<FakeConnection>();
     healthy_conn->cert_names.push_back("healthy");
     auto healthy_writer = make_null_writer();
     auto healthy_client = std::make_shared<fss::server::fss_client>(healthy_conn, &mock, healthy_writer, &sc);
-    healthy_client->processMessage(std::make_shared<fss::transport::fss_message_identity>("healthy"));
     sc.clientConnected(healthy_client);
+    healthy_client->processMessage(std::make_shared<fss::transport::fss_message_identity>("healthy"));
 
     /* Both clients already received one server_list send as a side effect of
      * identify (independent of broadcastMsg) — baseline before the broadcast
@@ -349,7 +419,6 @@ TEST_CASE("server_clients: broadcastMsg skips the 'except' client")
     fss_test::MockDatabase mock;
 
     auto aircraft = make_aircraft_client("craft1", mock, sc);
-    sc.clientConnected(aircraft);
 
     auto msg = std::make_shared<fss::transport::fss_message_rtt_request>();
     // Passing aircraft as the 'except' client — should send to 0 clients (no crash)
@@ -375,8 +444,8 @@ TEST_CASE("server_clients: broadcast stamps a per-connection sequence id into th
     conn->cert_names.push_back("craft1");
     auto writer = make_null_writer();
     auto client = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &sc);
-    client->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft1"));
     sc.clientConnected(client);
+    client->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft1"));
 
     auto make_report = [](uint32_t altitude) {
         return std::make_shared<fss::transport::fss_message_position_report>(0.0, 0.0, altitude, 0U, 0U, int16_t{0}, 0U,
@@ -428,8 +497,8 @@ TEST_CASE("server_clients: checkTimeouts disconnects timed-out client")
     client->setClock(clock);
     client->setTimeoutMs(1000);
     /* Identity handshake sets liveness_active = true. */
-    client->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
     sc.clientConnected(client);
+    client->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
 
     /* Advance time past the 1-second timeout. */
     clock->advance(2000);
@@ -456,8 +525,8 @@ TEST_CASE("server_clients: checkTimeouts logs warning and disconnects timed-out 
     auto client = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &sc);
     client->setClock(clock);
     client->setTimeoutMs(500);
-    client->processMessage(std::make_shared<fss::transport::fss_message_identity>("old-craft"));
     sc.clientConnected(client);
+    client->processMessage(std::make_shared<fss::transport::fss_message_identity>("old-craft"));
 
     /* Advance past the 500 ms threshold so isTimedOut() returns true. */
     clock->advance(1001);
@@ -956,63 +1025,30 @@ TEST_CASE("server_clients: a claim that never published is still released on dis
     REQUIRE(sc.resolveDuplicateIdentity(second.get(), 42));
 }
 
-TEST_CASE("server_clients: a stale claim owner is reported loudly under evict_oldest (todo/44, PR #328 review)")
+TEST_CASE("server_clients: a removed session cannot reclaim an identity")
 {
-    /* Claim-map invariant: a recorded owner is always still in `clients`
-     * (clientDisconnected releases claims in the same critical section that
-     * removes the client). Violate it deliberately — claim via a client never
-     * registered through clientConnected() — and require the breach to
-     * surface as an ERROR while behaviour stays unchanged: evict_oldest still
-     * admits the newcomer, with nobody to evict, and transfers the claim. */
     server_clients sc;
-    sc.setDuplicateIdentityPolicy(fss::server::duplicate_identity_evict_oldest);
+    SECTION("reject newcomer") {}
+    SECTION("evict oldest")
+    {
+        sc.setDuplicateIdentityPolicy(fss::server::duplicate_identity_evict_oldest);
+    }
     fss_test::MockDatabase mock;
-
-    auto conn1 = std::make_shared<FakeConnection>();
-    auto writer1 = make_null_writer();
-    /* Deliberately NOT clientConnected: the claim's owner is unknown to the
-     * client list, modelling a removal path that forgot to release it. */
-    auto stale = std::make_shared<fss::server::fss_client>(conn1, &mock, writer1, &sc);
+    auto stale =
+        std::make_shared<fss::server::fss_client>(std::make_shared<FakeConnection>(), &mock, make_null_writer(), &sc);
+    // A never-admitted session cannot create a claim either.
+    REQUIRE_FALSE(sc.resolveDuplicateIdentity(stale.get(), 42));
+    sc.clientConnected(stale);
     REQUIRE(sc.resolveDuplicateIdentity(stale.get(), 42));
-
-    auto conn2 = std::make_shared<FakeConnection>();
-    auto writer2 = make_null_writer();
-    auto newcomer = std::make_shared<fss::server::fss_client>(conn2, &mock, writer2, &sc);
+    sc.clientDisconnected(stale.get());
+    // Model a registry read returning after removal, before cleanup completes.
+    REQUIRE_FALSE(sc.resolveDuplicateIdentity(stale.get(), 42));
+    auto newcomer =
+        std::make_shared<fss::server::fss_client>(std::make_shared<FakeConnection>(), &mock, make_null_writer(), &sc);
     sc.clientConnected(newcomer);
-
-    fss_test::capture_cerr capture;
     REQUIRE(sc.resolveDuplicateIdentity(newcomer.get(), 42));
-    REQUIRE(capture.str().find("invariant breach") != std::string::npos);
-
-    /* Nobody was evicted — the registered newcomer is the only live session,
-     * and it now owns the claim (a third resolve for the same id must see a
-     * conflict again). */
     sc.cleanupRemovableClients();
     REQUIRE(sc.getTotalClients() == 1);
-}
-
-TEST_CASE("server_clients: a stale claim owner is reported loudly under reject_newcomer (todo/44, PR #328 review)")
-{
-    /* Same deliberate breach under the default policy: the newcomer is still
-     * refused (the conservative outcome — a stale claim must not silently
-     * hand the identity over), but the breach is visible as an ERROR rather
-     * than looking like an ordinary duplicate rejection. */
-    server_clients sc;
-    fss_test::MockDatabase mock;
-
-    auto conn1 = std::make_shared<FakeConnection>();
-    auto writer1 = make_null_writer();
-    auto stale = std::make_shared<fss::server::fss_client>(conn1, &mock, writer1, &sc);
-    REQUIRE(sc.resolveDuplicateIdentity(stale.get(), 42));
-
-    auto conn2 = std::make_shared<FakeConnection>();
-    auto writer2 = make_null_writer();
-    auto newcomer = std::make_shared<fss::server::fss_client>(conn2, &mock, writer2, &sc);
-    sc.clientConnected(newcomer);
-
-    fss_test::capture_cerr capture;
-    REQUIRE_FALSE(sc.resolveDuplicateIdentity(newcomer.get(), 42));
-    REQUIRE(capture.str().find("invariant breach") != std::string::npos);
 }
 
 TEST_CASE("server_clients: disconnectAll severs every live session (todo/34)")
@@ -1079,7 +1115,6 @@ TEST_CASE("server_clients: clearing the degraded gate readmits sessions (todo/47
     sc.setDegraded(false);
     /* A full identify must succeed post-recovery, not just raw admission. */
     auto client = make_aircraft_client("craft-recovered", mock, sc);
-    sc.clientConnected(client);
     REQUIRE(sc.getTotalClients() == 1);
     REQUIRE(client->isAircraft());
 }
@@ -1096,8 +1131,6 @@ TEST_CASE("server_clients: gate-then-sever leaves no session live or admissible 
 
     auto craft1 = make_aircraft_client("craft1", mock, sc);
     auto craft2 = make_aircraft_client("craft2", mock, sc);
-    sc.clientConnected(craft1);
-    sc.clientConnected(craft2);
     REQUIRE(sc.getTotalClients() == 2);
 
     sc.setDegraded(true);
@@ -1117,7 +1150,6 @@ TEST_CASE("server_clients: gate-then-sever leaves no session live or admissible 
     /* Recovery lifts the gate and the same asset can come back. */
     sc.setDegraded(false);
     auto returned = make_aircraft_client("craft1", mock, sc);
-    sc.clientConnected(returned);
     REQUIRE(sc.getTotalClients() == 1);
 }
 
@@ -1139,14 +1171,14 @@ TEST_CASE("server_clients: pollCommands fans the batched read out to the owning 
     auto client1 = std::make_shared<fss::server::fss_client>(conn1, &mock, make_null_writer(), &sc);
     /* Identify before pushing the command so the identify-time dispatch path
      * does not deliver it -- this isolates pollCommands as the sole delivery. */
-    client1->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft1"));
     sc.clientConnected(client1);
+    client1->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft1"));
 
     auto conn2 = std::make_shared<FakeConnection>();
     conn2->cert_names.push_back("craft2");
     auto client2 = std::make_shared<fss::server::fss_client>(conn2, &mock, make_null_writer(), &sc);
-    client2->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft2"));
     sc.clientConnected(client2);
+    client2->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft2"));
 
     /* Only craft1 (asset 1) has a pending command. */
     mock.pushCommand(
@@ -1175,8 +1207,8 @@ TEST_CASE("server_clients: a failed batched read leaves pending commands intact 
     auto conn1 = std::make_shared<FakeConnection>();
     conn1->cert_names.push_back("craft1");
     auto client1 = std::make_shared<fss::server::fss_client>(conn1, &mock, make_null_writer(), &sc);
-    client1->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft1"));
     sc.clientConnected(client1);
+    client1->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft1"));
 
     mock.pushCommand(
         1, std::make_shared<fss::server::asset_command>(uint64_t{100}, uint64_t{1000}, "RTL", 0.0, 0.0, uint32_t{0}));
@@ -1213,14 +1245,13 @@ TEST_CASE("server_clients: retiring a live asset severs its session (todo/80)")
     server_clients sc;
     fss_test::MockDatabase mock;
     auto client = make_aircraft_client("craft1", mock, sc);
-    sc.clientConnected(client);
     const uint64_t asset_id = client->getCachedAssetId();
     REQUIRE(asset_id != 0);
     REQUIRE(sc.getTotalClients() == 1);
 
     /* Held from here: fss_client releases its connection during teardown, so
      * getConnection() is null by the time the severance has happened and the
-     * disconnect_calls counter has to be reached through a pointer taken while
+     * shutdown_calls counter has to be reached through a pointer taken while
      * the session is still live. */
     auto conn = std::dynamic_pointer_cast<FakeConnection>(client->getConnection());
     REQUIRE(conn != nullptr);
@@ -1229,12 +1260,12 @@ TEST_CASE("server_clients: retiring a live asset severs its session (todo/80)")
     sc.pollRetiredAssets(&mock);
     REQUIRE(sc.disconnectRetiredClients() == 0);
     REQUIRE(sc.getTotalClients() == 1);
-    REQUIRE(conn->disconnect_calls == 0);
+    REQUIRE(conn->shutdown_calls == 0);
 
     mock.setAssetRetired(asset_id, true);
     sc.pollRetiredAssets(&mock);
     REQUIRE(sc.disconnectRetiredClients() == 1);
-    REQUIRE(conn->disconnect_calls > 0);
+    REQUIRE(conn->shutdown_calls > 0);
     sc.cleanupRemovableClients();
     REQUIRE(sc.getTotalClients() == 0);
 }
@@ -1249,18 +1280,17 @@ TEST_CASE("server_clients: detection and severing are split across the two threa
     server_clients sc;
     fss_test::MockDatabase mock;
     auto client = make_aircraft_client("craft1", mock, sc);
-    sc.clientConnected(client);
     mock.setAssetRetired(client->getCachedAssetId(), true);
     /* Held across the severance -- see the note in the test above. */
     auto conn = std::dynamic_pointer_cast<FakeConnection>(client->getConnection());
     REQUIRE(conn != nullptr);
 
     sc.pollRetiredAssets(&mock);
-    REQUIRE(conn->disconnect_calls == 0); /* staged, not severed */
+    REQUIRE(conn->shutdown_calls == 0); /* staged, not severed */
     REQUIRE(sc.getTotalClients() == 1);
 
     REQUIRE(sc.disconnectRetiredClients() == 1);
-    REQUIRE(conn->disconnect_calls > 0);
+    REQUIRE(conn->shutdown_calls > 0);
 }
 
 TEST_CASE("server_clients: repeated polls before a drain sever the session once (todo/80)")
@@ -1273,7 +1303,6 @@ TEST_CASE("server_clients: repeated polls before a drain sever the session once 
     server_clients sc;
     fss_test::MockDatabase mock;
     auto client = make_aircraft_client("craft1", mock, sc);
-    sc.clientConnected(client);
     mock.setAssetRetired(client->getCachedAssetId(), true);
 
     sc.pollRetiredAssets(&mock);
@@ -1295,7 +1324,6 @@ TEST_CASE("server_clients: a failed retirement read severs nobody (todo/80)")
     server_clients sc;
     fss_test::MockDatabase mock;
     auto client = make_aircraft_client("craft1", mock, sc);
-    sc.clientConnected(client);
     mock.setAssetRetired(client->getCachedAssetId(), true);
 
     mock.retired_read_fail = true;
@@ -1320,8 +1348,6 @@ TEST_CASE("server_clients: retirement severs only the retired asset's session (t
     fss_test::MockDatabase mock;
     auto doomed = make_aircraft_client("craft1", mock, sc);
     auto bystander = make_aircraft_client("craft2", mock, sc);
-    sc.clientConnected(doomed);
-    sc.clientConnected(bystander);
     REQUIRE(doomed->getCachedAssetId() != bystander->getCachedAssetId());
 
     mock.setAssetRetired(doomed->getCachedAssetId(), true);
@@ -1330,7 +1356,7 @@ TEST_CASE("server_clients: retirement severs only the retired asset's session (t
 
     auto *bystander_conn = dynamic_cast<FakeConnection *>(bystander->getConnection().get());
     REQUIRE(bystander_conn != nullptr);
-    REQUIRE(bystander_conn->disconnect_calls == 0);
+    REQUIRE(bystander_conn->shutdown_calls == 0);
     sc.cleanupRemovableClients();
     REQUIRE(sc.getTotalClients() == 1);
 }
@@ -1352,7 +1378,7 @@ TEST_CASE("server_clients: an unidentified client is never severed as retired (t
     mock.setAssetRetired(0, true);
     sc.pollRetiredAssets(&mock);
     REQUIRE(sc.disconnectRetiredClients() == 0);
-    REQUIRE(conn->disconnect_calls == 0);
+    REQUIRE(conn->shutdown_calls == 0);
     REQUIRE(sc.getTotalClients() == 1);
 }
 
@@ -1366,7 +1392,6 @@ TEST_CASE("server_clients: reactivation lets the same asset identify again (todo
     server_clients sc;
     fss_test::MockDatabase mock;
     auto client = make_aircraft_client("craft1", mock, sc);
-    sc.clientConnected(client);
     const uint64_t asset_id = client->getCachedAssetId();
 
     mock.setAssetRetired(asset_id, true);

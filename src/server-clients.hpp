@@ -4,10 +4,12 @@
 
 #include <algorithm>
 #include <atomic>
+#include <condition_variable>
 #include <list>
 #include <map>
 #include <mutex>
 #include <queue>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -18,6 +20,16 @@ private:
     std::queue<std::shared_ptr<flight_safety_system::server::fss_client>> disconnected{};
     uint32_t total_clients{0};
     std::atomic<bool> shutting_down{false};
+    /* Only the cleanup worker joins sessions. A receive callback can be stuck
+     * in the DB long after its aircraft socket was shut down. Retain ownership
+     * until disconnect returns; the destructor drains and joins this worker
+     * before the handler or database can be destroyed. */
+    std::mutex cleanup_lock{};
+    std::condition_variable cleanup_cv{};
+    std::queue<std::shared_ptr<flight_safety_system::server::fss_client>> cleanup_queue{};
+    bool cleanup_stopping{false};
+    std::thread cleanup_worker{};
+    void runCleanup();
     uint64_t client_timeout_ms{30000};
     uint64_t identify_timeout_ms{30000};
     uint64_t position_staleness_ms{flight_safety_system::server::default_position_staleness_ms};
@@ -47,17 +59,8 @@ private:
      * allowed to read the DB for it); broadcast by the main loop, which must
      * never perform a synchronous DB read. */
     std::shared_ptr<flight_safety_system::transport::fss_message_server_list> cached_server_list{};
-    /* Sessions the poller has observed to be retired, waiting for the main loop
-     * to sever them (todo/80). Guarded by lock.
-     *
-     * The hand-off exists because the two halves belong on different threads.
-     * Detection is a DB read, which may only happen on the command poller; the
-     * severing is disconnect(), which blocks on socket I/O and joins the recv
-     * thread, and running that on the poller would let one black-holed peer
-     * stall command polling for the whole fleet — the hazard todo/46 moved
-     * db_ping off that thread to avoid. The main loop already severs clients
-     * this way for CRL reloads and for the fail-safe, so this list is drained
-     * where that work already lives. */
+    /* Guarded by lock. The poller detects retirement, the main loop requests
+     * socket shutdown, and the cleanup worker joins the removed sessions. */
     std::vector<std::shared_ptr<flight_safety_system::server::fss_client>> pending_retirement{};
     /* Copy the client list under the lock so the caller can act on it
      * outside the lock: sends block on sockets and disconnect() joins recv
@@ -71,7 +74,7 @@ private:
         return {this->clients.begin(), this->clients.end()};
     }
 public:
-    server_clients() = default;
+    server_clients();
     ~server_clients() override;
     server_clients(server_clients &) = delete;
     server_clients(server_clients &&) = delete;

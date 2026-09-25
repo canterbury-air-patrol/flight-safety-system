@@ -177,6 +177,11 @@ fss::server::fss_client::fss_client(std::shared_ptr<fss::transport::fss_connecti
 
 void fss::server::fss_client::activate()
 {
+    std::scoped_lock lifecycle_guard(this->lifecycle_lock);
+    if (this->disconnect_requested.load())
+    {
+        return;
+    }
     {
         std::scoped_lock guard(this->client_lock);
         this->activated_ms = this->clock->now_ms();
@@ -391,30 +396,30 @@ void fss::server::fss_client::stopOutboundWorker()
     }
 }
 
+void fss::server::fss_client::requestDisconnect()
+{
+    this->disconnect_requested.store(true);
+    this->requestOutboundStop();
+    if (auto active_conn = this->getConnection())
+    {
+        active_conn->shutdownSocket();
+    }
+}
+
 void fss::server::fss_client::disconnect()
 {
-    /* Order matters (todo/21, todo/52): signal the worker to stop, then shut
-     * the socket down — not close it — so a worker blocked in send() returns
-     * (EPIPE) while the descriptor number stays reserved, then join the
-     * worker, and only then run the connection's disconnect(), which joins the
-     * recv thread and performs the deferred close. Closing any earlier would
-     * free the fd number for reuse while the worker may still be about to pass
-     * its stale value to send() — I/O into an unrelated session (todo/52). All
-     * of this runs before the base class clears the connection, and the worker
-     * only ever sees a non-null connection (its sends fail fast once the fd
-     * reads -1), so it can never dereference a cleared connection. */
-    this->requestOutboundStop();
+    /* Shutdown is nonblocking and precedes the lifecycle lock: activate()
+     * can be flushing a DB-backed callback, or a send waiting on this socket.
+     * The cleanup worker may wait here, but the main loop never does. */
+    this->requestDisconnect();
+    std::scoped_lock lifecycle_guard(this->lifecycle_lock);
     auto active_conn = this->getConnection();
-    if (active_conn != nullptr)
-    {
-        active_conn->shutdownSocket(); // unblocks a stalled worker send and the recv thread
-    }
     this->stopOutboundWorker();
     if (active_conn != nullptr)
     {
         active_conn->disconnect(); // joins the recv thread, then closes the fd
     }
-    fss_message_cb::disconnect(); // a second disconnect() on the connection here is a safe no-op
+    fss_message_cb::disconnect();
 }
 
 fss::server::fss_client::~fss_client()
@@ -1001,7 +1006,7 @@ void fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss
      * and non-null for the whole call; after teardown its fd is closed, so
      * sends simply fail, exactly like any mid-message disconnect. */
     auto active_conn = this->getConnection();
-    if (active_conn == nullptr)
+    if (active_conn == nullptr || this->disconnect_requested.load())
     {
         return;
     }
@@ -1142,6 +1147,10 @@ void fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss
                     return;
                 }
                 auto asset_id_opt = this->dbc->getAssetId(client_name);
+                if (this->disconnect_requested.load())
+                {
+                    return;
+                }
                 if (!asset_id_opt.has_value())
                 {
                     /* The lookup itself failed (DB read error) -- distinct
@@ -1236,6 +1245,10 @@ void fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss
             }
             const auto &client_name = possible_names.front();
             auto asset_id_opt = this->dbc->getAssetId(client_name);
+            if (this->disconnect_requested.load())
+            {
+                return;
+            }
             if (!asset_id_opt.has_value())
             {
                 /* Can't prove this CN isn't an aircraft's -- treat the read
