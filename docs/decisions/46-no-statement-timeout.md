@@ -63,8 +63,8 @@ Two findings from that verification worth remembering:
 - Identify and the poller itself still stall behind a wedged connection's mutex
   — bounded at ~25 s in the partition case, unbounded for a frozen host. No
   client-side option can detect an ACKed-but-unanswered query.
-- The SIGHUP CRL reload still runs `disconnectRevokedClients()` (blocking joins)
-  on the main loop.
+- CRL checks still read the CRL on the main loop. Socket shutdown is immediate;
+  session thread joins now run on the cleanup worker (see below).
 - The network-partition e2e variant (a dedicated container on a user-defined
   docker network) that would exercise `PGTCPUSERTIMEOUT` and the fail-safe trip
   end to end was deferred, not done.
@@ -77,3 +77,21 @@ second. Checking both from the poller reacquired the write mutex and blocked
 new commands behind a telemetry lock wait, defeating the connection split.
 The write-stall e2e test now observes a blocked INSERT in `pg_stat_activity`
 before inserting a command, instead of assuming a fixed sleep establishes it.
+
+## Correction: deferred session teardown
+
+A timed-out identify can still be blocked on the database when removed from
+the live client list. Joining its receive thread on the main loop therefore
+reintroduced a global database stall through cleanup, even without a database
+call on the loop itself.
+
+Removal now shuts the socket down and stops outbound scheduling immediately.
+A single cleanup worker retains removed sessions and performs their blocking
+joins. Timeout, retirement, revocation, eviction, and fail-safe paths share
+this removal path. Activation and final teardown are serialized so an
+activation flushing queued messages cannot outlive or reinstall its handler
+after teardown. A lookup returning after removal cannot reclaim an identity.
+
+Shutdown still waits for callbacks to finish before destroying the client
+registry or database. A permanently stalled DB can consequently delay graceful
+process shutdown, but cannot stall fleet heartbeats during normal operation.

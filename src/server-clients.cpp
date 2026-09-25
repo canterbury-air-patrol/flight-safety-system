@@ -4,24 +4,34 @@
 #include <algorithm>
 #include <utility>
 
+server_clients::server_clients() : cleanup_worker(&server_clients::runCleanup, this) {}
+
+void server_clients::runCleanup()
+{
+    for (;;)
+    {
+        std::shared_ptr<flight_safety_system::server::fss_client> client;
+        {
+            std::unique_lock guard(this->cleanup_lock);
+            this->cleanup_cv.wait(guard,
+                                  [this]() -> bool { return this->cleanup_stopping || !this->cleanup_queue.empty(); });
+            if (this->cleanup_queue.empty())
+            {
+                return;
+            }
+            client = std::move(this->cleanup_queue.front());
+            this->cleanup_queue.pop();
+        }
+        client->disconnect();
+    }
+}
+
 server_clients::~server_clients()
 {
-    /* Same hazard as cleanupRemovableClients() (see the comment there):
-     * disconnect() joins the connection's recv thread, and that thread may
-     * itself be blocked acquiring this->lock in clientDisconnected() or
-     * broadcastMsg().  Joining while holding the lock would deadlock, so
-     * drain both lists under the lock and disconnect outside it.
-     * shutting_down is set first so a recv thread that wins the race to
-     * clientDisconnected() no-ops instead of re-queueing into a dying
-     * object. */
     this->shutting_down = true;
     std::list<std::shared_ptr<flight_safety_system::server::fss_client>> doomed;
     {
         std::scoped_lock guard(this->lock);
-        /* Claims die with the client list, so a straggling identify on a
-         * recv thread not yet joined below sees a consistently empty map
-         * rather than owners that are no longer in `clients` (which
-         * resolveDuplicateIdentity would report as an invariant breach). */
         this->asset_owners.clear();
         doomed.splice(doomed.end(), this->clients);
         while (!this->disconnected.empty())
@@ -30,26 +40,25 @@ server_clients::~server_clients()
             this->disconnected.pop();
         }
     }
-    for (const auto &c : doomed)
+    // Sever every socket before waiting for even one database-backed callback.
+    for (const auto &client : doomed)
     {
-        c->disconnect();
+        client->requestDisconnect();
     }
+    {
+        std::scoped_lock guard(this->cleanup_lock);
+        for (auto &client : doomed)
+        {
+            this->cleanup_queue.push(std::move(client));
+        }
+        this->cleanup_stopping = true;
+    }
+    this->cleanup_cv.notify_one();
+    this->cleanup_worker.join();
 }
 
 void server_clients::cleanupRemovableClients()
 {
-    /* Drain the disconnected queue under the lock, then call disconnect()
-     * outside the lock.  This avoids a deadlock: the recv thread's
-     * processMessage can call clientDisconnected / broadcastMsg, both of
-     * which also take this->lock.  If we held this->lock while joining the
-     * recv thread, and that thread was blocked waiting for this->lock, we
-     * would deadlock.  By releasing the lock before joining we break the
-     * cycle.
-     *
-     * disconnect() joins the recv thread while the fss_client object is
-     * still fully alive (the shared_ptr keeps it alive until removable goes
-     * out of scope), so processMessage can never execute after any member
-     * of fss_client has been destroyed. */
     std::vector<std::shared_ptr<flight_safety_system::server::fss_client>> removable;
     {
         std::scoped_lock guard(this->lock);
@@ -60,14 +69,19 @@ void server_clients::cleanupRemovableClients()
             total_clients--;
         }
     }
-    for (auto &client : removable)
     {
-        client->disconnect();
+        std::scoped_lock guard(this->cleanup_lock);
+        for (auto &client : removable)
+        {
+            this->cleanup_queue.push(std::move(client));
+        }
     }
-    /* removable goes out of scope here; clients are destroyed with the
-     * recv thread already stopped. */
+    this->cleanup_cv.notify_one();
 }
 
+/* Own the session across activate(): cleanup may remove the list's reference
+ * while activation is still flushing a callback. */
+// NOLINTNEXTLINE(performance-unnecessary-value-param)
 void server_clients::clientConnected(std::shared_ptr<flight_safety_system::server::fss_client> client)
 {
     /* Apply config before wiring the connection's message handler: the
@@ -86,7 +100,7 @@ void server_clients::clientConnected(std::shared_ptr<flight_safety_system::serve
         if (!refused)
         {
             this->total_clients++;
-            this->clients.push_back(std::move(client));
+            this->clients.push_back(client);
         }
     }
     if (refused)
@@ -107,24 +121,29 @@ void server_clients::clientConnected(std::shared_ptr<flight_safety_system::serve
 
 void server_clients::clientDisconnected(flight_safety_system::server::fss_client *client)
 {
-    std::scoped_lock guard(this->lock);
-    if (this->shutting_down)
-        return;
-    /* Release any asset-id claim this client holds (todo/44). Scan by
-     * owner rather than looking up client->getCachedAssetId(): a claim
-     * whose publication never completed (the client timed out or was
-     * evicted while its identify was still in flight) must still be
-     * released, or the asset_id would stay unclaimable until restart. */
-    for (auto owner_it = this->asset_owners.begin(); owner_it != this->asset_owners.end();)
+    std::shared_ptr<flight_safety_system::server::fss_client> removed;
     {
-        owner_it = (owner_it->second == client) ? this->asset_owners.erase(owner_it) : std::next(owner_it);
+        std::scoped_lock guard(this->lock);
+        if (this->shutting_down)
+        {
+            return;
+        }
+        for (auto owner_it = this->asset_owners.begin(); owner_it != this->asset_owners.end();)
+        {
+            owner_it = (owner_it->second == client) ? this->asset_owners.erase(owner_it) : std::next(owner_it);
+        }
+        auto it = std::find_if(this->clients.begin(), this->clients.end(),
+                               [client](const auto &c) -> bool { return c.get() == client; });
+        if (it != this->clients.end())
+        {
+            removed = *it;
+            this->disconnected.push(removed);
+            this->clients.erase(it);
+        }
     }
-    auto it = std::find_if(this->clients.begin(), this->clients.end(),
-                           [client](const auto &c) -> auto { return c.get() == client; });
-    if (it != this->clients.end())
+    if (removed != nullptr)
     {
-        this->disconnected.push(*it);
-        this->clients.erase(it);
+        removed->requestDisconnect();
     }
 }
 
@@ -192,24 +211,10 @@ void server_clients::checkTimeouts()
     }
 }
 
-/* todo/31, reworked for todo/44: called from the identify path once
- * asset_id is resolved, before `newcomer` is marked identified. The
- * duplicate check and the claim are one critical section over
- * asset_owners: the first claimant records itself under `lock`, so a
- * second connection identifying the same asset_id serialises here and
- * sees the claim even though the winner has not yet published the id
- * into its cached_asset_id. (The previous implementation checked a
- * snapshot of *published* ids and left publication to the caller; two
- * concurrent identifies could each miss the other's unpublished claim
- * and both proceed — the todo/44 race.) Because claims are unique per
- * asset_id, evict_oldest has exactly one owner to dethrone.
- *
- * The evictee's disconnect()+clientDisconnected() runs outside `lock`,
- * same as disconnectRevokedClients()/checkTimeouts() elsewhere in this
- * class: clientDisconnected() takes `lock` itself and the shared_ptr
- * grabbed under the lock keeps the evictee alive across the call —
- * disconnect() blocks on socket I/O and joins the recv thread, which
- * must never happen while holding `lock`. */
+/* Reserve identity under lock before the caller publishes cached_asset_id.
+ * Eviction only shuts down the old socket; the cleanup worker joins it later.
+ * Neither the receive thread identifying the newcomer nor the main loop may
+ * wait for the old session's DB-backed callback. */
 auto server_clients::resolveDuplicateIdentity(flight_safety_system::server::fss_client *newcomer, uint64_t asset_id)
     -> bool
 {
@@ -218,6 +223,13 @@ auto server_clients::resolveDuplicateIdentity(flight_safety_system::server::fss_
     bool stale_owner = false;
     {
         std::scoped_lock guard(this->lock);
+        /* A DB lookup can return after timeout removal. Such a session must
+         * never reclaim an identity while its deferred teardown is pending. */
+        if (this->shutting_down || std::none_of(this->clients.begin(), this->clients.end(),
+                                                [newcomer](const auto &c) -> bool { return c.get() == newcomer; }))
+        {
+            return false;
+        }
         auto owner = this->asset_owners.find(asset_id);
         if (owner != this->asset_owners.end() && owner->second != newcomer)
         {
@@ -267,7 +279,6 @@ auto server_clients::resolveDuplicateIdentity(flight_safety_system::server::fss_
     }
     if (evictee != nullptr)
     {
-        evictee->disconnect();
         this->clientDisconnected(evictee.get());
         FSS_LOG_WARN("server", "Duplicate identity for asset_id "
                                    << asset_id << ": evicted the existing session (duplicate_identity_evict_oldest)");
@@ -284,7 +295,6 @@ auto server_clients::disconnectRevokedClients(const std::string &crl_file) -> st
         if (conn && conn->isPeerCertRevoked(crl_file))
         {
             FSS_LOG_WARN("server", "Disconnecting client with revoked certificate after CRL reload");
-            client->disconnect();
             this->clientDisconnected(client.get());
             disconnected_count++;
         }
@@ -292,21 +302,9 @@ auto server_clients::disconnectRevokedClients(const std::string &crl_file) -> st
     return disconnected_count;
 }
 
-/* docs/decisions/80-retired-asset-enforcement.md: severs the sessions
- * pollRetiredAssets() observed to belong to a retired asset. Detection ran on
- * the command poller (it is a DB read); this runs on the main loop, because
- * disconnect() blocks on socket I/O and joins the recv thread and must not sit
- * on the thread that dispatches commands to everyone else.
- *
- * Same disconnect()+clientDisconnected() pattern as disconnectRevokedClients()
- * and disconnectAll(), and safe by the same reasoning: both calls are
- * idempotent, so a client racing its own concurrent teardown between the poll
- * and this drain is handled harmlessly. clientDisconnected() is what releases
- * the asset_owners claim (see its todo/44 comment), which is what lets the
- * asset identify again after reactivation without a server restart.
- *
- * The list is drained under `lock` and acted on outside it, like every other
- * severing path in this class. */
+/* The poller only detects retirement. The main loop removes these sessions
+ * and shuts down their sockets; the cleanup worker owns blocking teardown.
+ * Removing the session also releases its asset claim for reactivation. */
 auto server_clients::disconnectRetiredClients() -> std::size_t
 {
     std::vector<std::shared_ptr<flight_safety_system::server::fss_client>> retired{};
@@ -322,33 +320,19 @@ auto server_clients::disconnectRetiredClients() -> std::size_t
          * wrong asset needs to see which session went. */
         FSS_LOG_WARN("server", "Disconnecting session for retired asset_id " << client->getCachedAssetId()
                                                                              << " (fss-web retired_at is set)");
-        client->disconnect();
         this->clientDisconnected(client.get());
         disconnected_count++;
     }
     return disconnected_count;
 }
 
-/* docs/decisions/34-45-47-db-failsafe-latch.md: unconditional version of
- * disconnectRevokedClients above, for the main loop's sustained-DB-write-
- * failure guard — every currently live session gets severed (CAP/test-plan's
- * Tier-3 Path M step m05, the integration test that expects a severed session
- * to trigger aircraft comms-loss RTL) rather than the server silently
- * continuing to accept telemetry it cannot store.
- *
- * Same disconnect()+clientDisconnected() pattern as
- * disconnectRevokedClients() above, so it is safe by the same reasoning:
- * both calls are idempotent (fss_client::disconnect() documents a second
- * call as a safe no-op; clientDisconnected() only acts if the client is
- * still in `clients`, erasing it on the first call), so a client racing
- * its own concurrent teardown mid-snapshot is handled harmlessly rather
- * than double-freed or double-erased. */
+/* The fail-safe closes every socket promptly even if an earlier session's
+ * receive callback is stuck in the database. Joins happen on the cleanup worker. */
 auto server_clients::disconnectAll() -> std::size_t
 {
     std::size_t disconnected_count = 0;
     for (const auto &client : this->snapshotClients())
     {
-        client->disconnect();
         this->clientDisconnected(client.get());
         disconnected_count++;
     }

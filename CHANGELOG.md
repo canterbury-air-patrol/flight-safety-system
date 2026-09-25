@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Defer session thread joins to a cleanup worker so an identification stalled
+  in the database cannot freeze fleet heartbeats or timeout monitoring.
 - Serialize command dispatch recording with acknowledgements so fast replies
   cannot be dropped or erased by a later dispatch reset.
 - Keep command polling independent of stalled telemetry writes by checking

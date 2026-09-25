@@ -341,6 +341,10 @@ private:
      * client_lock, this may span socket I/O: main-loop liveness checks never
      * acquire it. Socket shutdown releases a blocked sender during teardown. */
     std::mutex command_delivery_lock{};
+    /* Only activation and blocking teardown acquire this mutex. Activation
+     * may synchronously flush an identification callback that reads the DB. */
+    std::mutex lifecycle_lock{};
+    std::atomic<bool> disconnect_requested{false};
     std::list<std::shared_ptr<fss_client_rtt>> outstanding_rtt_requests{};
     /* Responses that arrived before sendRTTRequest() could push its matching
      * outstanding entry (todo/35 — see the rtt_response handler and
@@ -559,6 +563,9 @@ public:
     /* Stops the per-client outbound writer thread and the connection (todo/21).
      * Overrides fss_message_cb::disconnect so a stalled writer is unblocked and
      * joined before the connection is torn down. */
+    /* Stop scheduling sends and shut down the socket without joining threads
+     * or waiting for a database-backed receive callback. Safe on the main loop. */
+    void requestDisconnect();
     void disconnect() override;
     void processMessage(std::shared_ptr<transport::fss_message> message) override;
     void sendRTTRequest(const std::shared_ptr<transport::fss_message_rtt_request> &rtt_req);

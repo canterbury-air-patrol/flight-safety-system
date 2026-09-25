@@ -497,8 +497,8 @@ auto main(int argc, char *argv[]) -> int
                  * administrative act, so a second of latency costs nothing,
                  * and at 100 ms it would double this poller's query rate to
                  * chase an event that happens a handful of times a year. The
-                 * severing itself is the main loop's job — pollRetiredAssets
-                 * only records who to sever, because disconnect() blocks.
+                 * socket shutdown is the main loop's job — pollRetiredAssets
+                 * only records who to sever. Thread joins run on the cleanup worker.
                  * Worst case observed-to-severed is therefore this second plus
                  * the main loop's next 100 ms tick. */
                 if ((poll_counter % ticks_per_sec) == 0)
@@ -528,9 +528,9 @@ auto main(int argc, char *argv[]) -> int
 
     /* Deadline-based, not usleep-plus-a-tick-counter (todo/70). The loop period
      * is the sleep PLUS whatever the body took — sendCommand() fans out over
-     * every client, and once a second cleanupRemovableClients() joins departing
-     * clients' recv threads — and usleep returns early on a signal, since the
-     * handlers install with sa_flags = 0 and the CRL reload wants that. So a
+     * every client, and once a second cleanupRemovableClients() hands departing
+     * clients to the cleanup worker — and usleep returns early on a signal,
+     * since the handlers install with sa_flags = 0 and the CRL reload wants that. So a
      * counter drifted in both directions and "every second" really meant "every
      * tenth iteration, whenever those happened". Each schedule advances by its
      * own period after firing, so a slow or interrupted tick changes when work
@@ -586,9 +586,9 @@ auto main(int argc, char *argv[]) -> int
             clients->sendCommand();
             /* Every tick, not once a second (todo/80): the poller found these
              * sessions up to a second ago, and the whole point of the split is
-             * that the blocking half runs promptly on the thread that can
-             * afford to block. Drains to nothing on the overwhelming majority
-             * of ticks, where it costs one uncontended mutex acquisition. */
+             * that socket shutdown runs promptly. Blocking thread joins are
+             * deferred to the cleanup worker. On most ticks the list is empty,
+             * costing only one uncontended mutex acquisition. */
             clients->disconnectRetiredClients();
             if (do_per_second)
             {
