@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Resolve tied command timestamps by descending row ID during identification,
+  matching polling and preventing an older command from being sent on reconnect.
 - Defer session thread joins to a cleanup worker so an identification stalled
   in the database cannot freeze fleet heartbeats or timeout monitoring.
 - Serialize command dispatch recording with acknowledgements so fast replies

@@ -78,3 +78,29 @@ def test_command_id_matches_row_and_retry_gets_fresh_id(db_conn, fake_client, se
     # always negotiated) and never a value we did not insert.
     ids = _delivered_ids(log)
     assert set(ids) <= {first_id, second_id}, f"unexpected cmd_id values delivered: {ids}"
+
+
+@pytest.mark.requires_docker
+def test_timestamp_tie_selects_same_command_on_identify_and_reconnect(db_conn, fake_client):
+    with db_conn.cursor() as cur:
+        cur.execute("INSERT INTO assets_asset (name) VALUES ('test1') RETURNING id")
+        asset_id = cur.fetchone()[0]
+        # NOW() is identical for both rows within this statement. Identification
+        # must choose the higher id immediately, before the first poll refresh.
+        cur.execute(
+            "INSERT INTO assets_assetcommand (asset_id, command, timestamp) "
+            "VALUES (%s, 'RTL', NOW()), (%s, 'RTL', NOW()) RETURNING id",
+            (asset_id, asset_id),
+        )
+        expected_id = max(row[0] for row in cur.fetchall())
+
+    for attempt in range(2):
+        client = fake_client("test1", client_id=f"tie-{attempt}")
+        assert _wait_for_id(client["log"], expected_id), client["log"].read_text()
+        client["proc"].terminate()
+        client["proc"].wait(timeout=5)
+        ids = _delivered_ids(client["log"])
+        assert ids
+        assert set(ids) == {expected_id}, (
+            f"identify/reconnect delivered a superseded command before the poll refresh: {ids}"
+        )
