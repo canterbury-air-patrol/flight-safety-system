@@ -39,3 +39,15 @@ INSERT INTO assets_assetcommand (asset_id, command)
 -- makes it safe to leave lying in the fixture set. The reactivation case flips
 -- a copy of its own making rather than this row.
 INSERT INTO assets_asset (name, retired_at) VALUES ('retired-asset', NOW());
+
+-- Timestamp wins first; among ties the higher row id must win on both reads.
+INSERT INTO assets_asset (name) VALUES ('command-order-asset');
+INSERT INTO assets_assetcommand (asset_id, command, timestamp)
+    SELECT a.id, 'HOLD', '2026-01-01 00:00:00+00'::timestamptz
+    FROM assets_asset a WHERE a.name = 'command-order-asset';
+INSERT INTO assets_assetcommand (asset_id, command, timestamp)
+    SELECT a.id, 'RTL', '2026-01-01 00:00:00+00'::timestamptz
+    FROM assets_asset a WHERE a.name = 'command-order-asset';
+INSERT INTO assets_assetcommand (asset_id, command, timestamp)
+    SELECT a.id, 'TERM', '2025-01-01 00:00:00+00'::timestamptz
+    FROM assets_asset a WHERE a.name = 'command-order-asset';

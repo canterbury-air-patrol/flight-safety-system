@@ -147,6 +147,25 @@ TEST_CASE("db_connection: connects to live database")
     (void)dbc;
 }
 
+TEST_CASE("db_connection: single and batched command reads break timestamp ties by row id")
+{
+    LIVE_DB_OR_SKIP(dbc);
+    auto asset_id = dbc->getAssetId("command-order-asset");
+    REQUIRE(asset_id.has_value());
+    REQUIRE(*asset_id != 0);
+    auto single = dbc->getCommand(*asset_id);
+    REQUIRE(single.has_value());
+    REQUIRE(*single != nullptr);
+    auto batch = dbc->getCommands({*asset_id});
+    REQUIRE(batch.has_value());
+    REQUIRE(batch->count(*asset_id) == 1);
+    // The newest two rows share a timestamp: RTL has the higher id. TERM
+    // has an even higher id but an older timestamp and must not win.
+    REQUIRE((*single)->getCommand() == flight_safety_system::transport::asset_command_rtl);
+    REQUIRE(batch->at(*asset_id)->getCommand() == flight_safety_system::transport::asset_command_rtl);
+    REQUIRE((*single)->getDBId() == batch->at(*asset_id)->getDBId());
+}
+
 TEST_CASE("db_connection: getAssetId returns non-zero for pre-inserted asset")
 {
     LIVE_DB_OR_SKIP(dbc);
