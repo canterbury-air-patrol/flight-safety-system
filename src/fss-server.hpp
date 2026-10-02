@@ -112,6 +112,7 @@ public:
      * inferable from a position that merely stops advancing (todo/76). */
     virtual void recordPosition(uint64_t asset_id, double latitude, double longitude, uint32_t altitude,
                                 bool gps_fix_valid) = 0;
+    virtual void recordIdentityEvent(const identity_event_write &event) = 0;
     virtual void recordRtt(uint64_t asset_id, uint64_t rtt_ms) = 0;
     virtual void recordStatus(uint64_t asset_id, uint8_t bat_percent, uint32_t bat_mah_used, double bat_voltage) = 0;
     virtual void recordSearchStatus(uint64_t asset_id, uint64_t search_id, uint64_t completed, uint64_t total) = 0;
@@ -239,6 +240,7 @@ public:
     auto getAssetId(const std::string &name) -> std::optional<uint64_t> override;
     void recordPosition(uint64_t asset_id, double latitude, double longitude, uint32_t altitude,
                         bool gps_fix_valid) override;
+    void recordIdentityEvent(const identity_event_write &event) override;
     void recordRtt(uint64_t asset_id, uint64_t rtt_ms) override;
     void recordStatus(uint64_t asset_id, uint8_t bat_percent, uint32_t bat_mah_used, double bat_voltage) override;
     void recordSearchStatus(uint64_t asset_id, uint64_t search_id, uint64_t completed, uint64_t total) override;
@@ -430,6 +432,7 @@ private:
     uint64_t activated_ms{0};
     uint64_t identify_timeout_ms{30000};
     bool identify_timeout_logged{false};
+    const std::string identity_evidence;
     IDatabase *dbc;
     std::shared_ptr<db_write_queue> writer;
     fss_client_handler *client_handler;
@@ -550,13 +553,16 @@ private:
      * a socket send, otherwise the join can hang for the send timeout. */
     void stopOutboundWorker();
 public:
-    fss_client(std::shared_ptr<transport::fss_connection> conn, IDatabase *t_dbc,
+    fss_client(const std::shared_ptr<transport::fss_connection> &conn, IDatabase *t_dbc,
                std::shared_ptr<db_write_queue> t_writer, fss_client_handler *t_handler);
     fss_client(fss_client &) = delete;
     fss_client(fss_client &&) = delete;
     auto operator=(fss_client &) -> fss_client & = delete;
     auto operator=(fss_client &&) -> fss_client & = delete;
     ~fss_client() override;
+    /* Snapshot captured before activation; remains available after teardown. */
+    auto identityEvidence() const -> const std::string & { return this->identity_evidence; }
+    void recordIdentityEvent(const identity_event_write &event) { this->writer->enqueue(event); }
     /* Wire this client as the connection's message handler. Call only after
      * per-client config (timeout, rate limits) is set; see the constructor. */
     void activate();

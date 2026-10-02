@@ -75,6 +75,7 @@ struct CapturingSink {
                  * id; these tests don't enqueue them, but the visit must
                  * cover every alternative, so record the id present. */
                 [&](const fss::server::command_dispatch_write &w) -> void { asset_ids.push_back(w.command_dbid); },
+                [&](const fss::server::identity_event_write &w) -> void { asset_ids.push_back(w.asset_id); },
                 [&](const fss::server::command_ack_write &w) -> void { asset_ids.push_back(w.command_dbid); },
             },
             task);
@@ -615,4 +616,47 @@ TEST_CASE("db_write_queue: a probe requested after stop is ignored")
 
     REQUIRE(probes.load() == 0);
     REQUIRE(q.probe_success_count() == 0);
+}
+
+TEST_CASE("db_write_queue: identity audit survives telemetry and command pressure (todo/77)")
+{
+    auto cap = std::make_shared<CapturingSink>();
+    cap->gate_open = false;
+    fss::server::db_write_queue q(
+        1, [cap](const fss::server::db_write_task &task) -> void { (*cap)(task); }, fss_test::healthy_probe);
+    q.enqueue(fss::server::rtt_write{1, 0});
+    const bool entered = fss_test::wait_for([&]() -> bool { return cap->entered.load() == 1; });
+    if (!entered)
+    {
+        cap->open_gate();
+    }
+    REQUIRE(entered);
+    q.enqueue(fss::server::rtt_write{2, 0});
+    q.enqueue(fss::server::identity_event_write{77, "event-one", 123, "newcomer_rejected", "{}", "{}"});
+    q.enqueue(fss::server::rtt_write{3, 0});
+    q.enqueue(fss::server::command_dispatch_write{4, 0});
+    q.enqueue(fss::server::identity_event_write{78, "event-two", 124, "incumbent_evicted", "{}", "{}"});
+    cap->open_gate();
+    q.stop();
+    REQUIRE(cap->snapshot() == std::vector<uint64_t>{1, 77});
+    REQUIRE(q.dropped_count() == 2);
+    REQUIRE(q.command_dropped_count() == 1);
+    REQUIRE(q.identity_lost_count() == 1);
+    q.enqueue(fss::server::identity_event_write{79, "event-three", 125, "newcomer_rejected", "{}", "{}"});
+    REQUIRE(q.identity_lost_count() == 2);
+}
+
+TEST_CASE("db_write_queue: every failed identity write reports its evidence (todo/77)")
+{
+    fss_test::capture_cerr capture;
+    fss::server::db_write_queue q(
+        4, [](const fss::server::db_write_task &) -> void { throw std::runtime_error("unavailable"); },
+        fss_test::healthy_probe);
+    q.enqueue(fss::server::identity_event_write{77, "event-one", 123, "newcomer_rejected", "{}", "{}"});
+    q.enqueue(fss::server::identity_event_write{77, "event-two", 124, "incumbent_evicted", "{}", "{}"});
+    q.stop();
+    REQUIRE(q.identity_lost_count() == 2);
+    REQUIRE(q.write_failure_count() == 2);
+    REQUIRE(capture.str().find("event_id=event-one") != std::string::npos);
+    REQUIRE(capture.str().find("event_id=event-two") != std::string::npos);
 }

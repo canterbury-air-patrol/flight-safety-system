@@ -4,6 +4,7 @@
 #include <condition_variable>
 #include <functional>
 #include <memory>
+#include <map>
 #include <mutex>
 #include <queue>
 #include <sys/types.h>
@@ -373,6 +374,8 @@ protected:
     void startRecvThread(std::thread t_recv_thread);
     explicit fss_connection(int fd, size_t t_max_queue_size = default_max_queue_size);
 public:
+    /* Immutable handshake evidence; unavailable fields are omitted. */
+    virtual auto peerEvidence() const -> std::map<std::string, std::string> { return {}; }
     fss_connection();
     static auto create(int fd, size_t t_max_queue_size = default_max_queue_size) -> std::shared_ptr<fss_connection>;
     auto getDroppedMessages() -> uint64_t;

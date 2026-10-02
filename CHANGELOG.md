@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Record duplicate-identity rejections and evictions through the async writer
+  for fss-web operator warnings, including both sessions' certificate and peer
+  evidence. Protect queued events from telemetry pressure and report each
+  failed persistence with its evidence (todo/77).
+
+### Changed
+- Require fss-web `assets` migration **0017** before deploying this server.
+- Advance all library sonames from `.so.4` to `.so.5` for the transport evidence
+  API and TLS connection layout change. **Consumers must rebuild.**
+
 ### Fixed
 - Resolve tied command timestamps by descending row ID during identification,
   matching polling and preventing an older command from being sent on reconnect.

@@ -1045,6 +1045,16 @@ static const struct required_column_s required_columns[] = {
     {"assets_assetposition", "altitude", 0},
     {"assets_assetposition", "gps_fix_valid", 0},
     {"assets_assetposition", "timestamp", 0},
+    {"assets_assetidentityevent", "event_id", 0},
+    {"assets_assetidentityevent", "asset_id", 0},
+    {"assets_assetidentityevent", "timestamp", 0},
+    {"assets_assetidentityevent", "outcome", 0},
+    {"assets_assetidentityevent", "incumbent", 0},
+    {"assets_assetidentityevent", "newcomer", 0},
+    {"assets_assetidentityevent", "received_at", 0},
+    {"assets_assetidentityevent", "acknowledged_at", 0},
+    {"assets_assetidentityevent", "acknowledged_by_id", 0},
+    {"assets_assetidentityevent", "acknowledged_username", 0},
     {"assets_assetrtt", "asset_id", 0},
     {"assets_assetrtt", "rtt", 0},
     {"assets_assetrtt", "timestamp", 0},
@@ -1321,4 +1331,30 @@ void db_free_retired_assets(unsigned long long *asset_ids)
     /* One flat block of scalars, so unlike db_free_asset_commands there is no
      * split ownership here: this frees everything the caller was given. */
     free(asset_ids);
+}
+
+int db_identity_event_create(const char *conn_arg, unsigned long long asset_id_arg, const char *event_id_arg,
+                            long long timestamp_ms_arg, const char *outcome_arg, const char *incumbent_arg, const char *newcomer_arg)
+{
+    EXEC SQL BEGIN DECLARE SECTION;
+    const char *conn = conn_arg;
+    unsigned long long asset_id = asset_id_arg;
+    const char *event_id = event_id_arg;
+    long long timestamp_ms = timestamp_ms_arg;
+    const char *outcome = outcome_arg;
+    const char *incumbent = incumbent_arg;
+    const char *newcomer = newcomer_arg;
+    EXEC SQL END DECLARE SECTION;
+
+    EXEC SQL AT :conn INSERT INTO assets_assetidentityevent
+        (event_id, asset_id, timestamp, outcome, incumbent, newcomer)
+        VALUES (CAST(:event_id AS uuid), :asset_id, to_timestamp(CAST(:timestamp_ms AS double precision) / 1000.0),
+                :outcome, CAST(:incumbent AS jsonb), CAST(:newcomer AS jsonb))
+        ON CONFLICT (event_id) DO NOTHING;
+    if (sqlca.sqlcode < 0)
+    {
+        sqlprint();
+        return 0;
+    }
+    return 1;
 }

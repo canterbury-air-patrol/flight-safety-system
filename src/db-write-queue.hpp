@@ -61,8 +61,20 @@ struct command_ack_write {
     uint8_t ack_reason;
 };
 
+/* Immutable occurrence evidence, captured before either session is torn down.
+ * JSON peer objects follow fss-web migration 0017; timestamps are Unix ms. */
+struct identity_event_write {
+    uint64_t asset_id{0};
+    std::string event_id{};
+    int64_t timestamp_ms{0};
+    std::string outcome{};
+    std::string incumbent{};
+    std::string newcomer{};
+};
+auto identity_uuid() -> std::string;
+
 using db_write_task = std::variant<rtt_write, position_write, status_write, search_status_write, command_dispatch_write,
-                                   command_ack_write>;
+                                   command_ack_write, identity_event_write>;
 using db_write_sink = std::function<void(const db_write_task &)>;
 /* The DB fail-safe's health probe (todo/78), run on this queue's worker thread
  * because that thread already owns the write connection and already blocks on
@@ -106,6 +118,8 @@ private:
     std::atomic<uint64_t> dropped{0};
     std::atomic<uint64_t> command_dropped{0};
     std::atomic<uint64_t> write_failures{0};
+    std::atomic<uint64_t> identity_lost{0};
+    void reportIdentityLoss(const db_write_task &task, const char *reason);
     std::atomic<uint64_t> probe_successes{0};
     std::atomic<uint64_t> probe_failures{0};
     std::atomic<uint64_t> probe_inconclusive{0};
@@ -118,7 +132,7 @@ private:
     /* Run the probe and account for its outcome. Called on the worker thread
      * with mtx released. */
     void run_probe();
-    /* Remove the oldest telemetry (non-command) task from the queue, if any.
+    /* Remove the oldest loss-tolerant telemetry task from the queue, if any.
      * Caller must hold mtx. Returns true if one was evicted. */
     auto evict_oldest_telemetry() -> bool;
 public:
@@ -132,7 +146,7 @@ public:
     auto operator=(const db_write_queue &) -> db_write_queue & = delete;
     auto operator=(db_write_queue &&) -> db_write_queue & = delete;
 
-    void enqueue(db_write_task task);
+    void enqueue(const db_write_task &task);
     /* Ask the worker to run one health probe once the queue has drained. Never
      * touches the database itself, so the main loop can call it (todo/46's
      * no-synchronous-DB-work-on-the-main-loop contract). Repeated calls before
@@ -142,6 +156,7 @@ public:
     auto dropped_count() const -> uint64_t;
     auto command_dropped_count() const -> uint64_t;
     auto write_failure_count() const -> uint64_t;
+    auto identity_lost_count() const -> uint64_t { return this->identity_lost.load(); }
     /* Probes that wrote (and rolled back) a row: the fail-safe's evidence that
      * the write path is working. */
     auto probe_success_count() const -> uint64_t;

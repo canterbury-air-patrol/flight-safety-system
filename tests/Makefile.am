@@ -79,7 +79,9 @@ all_test_SOURCES = main.cpp messages.cpp connection.cpp client.cpp \
 nodist_all_test_SOURCES = ../src/server-db.c
 # Header search path belongs at the preprocessor layer so it applies to both
 # the C (server-db.c) and C++ sources, independent of CFLAGS/CXXFLAGS.
-all_test_CPPFLAGS = -I$(top_srcdir)/src
+# client_session.cpp includes JsonCpp for identity-event evidence. Its headers
+# are outside the default include path on Debian/Ubuntu.
+all_test_CPPFLAGS = -I$(top_srcdir)/src $(JSONCPP_CFLAGS)
 all_test_CFLAGS = $(AM_CFLAGS) $(ECPG_CFLAGS)
 all_test_LDADD = ../src/libfss-transport.la ../src/libfss-client-ssl.la ../src/libfss.la $(JSONCPP_LIBS) $(ECPG_LIBS)
 
@@ -156,7 +158,8 @@ concurrency_tsan_test_SOURCES = main.cpp \
 	../src/db-write-queue.cpp \
 	../src/fss-main.cpp
 concurrency_tsan_test_CXXFLAGS = $(AM_CXXFLAGS)
-concurrency_tsan_test_LDADD = $(CATCH2_LIBS) $(pthread_LIBS)
+concurrency_tsan_test_CPPFLAGS = $(JSONCPP_CFLAGS)
+concurrency_tsan_test_LDADD = $(CATCH2_LIBS) $(pthread_LIBS) $(JSONCPP_LIBS)
 
 # Run the full unit suite *and* the concurrency stress binary under TSan in one
 # command. `make check` already runs all_test under TSan (TESTS +

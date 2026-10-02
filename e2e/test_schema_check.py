@@ -51,6 +51,13 @@ REFUSAL_TIMEOUT_S = 15
 # the table *exactly*, indexes included -- see the finally block below for why.
 GATED_COLUMNS = [
     pytest.param(
+        "assets_assetidentityevent",
+        "acknowledged_at",
+        "ALTER TABLE assets_assetidentityevent DROP COLUMN acknowledged_at",
+        "ALTER TABLE assets_assetidentityevent ADD COLUMN acknowledged_at TIMESTAMPTZ",
+        id="identity-event-migration-0017",
+    ),
+    pytest.param(
         "assets_assetcommand",
         "ack_state",
         "ALTER TABLE assets_assetcommand DROP COLUMN ack_state",

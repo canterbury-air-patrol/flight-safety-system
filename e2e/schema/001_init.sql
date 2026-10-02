@@ -100,3 +100,18 @@ CREATE TABLE config_serverconfig (
     config_port  INTEGER      NOT NULL DEFAULT 8090,
     https        BOOLEAN      NOT NULL DEFAULT FALSE
 );
+
+-- fss-web migration 0017. Audit history is not telemetry.
+CREATE TABLE assets_assetidentityevent (
+    id BIGSERIAL PRIMARY KEY,
+    event_id UUID NOT NULL UNIQUE,
+    asset_id BIGINT NOT NULL REFERENCES assets_asset(id),
+    timestamp TIMESTAMPTZ NOT NULL,
+    received_at TIMESTAMPTZ NOT NULL DEFAULT statement_timestamp(),
+    outcome VARCHAR(24) NOT NULL CHECK (outcome IN ('newcomer_rejected', 'incumbent_evicted')),
+    incumbent JSONB NOT NULL DEFAULT '{}',
+    newcomer JSONB NOT NULL DEFAULT '{}',
+    acknowledged_at TIMESTAMPTZ,
+    acknowledged_by_id INTEGER,
+    acknowledged_username VARCHAR(150) NOT NULL DEFAULT ''
+);

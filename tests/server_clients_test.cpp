@@ -1419,3 +1419,60 @@ TEST_CASE("server_clients: reactivation lets the same asset identify again (todo
     REQUIRE(sc.disconnectRetiredClients() == 0);
     REQUIRE(sc.getTotalClients() == 1);
 }
+
+TEST_CASE("server_clients: concurrent duplicate claims emit one audit event (todo/77)")
+{
+    server_clients sc;
+    bool evict = false;
+    SECTION("reject newcomer") {}
+    SECTION("evict incumbent")
+    {
+        evict = true;
+        sc.setDuplicateIdentityPolicy(fss::server::duplicate_identity_evict_oldest);
+    }
+    fss_test::MockDatabase mock;
+    std::vector<fss::server::identity_event_write> events;
+    auto writer = std::make_shared<fss::server::db_write_queue>(
+        10,
+        [&](const fss::server::db_write_task &task) -> void {
+            if (const auto *event = std::get_if<fss::server::identity_event_write>(&task))
+            {
+                events.push_back(*event);
+            }
+        },
+        fss_test::healthy_probe);
+    auto first = std::make_shared<fss::server::fss_client>(std::make_shared<FakeConnection>(), &mock, writer, &sc);
+    auto second = std::make_shared<fss::server::fss_client>(std::make_shared<FakeConnection>(), &mock, writer, &sc);
+    sc.clientConnected(first);
+    sc.clientConnected(second);
+    std::atomic<bool> go{false};
+    bool first_won = false;
+    bool second_won = false;
+    auto claim = [&](fss::server::fss_client *client, bool &result) -> void {
+        while (!go.load())
+        {
+            std::this_thread::yield();
+        }
+        result = sc.resolveDuplicateIdentity(client, 77);
+    };
+    std::thread one(claim, first.get(), std::ref(first_won));
+    std::thread two(claim, second.get(), std::ref(second_won));
+    go.store(true);
+    one.join();
+    two.join();
+    // A timed-out/unregistered caller returning false is not another duplicate.
+    auto removed = std::make_shared<fss::server::fss_client>(std::make_shared<FakeConnection>(), &mock, writer, &sc);
+    REQUIRE_FALSE(sc.resolveDuplicateIdentity(removed.get(), 77));
+    writer->stop(); // join the only thread accessing events before inspection
+    REQUIRE(events.size() == 1);
+    const auto &event = events.front();
+    REQUIRE(event.asset_id == 77);
+    REQUIRE(event.event_id.size() == 36);
+    REQUIRE(event.timestamp_ms > 0);
+    REQUIRE(event.outcome == (evict ? "incumbent_evicted" : "newcomer_rejected"));
+    REQUIRE(event.incumbent != event.newcomer);
+    REQUIRE(event.incumbent.find("session_id") != std::string::npos);
+    REQUIRE(event.newcomer.find("session_id") != std::string::npos);
+    REQUIRE((first_won && second_won) == evict);
+    REQUIRE((first_won || second_won));
+}

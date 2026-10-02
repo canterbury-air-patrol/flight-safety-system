@@ -8,7 +8,9 @@
 #include <gnutls/gnutls.h>
 #include <gnutls/gnutlsxx.h>
 #include <gnutls/x509.h>
+#include <string_view>
 #include <memory>
+#include <netdb.h>
 #include <ostream>
 #include <sys/types.h>
 #include <thread>
@@ -415,10 +417,33 @@ auto flight_safety_system::transport_ssl::fss_connection_server::setupSSL() -> b
         if (rc == GNUTLS_E_SUCCESS && name_len > 0)
         {
             this->possible_names.emplace_back(name_buf.data(), name_len);
+            this->peer_evidence["certificate_cn"] = this->possible_names.back();
+        }
+        std::array<unsigned char, 32> fingerprint{};
+        size_t fingerprint_size = fingerprint.size();
+        if (gnutls_x509_crt_get_fingerprint(cert_data, GNUTLS_DIG_SHA256, fingerprint.data(), &fingerprint_size) >= 0)
+        {
+            constexpr std::string_view hex = "0123456789abcdef";
+            std::string encoded;
+            for (auto byte : fingerprint)
+            {
+                encoded += hex[byte >> 4U];
+                encoded += hex[byte & 15U];
+            }
+            this->peer_evidence["certificate_sha256"] = encoded;
         }
         gnutls_x509_crt_deinit(cert_data);
     }
-
+    sockaddr_storage address{};
+    socklen_t address_size = sizeof(address);
+    std::array<char, NI_MAXHOST> host{};
+    std::array<char, NI_MAXSERV> port{};
+    if (getpeername(this->getFd(), as_sockaddr(&address), &address_size) == 0 &&
+        getnameinfo(as_sockaddr(&address), address_size, host.data(), host.size(), port.data(), port.size(),
+                    NI_NUMERICHOST | NI_NUMERICSERV) == 0)
+    {
+        this->peer_evidence["peer_address"] = "[" + std::string(host.data()) + "]:" + port.data();
+    }
     return true;
 }
 

@@ -269,6 +269,7 @@ def db_conn(migrated_db: dict[str, object]) -> Iterator[psycopg2.extensions.conn
 def reset_db(db_conn: psycopg2.extensions.connection) -> None:
     """Truncate FSS tables before the test so state doesn't bleed between cases."""
     tables = [
+        "assets_assetidentityevent",
         "assets_assetposition",
         "assets_assetrtt",
         "assets_assetstatus",
@@ -329,6 +330,7 @@ def _render_template(template_path: Path, out_path: Path, **subs: object) -> Non
 
 @pytest.fixture
 def server_proc(
+    request: pytest.FixtureRequest,
     migrated_db: dict[str, object],
     certs_dir: Path,
     tmp_path: Path,
@@ -356,6 +358,12 @@ def server_proc(
         DB_NAME=migrated_db["dbname"],
         CERTS_DIR=str(certs_dir),
     )
+
+    overrides = getattr(request, "param", {})
+    if overrides:
+        config = json.loads(config_path.read_text())
+        config.update(overrides)
+        config_path.write_text(json.dumps(config))
 
     env = os.environ.copy()
     env["LD_LIBRARY_PATH"] = str(REPO_ROOT / "src" / ".libs")

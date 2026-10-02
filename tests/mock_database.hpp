@@ -128,6 +128,7 @@ public:
         dispatches.push_back({command_dbid, dispatch_id});
     }
 
+    void recordIdentityEvent(const flight_safety_system::server::identity_event_write &) override {}
     void recordCommandAck(uint64_t command_dbid, uint8_t ack_state, uint64_t ack_timestamp, uint8_t ack_reason) override
     {
         const std::scoped_lock lock(records_lock);

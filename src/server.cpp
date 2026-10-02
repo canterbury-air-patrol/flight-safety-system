@@ -407,6 +407,9 @@ auto main(int argc, char *argv[]) -> int
                 [&](const flight_safety_system::server::command_dispatch_write &w) -> void {
                     dbc->recordCommandDispatch(w.command_dbid, w.dispatch_id);
                 },
+                [&](const flight_safety_system::server::identity_event_write &w) -> void {
+                    dbc->recordIdentityEvent(w);
+                },
                 [&](const flight_safety_system::server::command_ack_write &w) -> void {
                     dbc->recordCommandAck(w.command_dbid, w.ack_state, w.ack_timestamp, w.ack_reason);
                 },
@@ -439,12 +442,12 @@ auto main(int argc, char *argv[]) -> int
         FSS_LOG_INFO("server", "CRL file configured: " << crl_file);
     }
     flight_safety_system::transport::fss_connect_cb connect_cb =
-        [dbc, writer, &clients](std::shared_ptr<flight_safety_system::transport::fss_connection> conn) -> bool {
+        [dbc, writer, &clients](const std::shared_ptr<flight_safety_system::transport::fss_connection> &conn) -> bool {
 #ifdef DEBUG
         std::cout << "New client connected" << std::endl;
 #endif
-        clients->clientConnected(std::make_shared<flight_safety_system::server::fss_client>(std::move(conn), dbc.get(),
-                                                                                            writer, clients.get()));
+        clients->clientConnected(
+            std::make_shared<flight_safety_system::server::fss_client>(conn, dbc.get(), writer, clients.get()));
         return true;
     };
     listen = std::make_shared<flight_safety_system::transport_ssl::fss_listen>(

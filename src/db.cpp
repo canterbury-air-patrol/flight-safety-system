@@ -466,3 +466,13 @@ auto flight_safety_system::server::db_connection::getActiveServers() -> std::opt
     }
     return res;
 }
+
+void flight_safety_system::server::db_connection::recordIdentityEvent(const identity_event_write &event)
+{
+    std::scoped_lock guard(this->write_lock);
+    if (db_identity_event_create(write_conn_name, event.asset_id, event.event_id.c_str(), event.timestamp_ms,
+                                 event.outcome.c_str(), event.incumbent.c_str(), event.newcomer.c_str()) == 0)
+    {
+        throw database_error("identity event INSERT failed");
+    }
+}

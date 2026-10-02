@@ -104,6 +104,7 @@ public:
         return uint64_t{name == "craft" ? 1U : 0U};
     }
     void recordPosition(uint64_t, double, double, uint32_t, bool) override {}
+    void recordIdentityEvent(const flight_safety_system::server::identity_event_write &) override {}
     void recordRtt(uint64_t, uint64_t) override {}
     void recordStatus(uint64_t, uint8_t, uint32_t, double) override {}
     void recordSearchStatus(uint64_t, uint64_t, uint64_t, uint64_t) override {}
