@@ -958,3 +958,33 @@ TEST_CASE("db_connection: verifySchema refuses a database missing an ack column 
     scoped_dropped_column guard("assets_assetcommand", "ack_state", "SMALLINT");
     REQUIRE_FALSE(dbc->verifySchema());
 }
+
+TEST_CASE("db_connection: identity audit retries preserve evidence and acknowledgement (todo/77)")
+{
+    LIVE_DB_OR_SKIP(dbc);
+    const auto asset_id = get_test_asset_id(*dbc);
+    flight_safety_system::server::identity_event_write event{asset_id,
+                                                             flight_safety_system::server::identity_uuid(),
+                                                             1700000000123,
+                                                             "incumbent_evicted",
+                                                             R"({"certificate_cn":"shared","session_id":"old"})",
+                                                             R"({"certificate_cn":"shared","session_id":"new"})"};
+    dbc->recordIdentityEvent(event);
+    const auto predicate = " WHERE event_id = '" + event.event_id + "'";
+    REQUIRE(psql_query("SELECT outcome || ':' || (incumbent->>'session_id') FROM assets_assetidentityevent" +
+                       predicate) == "incumbent_evicted:old");
+    REQUIRE(psql_query("SELECT (extract(epoch FROM timestamp) * 1000)::bigint FROM assets_assetidentityevent" +
+                       predicate) == "1700000000123");
+    psql_query("UPDATE assets_assetidentityevent SET acknowledged_at = '2026-01-01T00:00:00Z', "
+               "acknowledged_username = 'operator'" +
+               predicate);
+    event.outcome = "newcomer_rejected";
+    event.newcomer = "{}";
+    dbc->recordIdentityEvent(event);
+    REQUIRE(psql_query("SELECT count(*) FROM assets_assetidentityevent" + predicate) == "1");
+    REQUIRE(psql_query("SELECT outcome FROM assets_assetidentityevent" + predicate) == "incumbent_evicted");
+    REQUIRE(psql_query("SELECT newcomer->>'session_id' FROM assets_assetidentityevent" + predicate) == "new");
+    REQUIRE(psql_query("SELECT acknowledged_username FROM assets_assetidentityevent" + predicate) == "operator");
+    REQUIRE(psql_query("SELECT extract(epoch FROM acknowledged_at)::bigint FROM assets_assetidentityevent" +
+                       predicate) == "1767225600");
+}

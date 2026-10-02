@@ -2,6 +2,7 @@
 #include "fss.hpp"
 #include "fss-log.hpp"
 #include "fss-server.hpp"
+#include "json-config.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -163,9 +164,23 @@ auto fss::server::fss_client_rtt::getRequestId() -> uint64_t
     return this->reqid;
 }
 
-fss::server::fss_client::fss_client(std::shared_ptr<fss::transport::fss_connection> t_conn, IDatabase *t_dbc,
+static auto identity_evidence(const std::shared_ptr<fss::transport::fss_connection> &connection) -> std::string
+{
+    Json::Value evidence(Json::objectValue);
+    for (const auto &[key, value] : connection->peerEvidence())
+    {
+        evidence[key] = value.substr(0, 512);
+    }
+    evidence["session_id"] = fss::server::identity_uuid();
+    Json::StreamWriterBuilder builder;
+    builder["indentation"] = "";
+    return Json::writeString(builder, evidence);
+}
+
+fss::server::fss_client::fss_client(const std::shared_ptr<fss::transport::fss_connection> &t_conn, IDatabase *t_dbc,
                                     std::shared_ptr<db_write_queue> t_writer, fss_client_handler *t_handler)
-    : fss_message_cb(std::move(t_conn)), dbc(t_dbc), writer(std::move(t_writer)), client_handler(t_handler)
+    : fss_message_cb(t_conn), identity_evidence(::identity_evidence(t_conn)), dbc(t_dbc), writer(std::move(t_writer)),
+      client_handler(t_handler)
 {
     /* The connection's recv thread may already be running (it is started by
      * fss_connection_server::create before this client exists). The handler

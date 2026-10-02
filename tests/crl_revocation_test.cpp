@@ -48,6 +48,7 @@ auto make_writer(fss_test::MockDatabase &mock) -> std::shared_ptr<fss::server::d
                        [&](const fss::server::command_dispatch_write &w) -> void {
                            mock.recordCommandDispatch(w.command_dbid, w.dispatch_id);
                        },
+                       [&](const fss::server::identity_event_write &) -> void {},
                        [&](const fss::server::command_ack_write &w) -> void {
                            mock.recordCommandAck(w.command_dbid, w.ack_state, w.ack_timestamp, w.ack_reason);
                        },

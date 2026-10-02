@@ -210,3 +210,7 @@ struct fss_server_s {
 struct fss_server_s **db_active_fss_servers_get(const char *conn, int *error_out);
 
 void db_free_fss_servers(struct fss_server_s **servers);
+
+/* Idempotent audit insertion; never modifies web-owned acknowledgement fields. */
+int db_identity_event_create(const char *conn, unsigned long long asset_id, const char *event_id,
+                             long long timestamp_ms, const char *outcome, const char *incumbent, const char *newcomer);

@@ -2,6 +2,8 @@
 #include "fss-log.hpp"
 
 #include <algorithm>
+#include <chrono>
+#include <optional>
 #include <utility>
 
 server_clients::server_clients() : cleanup_worker(&server_clients::runCleanup, this) {}
@@ -220,7 +222,9 @@ auto server_clients::resolveDuplicateIdentity(flight_safety_system::server::fss_
 {
     std::shared_ptr<flight_safety_system::server::fss_client> evictee{};
     bool reject = false;
+    const auto event_id = flight_safety_system::server::identity_uuid();
     bool stale_owner = false;
+    std::optional<flight_safety_system::server::identity_event_write> event;
     {
         std::scoped_lock guard(this->lock);
         /* A DB lookup can return after timeout removal. Such a session must
@@ -248,6 +252,21 @@ auto server_clients::resolveDuplicateIdentity(flight_safety_system::server::fss_
             auto it = std::find_if(this->clients.begin(), this->clients.end(),
                                    [&owner](const auto &c) -> bool { return c.get() == owner->second; });
             stale_owner = it == this->clients.end();
+            if (!stale_owner)
+            {
+                const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                     std::chrono::system_clock::now().time_since_epoch())
+                                     .count();
+                event = flight_safety_system::server::identity_event_write{
+                    asset_id,
+                    event_id,
+                    now,
+                    this->duplicate_identity_policy_ == flight_safety_system::server::duplicate_identity_reject_newcomer
+                        ? "newcomer_rejected"
+                        : "incumbent_evicted",
+                    (*it)->identityEvidence(),
+                    newcomer->identityEvidence()};
+            }
             if (this->duplicate_identity_policy_ == flight_safety_system::server::duplicate_identity_reject_newcomer)
             {
                 reject = true;
@@ -265,6 +284,10 @@ auto server_clients::resolveDuplicateIdentity(flight_safety_system::server::fss_
         {
             this->asset_owners[asset_id] = newcomer;
         }
+    }
+    if (event)
+    {
+        newcomer->recordIdentityEvent(*event);
     }
     if (stale_owner)
     {

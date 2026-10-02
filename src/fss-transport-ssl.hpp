@@ -93,12 +93,14 @@ public:
 class fss_connection_server : public fss_connection {
 private:
     std::list<std::string> possible_names{};
+    std::map<std::string, std::string> peer_evidence{};
     unsigned int handshake_timeout_ms{default_handshake_timeout_ms};
     fss_connection_server(int t_fd, std::string t_ca, std::string t_private_key, std::string t_public_key,
                           std::string t_crl, unsigned int t_handshake_timeout_ms);
 protected:
     auto setupSSL() -> bool;
 public:
+    auto peerEvidence() const -> std::map<std::string, std::string> override { return this->peer_evidence; }
     fss_connection_server(fss_connection_server&) = delete;
     fss_connection_server(fss_connection_server&&) = delete;
     auto operator=(fss_connection_server&) -> fss_connection_server& = delete;

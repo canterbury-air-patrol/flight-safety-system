@@ -2,12 +2,54 @@
 #include "fss-log.hpp"
 
 #include <algorithm>
+#include <random>
+#include <string_view>
 #include <exception>
 #include <system_error>
 #include <thread>
 #include <utility>
 
 namespace flight_safety_system::server {
+
+auto identity_uuid() -> std::string
+{
+    std::random_device random;
+    constexpr std::string_view hex = "0123456789abcdef";
+    std::string result;
+    for (int i = 0; i < 16; ++i)
+    {
+        auto byte = random() & 255U;
+        if (i == 6)
+        {
+            byte = (byte & 15U) | 64U;
+        }
+        if (i == 8)
+        {
+            byte = (byte & 63U) | 128U;
+        }
+        if (i == 4 || i == 6 || i == 8 || i == 10)
+        {
+            result += '-';
+        }
+        result += hex[byte >> 4U];
+        result += hex[byte & 15U];
+    }
+    return result;
+}
+
+void db_write_queue::reportIdentityLoss(const db_write_task &task, const char *reason)
+{
+    const auto *event = std::get_if<identity_event_write>(&task);
+    if (event == nullptr)
+    {
+        return;
+    }
+    ++this->identity_lost;
+    FSS_LOG_ERROR("db-writer", "IDENTITY EVENT NOT STORED: "
+                                   << reason << " event_id=" << event->event_id << " asset_id=" << event->asset_id
+                                   << " timestamp_ms=" << event->timestamp_ms << " outcome=" << event->outcome
+                                   << " incumbent=" << event->incumbent << " newcomer=" << event->newcomer);
+}
 
 db_write_queue::db_write_queue(std::size_t t_max_depth, db_write_sink t_sink, db_probe_fn t_probe)
     : max_depth(std::max<std::size_t>(1, t_max_depth)), sink(std::move(t_sink)), probe(std::move(t_probe))
@@ -22,8 +64,9 @@ db_write_queue::~db_write_queue()
 
 auto db_write_queue::evict_oldest_telemetry() -> bool
 {
-    auto it = std::find_if(this->q.begin(), this->q.end(),
-                           [](const db_write_task &t) -> bool { return !is_command_task(t); });
+    auto it = std::find_if(this->q.begin(), this->q.end(), [](const db_write_task &t) -> bool {
+        return !is_command_task(t) && !std::holds_alternative<identity_event_write>(t);
+    });
     if (it == this->q.end())
     {
         return false;
@@ -32,7 +75,7 @@ auto db_write_queue::evict_oldest_telemetry() -> bool
     return true;
 }
 
-void db_write_queue::enqueue(db_write_task task)
+void db_write_queue::enqueue(const db_write_task &task)
 {
     bool dropped_telemetry = false;
     bool dropped_command = false;
@@ -40,9 +83,11 @@ void db_write_queue::enqueue(db_write_task task)
     uint64_t total_command_dropped = 0;
     bool enqueued = true;
     {
-        std::scoped_lock guard(this->mtx);
+        std::unique_lock guard(this->mtx);
         if (this->stopping)
         {
+            guard.unlock();
+            this->reportIdentityLoss(task, "queue stopped");
             return;
         }
         if (this->q.size() >= this->max_depth)
@@ -56,21 +101,31 @@ void db_write_queue::enqueue(db_write_task task)
                 dropped_telemetry = true;
                 total_telemetry_dropped = this->dropped.fetch_add(1) + 1;
             }
+            else if (std::holds_alternative<identity_event_write>(task))
+            {
+                enqueued = false;
+            }
             else if (is_command_task(task))
             {
-                /* The whole queue is command writes and another command has
-                 * arrived: genuine command overload, not telemetry pressure.
-                 * Drop the oldest command to stay bounded, but on a distinct,
-                 * observable path rather than the generic telemetry drop. */
-                this->q.pop_front();
+                /* Only protected tasks remain. Evict the oldest command,
+                 * or refuse the incoming command if every slot is an identity
+                 * event. In either case preserve the command-loss alarm. */
+                auto command = std::find_if(this->q.begin(), this->q.end(), is_command_task);
+                if (command != this->q.end())
+                {
+                    this->q.erase(command);
+                }
+                else
+                {
+                    enqueued = false;
+                }
                 dropped_command = true;
                 total_command_dropped = this->command_dropped.fetch_add(1) + 1;
             }
             else
             {
-                /* Incoming telemetry with no telemetry to evict (queue full of
-                 * protected command writes): reject the new telemetry rather
-                 * than evicting a command. Use the fetch_add result for the
+                /* Incoming telemetry with no telemetry to evict: reject it
+                 * rather than evicting an audit task. Use the fetch_add result for the
                  * logged count, matching the eviction branch. */
                 dropped_telemetry = true;
                 total_telemetry_dropped = this->dropped.fetch_add(1) + 1;
@@ -85,6 +140,10 @@ void db_write_queue::enqueue(db_write_task task)
     if (enqueued)
     {
         this->cv.notify_one();
+    }
+    else
+    {
+        this->reportIdentityLoss(task, "protected queue full");
     }
     if (dropped_command)
     {
@@ -281,7 +340,7 @@ void db_write_queue::run()
             }
             else
             {
-                task = this->q.front();
+                task = std::move(this->q.front());
                 this->q.pop_front();
             }
         }
@@ -296,6 +355,7 @@ void db_write_queue::run()
         }
         catch (const std::exception &e)
         {
+            this->reportIdentityLoss(task, "database write failed; persistence uncertain");
             uint64_t failures = ++this->write_failures;
             constexpr uint64_t log_every = 100;
             if (failures == 1 || (failures % log_every) == 0)
@@ -305,6 +365,7 @@ void db_write_queue::run()
         }
         catch (...)
         {
+            this->reportIdentityLoss(task, "database write failed; persistence uncertain");
             uint64_t failures = ++this->write_failures;
             constexpr uint64_t log_every = 100;
             if (failures == 1 || (failures % log_every) == 0)
