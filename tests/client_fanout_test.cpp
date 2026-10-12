@@ -13,9 +13,11 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "fss-client-ssl.hpp"
@@ -83,6 +85,7 @@ protected:
  * under a lock. */
 class RecordingConnection : public fss::transport::fss_connection {
     mutable std::mutex sent_lock{};
+    std::condition_variable sent_cv{};
     std::vector<std::shared_ptr<fss::transport::fss_message>> sent{};
 public:
     RecordingConnection() = default;
@@ -92,6 +95,12 @@ public:
     auto operator=(RecordingConnection &&) -> RecordingConnection & = delete;
     ~RecordingConnection() override = default;
 
+    auto waitCount(size_t expected) -> bool
+    {
+        std::unique_lock<std::mutex> guard(this->sent_lock);
+        return this->sent_cv.wait_for(guard, std::chrono::seconds(2),
+                                      [&]() -> bool { return this->sent.size() >= expected; });
+    }
     auto count() const -> size_t
     {
         std::scoped_lock guard(this->sent_lock);
@@ -109,6 +118,7 @@ protected:
         {
             std::scoped_lock guard(this->sent_lock);
             this->sent.push_back(decoded);
+            this->sent_cv.notify_all();
         }
         return true;
     }
@@ -137,6 +147,17 @@ public:
     auto operator=(FanoutClient &&) -> FanoutClient & = delete;
     ~FanoutClient() override = default;
     void add(const std::shared_ptr<fss::client_ssl::fss_server> &server) { this->addServer(server); }
+    /* Runs on the maintenance caller, outside the client's list lock. Tests
+     * use it to deliver a close while another server is being scheduled. */
+    mutable std::function<void()> on_config_read{};
+    auto getTcpUserTimeoutMs() const -> unsigned int override
+    {
+        if (auto callback = std::exchange(this->on_config_read, {}))
+        {
+            callback();
+        }
+        return fss_client::getTcpUserTimeoutMs();
+    }
     std::atomic<fss::client_ssl::connection_status> last_status{fss::client_ssl::CLIENT_CONNECTION_STATUS_UNKNOWN};
 private:
     void connectionStatusChange(fss::client_ssl::connection_status status) override { this->last_status.store(status); }
@@ -204,6 +225,55 @@ protected:
         this->dials_entered++;
         this->setConnection(std::make_shared<RecordingConnection>());
         return true;
+    }
+};
+
+/* Hold each dial just before identity is sent. The CV establishes the exact
+ * ordering of close versus worker completion; timeouts only bound failures. */
+class GatedDialServer : public InstantDialServer {
+    std::mutex gate_lock{};
+    std::condition_variable gate_cv{};
+    int entered{0};
+    int released{0};
+    bool stopping{false};
+public:
+    using InstantDialServer::InstantDialServer;
+    GatedDialServer(const GatedDialServer &) = delete;
+    GatedDialServer(GatedDialServer &&) = delete;
+    auto operator=(const GatedDialServer &) -> GatedDialServer & = delete;
+    auto operator=(GatedDialServer &&) -> GatedDialServer & = delete;
+    ~GatedDialServer() override { this->disconnect(); }
+
+    auto waitIdentify(int attempt) -> bool
+    {
+        std::unique_lock<std::mutex> guard(this->gate_lock);
+        return this->gate_cv.wait_for(guard, std::chrono::seconds(2),
+                                      [&]() -> bool { return this->entered >= attempt; });
+    }
+    void releaseIdentify(int attempt)
+    {
+        std::scoped_lock guard(this->gate_lock);
+        this->released = attempt;
+        this->gate_cv.notify_all();
+    }
+    void sendIdentify() override
+    {
+        {
+            std::unique_lock<std::mutex> guard(this->gate_lock);
+            this->entered++;
+            this->gate_cv.notify_all();
+            this->gate_cv.wait(guard, [&]() -> bool { return this->stopping || this->released >= this->entered; });
+        }
+        fss_server::sendIdentify();
+    }
+    void disconnect() override
+    {
+        {
+            std::scoped_lock guard(this->gate_lock);
+            this->stopping = true;
+            this->gate_cv.notify_all();
+        }
+        fss_server::disconnect();
     }
 };
 
@@ -382,5 +452,123 @@ TEST_CASE("client: repeated attemptReconnect does not pile up dials on a stalled
     }
     REQUIRE(stalling->dials_entered.load() == 1);
 
+    client->disconnect();
+}
+
+TEST_CASE("client: an early close cannot strand a queued reconnect (todo/84)", "[reconnect-race]")
+{
+    auto client = std::make_shared<FanoutClient>();
+    auto server = std::make_shared<GatedDialServer>(client.get(), "retry.example", uint16_t{20208}, "", "", "");
+    auto clock = std::make_shared<fss_test::FakeClock>();
+    clock->advance(100000);
+    server->setClock(clock);
+    client->add(server);
+    client->attemptReconnect();
+    REQUIRE(server->waitIdentify(1));
+    auto first_conn = std::dynamic_pointer_cast<RecordingConnection>(server->getConnection());
+    REQUIRE(first_conn != nullptr);
+    REQUIRE(first_conn->count() == 1);
+    REQUIRE(first_conn->at(0)->getType() == fss::transport::message_type_version);
+
+    /* A connection installed by the dial is not yet eligible for telemetry. */
+    client->attemptReconnect();
+    client->sendMsgAll(make_position());
+    REQUIRE(first_conn->count() == 1);
+
+    bool close_before_publication = false;
+    bool close_during_harvest = false;
+    bool close_after_promotion = false;
+    SECTION("close before the worker publishes success")
+    {
+        close_before_publication = true;
+    }
+    SECTION("close after publication but before harvesting") {}
+    SECTION("close while maintenance schedules the next server")
+    {
+        close_during_harvest = true;
+    }
+    SECTION("close after promotion")
+    {
+        close_after_promotion = true;
+    }
+
+    if (close_before_publication)
+    {
+        server->processMessage(std::make_shared<fss::transport::fss_message_closed>());
+    }
+    /* A send queued directly behind reconnect is a completion fence: observing
+     * it proves the worker has published its result, without consuming it. */
+    server->queueSend(make_position()->getPacked());
+    server->releaseIdentify(1);
+    REQUIRE(first_conn->waitCount(3));
+    REQUIRE(first_conn->at(1)->getType() == fss::transport::message_type_identity);
+    REQUIRE(first_conn->at(2)->getType() == fss::transport::message_type_position_report);
+
+    if (close_during_harvest)
+    {
+        auto other = std::make_shared<InstantDialServer>(client.get(), "other.example", uint16_t{20209}, "", "", "");
+        client->add(other);
+        /* In the old two-phase harvest, this callback lands after the first
+         * success was consumed but before its promotion. With atomic promotion
+         * it instead removes the already-promoted server, preserving retry. */
+        client->on_config_read = [&]() {
+            server->processMessage(std::make_shared<fss::transport::fss_message_closed>());
+        };
+        client->attemptReconnect();
+        REQUIRE_FALSE(static_cast<bool>(client->on_config_read));
+    }
+    else if (!close_before_publication)
+    {
+        if (close_after_promotion)
+        {
+            client->attemptReconnect();
+        }
+        server->processMessage(std::make_shared<fss::transport::fss_message_closed>());
+    }
+    REQUIRE_FALSE(server->isServerTimedOut());
+    REQUIRE(client->last_status.load() == fss::client_ssl::CLIENT_CONNECTION_STATUS_DISCONNECTED);
+
+    /* A retry is required even though no received traffic ever armed liveness.
+     * The replacement then earns admission and carries actual fan-out traffic. */
+    client->attemptReconnect();
+    REQUIRE(server->waitIdentify(2));
+    auto replacement = std::dynamic_pointer_cast<RecordingConnection>(server->getConnection());
+    REQUIRE(replacement != nullptr);
+    REQUIRE(replacement != first_conn);
+    server->queueSend(make_position()->getPacked());
+    server->releaseIdentify(2);
+    REQUIRE(replacement->waitCount(3));
+    client->attemptReconnect();
+    server->processMessage(std::make_shared<fss::transport::fss_message_server_list>());
+    REQUIRE(client->last_status.load() == fss::client_ssl::CLIENT_CONNECTION_STATUS_CONNECTED_1_SERVER);
+    client->sendMsgAll(make_position());
+    REQUIRE(replacement->waitCount(4));
+    REQUIRE(replacement->at(3)->getType() == fss::transport::message_type_position_report);
+    REQUIRE(server->dials_entered.load() == 2);
+    client->disconnect();
+}
+
+TEST_CASE("client: an unharvested reconnect success prevents another queued dial (todo/84)", "[reconnect-race]")
+{
+    auto client = std::make_shared<FanoutClient>();
+    auto server = std::make_shared<GatedDialServer>(client.get(), "retry.example", uint16_t{20210}, "", "", "");
+    client->add(server);
+    client->attemptReconnect();
+    REQUIRE(server->waitIdentify(1));
+    auto conn = std::dynamic_pointer_cast<RecordingConnection>(server->getConnection());
+    REQUIRE(conn != nullptr);
+    server->queueSend(make_position()->getPacked());
+    server->releaseIdentify(1);
+    REQUIRE(conn->waitCount(3));
+
+    /* Model publication between maintenance's failed harvest and queue call.
+     * A second sentinel proves the worker processed everything queued here. */
+    server->queueReconnect();
+    server->queueSend(make_position()->getPacked());
+    REQUIRE(conn->waitCount(4));
+    REQUIRE(server->dials_entered.load() == 1);
+    client->attemptReconnect();
+    client->sendMsgAll(make_position());
+    REQUIRE(conn->waitCount(5));
     client->disconnect();
 }

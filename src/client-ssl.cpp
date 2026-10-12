@@ -246,9 +246,8 @@ void flight_safety_system::client_ssl::fss_client::attemptReconnect()
         this->serverRequiresReconnect(server);
     }
 
-    /* Phase (c): snapshot reconnect_servers under the lock, then, outside it,
-     * harvest the servers whose queued reconnect has since succeeded and
-     * schedule an attempt for the rest.
+    /* Phase (c): snapshot reconnect_servers, then consume success and promote
+     * each surviving entry under the lock. Schedule attempts outside the lock.
      *
      * The dial itself runs on each server's own outbound worker
      * (docs/decisions/66-67-client-outbound-fanout.md).
@@ -266,43 +265,34 @@ void flight_safety_system::client_ssl::fss_client::attemptReconnect()
         std::scoped_lock lock(this->servers_lock);
         reconnect_snapshot = this->reconnect_servers;
     }
-    std::list<std::shared_ptr<fss_server>> reconnected;
     bool any_connected = false;
     for (auto const &server : reconnect_snapshot)
     {
-        if (server->takeReconnectSucceeded())
         {
-            reconnected.push_back(server);
-            any_connected = true;
-        }
-        else
-        {
-            server->queueReconnect();
-        }
-    }
-
-    /* Phase (d): move the newly connected servers from reconnect_servers to
-     * servers under the lock. Promote only entries still *in* that list: the
-     * snapshot above was taken with the lock released, so updateServers() can
-     * have expired one in between, and blindly pushing would resurrect a
-     * server that phase (e) is about to disconnect. */
-    {
-        std::scoped_lock lock(this->servers_lock);
-        while (!reconnected.empty())
-        {
-            auto server = reconnected.front();
-            reconnected.pop_front();
+            /* Consume success and promote under the same lock as close. A
+             * close either invalidates success first or moves the promoted
+             * server back to reconnect_servers; there is no harvest gap.
+             * Lock order: servers_lock -> outbound_lock, never the reverse. */
+            std::scoped_lock lock(this->servers_lock);
             auto found = std::find(this->reconnect_servers.begin(), this->reconnect_servers.end(), server);
             if (found == this->reconnect_servers.end())
             {
                 continue;
             }
-            this->reconnect_servers.erase(found);
-            this->servers.push_back(server);
+            if (server->takeReconnectSucceeded())
+            {
+                this->servers.splice(this->servers.end(), this->reconnect_servers, found);
+                any_connected = true;
+                continue;
+            }
         }
+        /* Refreshing configuration calls user virtuals, so queue outside
+         * servers_lock. queueReconnect also checks for a success published
+         * since the check above, to avoid dialling over a healthy connection. */
+        server->queueReconnect();
     }
 
-    /* Phase (e): tear down anything updateServers() expired
+    /* Phase (d): tear down anything updateServers() expired
      * (docs/decisions/66-67-client-outbound-fanout.md). It removed them from
      * both lists but could not disconnect them: it runs on a
      * recv thread, and the expiring server can be the one the list arrived on,
@@ -319,7 +309,7 @@ void flight_safety_system::client_ssl::fss_client::attemptReconnect()
         server->disconnect();
     }
 
-    /* Phase (f): notify outside the lock — connectionStatusChange() is a
+    /* Phase (e): notify outside the lock — connectionStatusChange() is a
      * virtual user callback that may re-enter the client. */
     if (any_connected || !expired.empty())
     {
@@ -656,7 +646,6 @@ void flight_safety_system::client_ssl::fss_client::serverRequiresReconnect(
      * (e.g. call sendMsgAll or attemptReconnect), so the lock must not be
      * held when it is called. */
     size_t count = 0;
-    bool found = false;
     {
         std::scoped_lock lock(this->servers_lock);
         for (auto it = this->servers.begin(); it != this->servers.end(); ++it)
@@ -665,7 +654,6 @@ void flight_safety_system::client_ssl::fss_client::serverRequiresReconnect(
             {
                 this->reconnect_servers.push_back(std::move(*it));
                 this->servers.erase(it);
-                found = true;
                 break;
             }
         }
@@ -675,21 +663,10 @@ void flight_safety_system::client_ssl::fss_client::serverRequiresReconnect(
          * as dead. */
         if (server != nullptr)
         {
+            server->invalidateReconnect();
             server->setAdmitted(false);
         }
         count = this->countAdmittedLocked();
-    }
-    if (!found && server != nullptr)
-    {
-        /* Not in the live list, so this is a connection that died in the window
-         * between its worker finishing a reconnect and attemptReconnect()
-         * harvesting the result (see the decision file above). Discard the
-         * stale success: promoting
-         * it would move an already-dead connection into `servers`, where
-         * nothing would flag it — a fresh connection starts with liveness
-         * disarmed, so isServerTimedOut() would never fire. Dropping the flag
-         * simply leaves it in reconnect_servers to be dialled again. */
-        server->takeReconnectSucceeded();
     }
     this->connectionStatusChange(status_for_server_count(count));
 }
@@ -816,17 +793,18 @@ void flight_safety_system::client_ssl::fss_server::outboundWorkerRun()
              * any previous connection. Doing it here is the whole point — the
              * caller's thread no longer waits on it, so an unreachable server
              * cannot delay reconnection to a healthy one. */
+            {
+                std::scoped_lock guard(this->outbound_lock);
+                this->reconnect_invalidated = false;
+            }
             bool ok = this->reconnect();
             {
                 std::scoped_lock guard(this->outbound_lock);
+                /* Close can run inside reconnect(), before it returns true.
+                 * Only this worker starts attempts, so invalidation belongs to
+                 * this attempt until its result has been published. */
+                this->reconnect_succeeded = ok && !this->reconnect_invalidated;
                 this->reconnect_busy = false;
-            }
-            /* Publish success only now: reconnect() has sent the version and
-             * identity handshake by the time it returns true, so the client can
-             * safely promote this server to its live list (see the header). */
-            if (ok)
-            {
-                this->reconnect_succeeded.store(true, std::memory_order_release);
             }
         }
         for (const auto &packed : work.sends)
@@ -896,7 +874,7 @@ void flight_safety_system::client_ssl::fss_server::queueReconnect()
     this->refreshClientConfig();
     {
         std::scoped_lock guard(this->outbound_lock);
-        if (this->outbound_stopping || this->reconnect_busy)
+        if (this->outbound_stopping || this->reconnect_busy || this->reconnect_succeeded)
         {
             return;
         }
@@ -909,7 +887,15 @@ void flight_safety_system::client_ssl::fss_server::queueReconnect()
 
 auto flight_safety_system::client_ssl::fss_server::takeReconnectSucceeded() -> bool
 {
-    return this->reconnect_succeeded.exchange(false, std::memory_order_acquire);
+    std::scoped_lock guard(this->outbound_lock);
+    return std::exchange(this->reconnect_succeeded, false);
+}
+
+void flight_safety_system::client_ssl::fss_server::invalidateReconnect()
+{
+    std::scoped_lock guard(this->outbound_lock);
+    this->reconnect_invalidated = true;
+    this->reconnect_succeeded = false;
 }
 
 auto flight_safety_system::client_ssl::fss_server::getDroppedSends() -> uint64_t

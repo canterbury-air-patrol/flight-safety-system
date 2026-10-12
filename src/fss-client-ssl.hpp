@@ -331,7 +331,11 @@ private:
      * expose the window inside reconnect() between installing the connection
      * and sending the handshake, during which sendMsgAll() could put telemetry
      * ahead of the mandatory version message. */
-    std::atomic<bool> reconnect_succeeded{false};
+    bool reconnect_succeeded{false};
+    /* Close invalidates both an in-flight attempt and an unconsumed success.
+     * Only the single worker resets this at the start of its next attempt.
+     * See docs/decisions/66-67-client-outbound-fanout.md. */
+    bool reconnect_invalidated{false};
     /* Bounded, drop-oldest: telemetry is loss-tolerant, so under sustained
      * backlog into a half-dead server the OLDEST queued frame is dropped
      * rather than the queue growing without bound — the same policy and
@@ -417,7 +421,7 @@ public:
     /* Schedule a reconnect on this server's outbound worker instead of dialling
      * inline (see the outbound-worker block above). Returns immediately, and
      * is a no-op while an attempt is
-     * already queued or in flight, so calling it every tick is safe. The
+     * already queued, in flight, or awaiting promotion, so calling it every tick is safe. The
      * backoff throttle still lives in reconnect() itself, so a queued attempt
      * inside the retry window costs a worker wake-up and nothing else. */
     void queueReconnect();
@@ -430,8 +434,13 @@ public:
     /* Consume the "the queued reconnect succeeded" signal (clearing it).
      * fss_client::attemptReconnect() polls this to move the server from
      * reconnect_servers to servers, which keeps every list mutation on the
-     * thread that owns servers_lock and out of the worker. */
+     * thread that owns servers_lock and out of the worker. Consumption and
+     * list promotion must both hold servers_lock, like invalidateReconnect().
+     * Both methods acquire outbound_lock; never acquire servers_lock while
+     * holding outbound_lock. */
     auto takeReconnectSucceeded() -> bool;
+    /* Called under the owning client's servers_lock when the connection ends. */
+    void invalidateReconnect();
     /* Cumulative frames this server's bounded outbound queue has dropped. */
     auto getDroppedSends() -> uint64_t;
     /* Stops this server's outbound worker and then the connection. Overrides

@@ -99,11 +99,45 @@ installing the connection and sending that handshake, during which
 `sendMsgAll()` could put telemetry ahead of the mandatory version message.
 Setting the flag afterwards preserves the previous ordering exactly.
 
-`serverRequiresReconnect()` discards a stale success for a server that is not in
-the live list: that is a connection which died between the dial finishing and
-the harvest, and promoting it would park a dead connection where nothing would
-flag it — a fresh connection starts with liveness disarmed, so
-`isServerTimedOut()` would never fire.
+### Early close invalidates the attempt (todo/84)
+
+Clearing a success flag on close was insufficient: the receive thread can
+observe close *inside* `reconnect()`, before the worker publishes success.
+The worker would then publish a dead connection anyway. A separate gap between
+consuming success and promoting the server could strand it in the same way.
+With liveness disarmed until the first received message, that dead entry could
+remain in the live list indefinitely and never retry.
+
+Close now invalidates both the in-flight attempt and any unconsumed success,
+under the server's `outbound_lock`. Only the single outbound worker resets that
+invalidation, immediately before starting its next attempt. It publishes success
+only if `reconnect()` returned true and the attempt was not invalidated, and
+clears the busy flag in the same critical section. No connection generation
+counter is needed: the worker serializes attempts and `reconnect()` detaches and
+joins the previous connection before installing the next handler.
+
+The client consumes success and promotes the entry while holding `servers_lock`,
+the same lock used by `serverRequiresReconnect()` to invalidate success and move
+live entries back to the retry list. Close therefore either prevents promotion
+or returns the promoted entry to the retry list. The lock order is always
+`servers_lock` then `outbound_lock`; the worker holds neither across blocking
+reconnection or message callbacks. Configuration callbacks remain outside both.
+
+`queueReconnect()` also refuses to queue over an unconsumed success. This covers
+publication between a maintenance pass's unsuccessful harvest and its subsequent
+queue call. Without this guard the worker could retire a healthy connection
+before the next pass promoted it.
+
+The handshake-before-telemetry rule is unchanged: publication still follows both
+version and identity sends. This fixes queued reconnection lifecycle only; the
+admission/status callback ordering identified by todo/86 remains separate work.
+
+`tests/client_fanout_test.cpp` forces close before publication, after publication,
+during scheduling of another server (the former harvest/promotion gap), and
+after promotion. Each case requires a subsequent dial, admission, and restored
+telemetry. Condition-variable gates and queued-send completion fences establish
+the ordering without timing sleeps. A separate case pins the unconsumed-success
+queue guard.
 
 ## Why the worker never touches the `fss_client`
 
