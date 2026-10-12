@@ -19,6 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   API and TLS connection layout change. **Consumers must rebuild.**
 
 ### Fixed
+- Keep client reconnect attempts eligible for retry when the peer closes before
+  success publication or promotion, and avoid redialling an unharvested success
+  (`docs/decisions/66-67-client-outbound-fanout.md`).
 - Resolve tied command timestamps by descending row ID during identification,
   matching polling and preventing an older command from being sent on reconnect.
 - Defer session thread joins to a cleanup worker so an identification stalled
