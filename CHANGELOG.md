@@ -19,6 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   API and TLS connection layout change. **Consumers must rebuild.**
 
 ### Fixed
+- Revalidate retry scheduling after configuration callbacks so overlapping or
+  reentrant maintenance cannot redial a promoted connection, and drain the old
+  connection before resetting invalidation for its replacement (PR #456).
 - Keep client reconnect attempts eligible for retry when the peer closes before
   success publication or promotion, and avoid redialling an unharvested success
   (`docs/decisions/66-67-client-outbound-fanout.md`).

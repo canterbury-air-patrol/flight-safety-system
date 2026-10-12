@@ -110,18 +110,32 @@ remain in the live list indefinitely and never retry.
 
 Close now invalidates both the in-flight attempt and any unconsumed success,
 under the server's `outbound_lock`. Only the single outbound worker resets that
-invalidation, immediately before starting its next attempt. It publishes success
-only if `reconnect()` returned true and the attempt was not invalidated, and
-clears the busy flag in the same critical section. No connection generation
-counter is needed: the worker serializes attempts and `reconnect()` detaches and
-joins the previous connection before installing the next handler.
+invalidation, **after detaching and draining the previous connection's handler**
+and before calling the virtual `reconnect()`. Resetting before retirement lets
+an in-flight old close invalidate a successful replacement (PR #456). The shared
+retirement helper also runs from base `reconnect()` for direct synchronous
+callers; that call is a no-op when the worker already retired the connection.
+Keeping the worker's reset outside the virtual call preserves reconnect overrides.
 
-The client consumes success and promotes the entry while holding `servers_lock`,
-the same lock used by `serverRequiresReconnect()` to invalidate success and move
-live entries back to the retry list. Close therefore either prevents promotion
-or returns the promoted entry to the retry list. The lock order is always
-`servers_lock` then `outbound_lock`; the worker holds neither across blocking
-reconnection or message callbacks. Configuration callbacks remain outside both.
+The worker publishes success only if `reconnect()` returned true and the attempt
+was not invalidated, and clears the busy flag in the same critical section. No
+connection generation counter is needed for this publication window: attempts
+are serialized and the previous handler has drained before the window opens.
+
+The client refreshes configuration outside its locks, then revalidates retry-list
+membership, consumes success, and either promotes or schedules an attempt under
+`servers_lock`. The prepared scheduling helper invokes no configuration callbacks.
+A callback or overlapping maintenance pass can promote or expire the server while
+configuration is read; membership must therefore be checked **after** that read.
+A pending-success flag alone is insufficient: another pass can consume it and
+promote the entry before a stale pass queues a second dial (PR #456).
+
+`serverRequiresReconnect()` uses the same list lock to invalidate success and move
+live entries back to retry. Close therefore either prevents promotion or returns
+the promoted entry to retry. The lock order is always `servers_lock` then
+`outbound_lock`; the worker holds neither across blocking reconnection or message
+callbacks. The low-level public `queueReconnect()` refreshes configuration itself;
+its callers manage membership, while client maintenance uses the prepared helper.
 
 `queueReconnect()` also refuses to queue over an unconsumed success. This covers
 publication between a maintenance pass's unsuccessful harvest and its subsequent
@@ -137,7 +151,11 @@ during scheduling of another server (the former harvest/promotion gap), and
 after promotion. Each case requires a subsequent dial, admission, and restored
 telemetry. Condition-variable gates and queued-send completion fences establish
 the ordering without timing sleeps. A separate case pins the unconsumed-success
-queue guard.
+queue guard. PR #456 adds reentrant maintenance that promotes during another
+pass's configuration callback, and a late old close while the worker is acquiring
+the previous connection for retirement. Both require service without a second dial.
+The retirement test injects the old close at the lifecycle seam; the transport's
+in-flight delivery barrier is independently covered by `handler_reentry_test.cpp`.
 
 ## Why the worker never touches the `fss_client`
 
