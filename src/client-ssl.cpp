@@ -246,8 +246,8 @@ void flight_safety_system::client_ssl::fss_client::attemptReconnect()
         this->serverRequiresReconnect(server);
     }
 
-    /* Phase (c): snapshot reconnect_servers, then consume success and promote
-     * each surviving entry under the lock. Schedule attempts outside the lock.
+    /* Phase (c): snapshot reconnect_servers, refresh configuration outside the
+     * lock, then consume success, promote, or schedule under the lock.
      *
      * The dial itself runs on each server's own outbound worker
      * (docs/decisions/66-67-client-outbound-fanout.md).
@@ -268,28 +268,27 @@ void flight_safety_system::client_ssl::fss_client::attemptReconnect()
     bool any_connected = false;
     for (auto const &server : reconnect_snapshot)
     {
+        /* Configuration virtuals may re-enter maintenance and promote or expire
+         * this server. Refresh outside the lock, then revalidate membership. */
+        server->refreshClientConfig();
+        std::scoped_lock lock(this->servers_lock);
+        auto found = std::find(this->reconnect_servers.begin(), this->reconnect_servers.end(), server);
+        if (found == this->reconnect_servers.end())
         {
-            /* Consume success and promote under the same lock as close. A
-             * close either invalidates success first or moves the promoted
-             * server back to reconnect_servers; there is no harvest gap.
-             * Lock order: servers_lock -> outbound_lock, never the reverse. */
-            std::scoped_lock lock(this->servers_lock);
-            auto found = std::find(this->reconnect_servers.begin(), this->reconnect_servers.end(), server);
-            if (found == this->reconnect_servers.end())
-            {
-                continue;
-            }
-            if (server->takeReconnectSucceeded())
-            {
-                this->servers.splice(this->servers.end(), this->reconnect_servers, found);
-                any_connected = true;
-                continue;
-            }
+            continue;
         }
-        /* Refreshing configuration calls user virtuals, so queue outside
-         * servers_lock. queueReconnect also checks for a success published
-         * since the check above, to avoid dialling over a healthy connection. */
-        server->queueReconnect();
+        /* Success consumption, promotion, and retry scheduling share the close
+         * path's lock. Another pass cannot consume success between this pass's
+         * check and queueing. Lock order: servers_lock -> outbound_lock. */
+        if (server->takeReconnectSucceeded())
+        {
+            this->servers.splice(this->servers.end(), this->reconnect_servers, found);
+            any_connected = true;
+        }
+        else
+        {
+            server->queueReconnectPrepared();
+        }
     }
 
     /* Phase (d): tear down anything updateServers() expired
@@ -793,8 +792,11 @@ void flight_safety_system::client_ssl::fss_server::outboundWorkerRun()
              * any previous connection. Doing it here is the whole point — the
              * caller's thread no longer waits on it, so an unreachable server
              * cannot delay reconnection to a healthy one. */
+            this->retireConnection();
             {
                 std::scoped_lock guard(this->outbound_lock);
+                /* The old handler is now detached and its callbacks drained.
+                 * A late old close must not invalidate the replacement. */
                 this->reconnect_invalidated = false;
             }
             bool ok = this->reconnect();
@@ -872,6 +874,11 @@ void flight_safety_system::client_ssl::fss_server::queueReconnect()
      * Doing it per attempt is also what keeps a configuration change picked up
      * as promptly as reading the client live used to. */
     this->refreshClientConfig();
+    this->queueReconnectPrepared();
+}
+
+void flight_safety_system::client_ssl::fss_server::queueReconnectPrepared()
+{
     {
         std::scoped_lock guard(this->outbound_lock);
         if (this->outbound_stopping || this->reconnect_busy || this->reconnect_succeeded)
@@ -1079,20 +1086,8 @@ void flight_safety_system::client_ssl::fss_server::resetBackoff()
     this->effective_delay = retry_delay_start;
 }
 
-auto flight_safety_system::client_ssl::fss_server::reconnect() -> bool
+void flight_safety_system::client_ssl::fss_server::retireConnection()
 {
-    /* Consume a reset requested by the recv thread (connection closed):
-     * retry immediately and restart the backoff progression. All backoff
-     * fields are only ever touched on this thread (see the header), so the
-     * atomic flag is the only cross-thread hand-off. */
-    if (this->backoff_reset_requested.exchange(false))
-    {
-        this->resetBackoff();
-    }
-
-    uint64_t ts = this->clock->now_ms();
-    uint64_t elapsed_time = ts - this->last_tried;
-
     /* Retire any previous connection properly (todo/65). Detach the handler
      * FIRST so the old connection's closed event queues on the dying
      * connection instead of reaching processMessage(), where it would be
@@ -1111,6 +1106,26 @@ auto flight_safety_system::client_ssl::fss_server::reconnect() -> bool
         old_conn->disconnect();
         this->clearConnection();
     }
+}
+
+auto flight_safety_system::client_ssl::fss_server::reconnect() -> bool
+{
+    /* Consume a reset requested by the recv thread (connection closed):
+     * retry immediately and restart the backoff progression. All backoff
+     * fields are only ever touched on this thread (see the header), so the
+     * atomic flag is the only cross-thread hand-off. */
+    if (this->backoff_reset_requested.exchange(false))
+    {
+        this->resetBackoff();
+    }
+
+    uint64_t ts = this->clock->now_ms();
+    uint64_t elapsed_time = ts - this->last_tried;
+
+    /* The worker has already retired the old connection before opening the
+     * new attempt's invalidation window. Direct synchronous callers still
+     * need this barrier here. */
+    this->retireConnection();
 
     if (elapsed_time > this->effective_delay)
     {

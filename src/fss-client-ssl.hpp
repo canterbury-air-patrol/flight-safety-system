@@ -246,6 +246,13 @@ public:
 
 class fss_server : public flight_safety_system::transport::fss_message_cb {
 private:
+    friend class fss_client;
+    /* Callback-free scheduling after refreshClientConfig(). The client holds
+     * servers_lock across its membership check and this call. */
+    void queueReconnectPrepared();
+    /* Detach and drain the previous handler before a new attempt can accept
+     * close invalidations. Never called with servers_lock or outbound_lock held. */
+    void retireConnection();
     fss_client *client;
     std::string address;
     uint16_t port;
@@ -333,7 +340,8 @@ private:
      * ahead of the mandatory version message. */
     bool reconnect_succeeded{false};
     /* Close invalidates both an in-flight attempt and an unconsumed success.
-     * Only the single worker resets this at the start of its next attempt.
+     * Only the single worker resets this, after draining the old connection
+     * and before starting its next attempt.
      * See docs/decisions/66-67-client-outbound-fanout.md. */
     bool reconnect_invalidated{false};
     /* Bounded, drop-oldest: telemetry is loss-tolerant, so under sustained
@@ -420,9 +428,10 @@ public:
     void queueSend(const std::shared_ptr<const flight_safety_system::transport::buf_len> &packed);
     /* Schedule a reconnect on this server's outbound worker instead of dialling
      * inline (see the outbound-worker block above). Returns immediately, and
-     * is a no-op while an attempt is
-     * already queued, in flight, or awaiting promotion, so calling it every tick is safe. The
-     * backoff throttle still lives in reconnect() itself, so a queued attempt
+     * is a no-op while an attempt is queued, in flight, or awaiting promotion.
+     * Low-level callers manage list membership; client maintenance uses the
+     * prepared helper under servers_lock to exclude stale scheduling passes.
+     * The backoff throttle still lives in reconnect(), so a queued attempt
      * inside the retry window costs a worker wake-up and nothing else. */
     void queueReconnect();
     /* Re-read the owning client's configuration into this server's snapshot

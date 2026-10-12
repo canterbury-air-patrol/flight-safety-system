@@ -277,6 +277,58 @@ public:
     }
 };
 
+/* Pause the worker as it acquires the previous connection for retirement.
+ * A close delivered here still belongs to that previous connection. */
+class RetirementGateServer : public GatedDialServer {
+    std::mutex retirement_lock{};
+    std::condition_variable retirement_cv{};
+    bool armed{false};
+    bool entered{false};
+    bool released{false};
+public:
+    using GatedDialServer::GatedDialServer;
+    using fss::transport::fss_message_cb::setConnection;
+    RetirementGateServer(const RetirementGateServer &) = delete;
+    RetirementGateServer(RetirementGateServer &&) = delete;
+    auto operator=(const RetirementGateServer &) -> RetirementGateServer & = delete;
+    auto operator=(RetirementGateServer &&) -> RetirementGateServer & = delete;
+    ~RetirementGateServer() override { this->disconnect(); }
+
+    void armRetirement()
+    {
+        std::scoped_lock guard(this->retirement_lock);
+        this->armed = true;
+    }
+    auto waitRetirement() -> bool
+    {
+        std::unique_lock<std::mutex> guard(this->retirement_lock);
+        return this->retirement_cv.wait_for(guard, std::chrono::seconds(2), [&]() -> bool { return this->entered; });
+    }
+    void releaseRetirement()
+    {
+        std::scoped_lock guard(this->retirement_lock);
+        this->released = true;
+        this->retirement_cv.notify_all();
+    }
+    auto getConnection() -> std::shared_ptr<fss::transport::fss_connection> override
+    {
+        auto previous = fss_server::getConnection();
+        std::unique_lock<std::mutex> guard(this->retirement_lock);
+        if (std::exchange(this->armed, false))
+        {
+            this->entered = true;
+            this->retirement_cv.notify_all();
+            this->retirement_cv.wait(guard, [&]() -> bool { return this->released; });
+        }
+        return previous;
+    }
+    void disconnect() override
+    {
+        this->releaseRetirement();
+        GatedDialServer::disconnect();
+    }
+};
+
 auto make_position() -> std::shared_ptr<fss::transport::fss_message_position_report>
 {
     return std::make_shared<fss::transport::fss_message_position_report>(-43.5, 172.5, 300U, 0U, 0U, int16_t{0}, 0U,
@@ -508,11 +560,12 @@ TEST_CASE("client: an early close cannot strand a queued reconnect (todo/84)", "
     {
         auto other = std::make_shared<InstantDialServer>(client.get(), "other.example", uint16_t{20209}, "", "", "");
         client->add(other);
-        /* In the old two-phase harvest, this callback lands after the first
-         * success was consumed but before its promotion. With atomic promotion
-         * it instead removes the already-promoted server, preserving retry. */
+        /* Skip the first server's refresh and close it during the second's.
+         * It has already been promoted by then and must return to retry. */
         client->on_config_read = [&]() {
-            server->processMessage(std::make_shared<fss::transport::fss_message_closed>());
+            client->on_config_read = [&]() {
+                server->processMessage(std::make_shared<fss::transport::fss_message_closed>());
+            };
         };
         client->attemptReconnect();
         REQUIRE_FALSE(static_cast<bool>(client->on_config_read));
@@ -570,5 +623,74 @@ TEST_CASE("client: an unharvested reconnect success prevents another queued dial
     client->attemptReconnect();
     client->sendMsgAll(make_position());
     REQUIRE(conn->waitCount(5));
+    client->disconnect();
+}
+
+TEST_CASE("client: a reentrant maintenance pass cannot redial a promoted success", "[reconnect-race]")
+{
+    auto client = std::make_shared<FanoutClient>();
+    auto server = std::make_shared<GatedDialServer>(client.get(), "retry.example", uint16_t{20211}, "", "", "");
+    client->add(server);
+    client->attemptReconnect();
+    REQUIRE(server->waitIdentify(1));
+    auto conn = std::dynamic_pointer_cast<RecordingConnection>(server->getConnection());
+    REQUIRE(conn != nullptr);
+
+    /* The outer pass sees an unfinished attempt. During its config callback,
+     * the worker publishes success and a nested pass consumes and promotes it.
+     * A pending-success flag alone cannot stop the outer pass's stale retry. */
+    bool published = false;
+    client->on_config_read = [&]() {
+        server->queueSend(make_position()->getPacked());
+        server->releaseIdentify(1);
+        published = conn->waitCount(3);
+        client->attemptReconnect();
+    };
+    client->attemptReconnect();
+    REQUIRE(published);
+    REQUIRE_FALSE(static_cast<bool>(client->on_config_read));
+
+    /* This worker fence would stall behind the erroneous second dial. */
+    server->queueSend(make_position()->getPacked());
+    REQUIRE(conn->waitCount(4));
+    REQUIRE(server->dials_entered.load() == 1);
+    server->processMessage(std::make_shared<fss::transport::fss_message_server_list>());
+    REQUIRE(client->last_status.load() == fss::client_ssl::CLIENT_CONNECTION_STATUS_CONNECTED_1_SERVER);
+    client->sendMsgAll(make_position());
+    REQUIRE(conn->waitCount(5));
+    REQUIRE(server->getConnection() == conn);
+    client->disconnect();
+}
+
+TEST_CASE("client: an old close during retirement cannot invalidate the replacement", "[reconnect-race]")
+{
+    auto client = std::make_shared<FanoutClient>();
+    auto server = std::make_shared<RetirementGateServer>(client.get(), "retry.example", uint16_t{20212}, "", "", "");
+    auto old_conn = std::make_shared<RecordingConnection>();
+    server->setConnection(old_conn);
+    old_conn->setHandler(server.get());
+    client->add(server);
+    /* A timeout has already scheduled the old connection for replacement;
+     * its receive thread's close notification has not arrived yet. */
+    client->serverRequiresReconnect(server.get());
+    server->armRetirement();
+    client->attemptReconnect();
+    REQUIRE(server->waitRetirement());
+    server->processMessage(std::make_shared<fss::transport::fss_message_closed>());
+    server->releaseRetirement();
+
+    REQUIRE(server->waitIdentify(1));
+    auto replacement = std::dynamic_pointer_cast<RecordingConnection>(server->getConnection());
+    REQUIRE(replacement != nullptr);
+    REQUIRE(replacement != old_conn);
+    server->queueSend(make_position()->getPacked());
+    server->releaseIdentify(1);
+    REQUIRE(replacement->waitCount(3));
+    client->attemptReconnect();
+    server->processMessage(std::make_shared<fss::transport::fss_message_server_list>());
+    REQUIRE(client->last_status.load() == fss::client_ssl::CLIENT_CONNECTION_STATUS_CONNECTED_1_SERVER);
+    client->sendMsgAll(make_position());
+    REQUIRE(replacement->waitCount(4));
+    REQUIRE(server->dials_entered.load() == 1);
     client->disconnect();
 }
