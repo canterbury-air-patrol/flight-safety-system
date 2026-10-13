@@ -221,29 +221,32 @@ void flight_safety_system::client_ssl::fss_client::connectTo(const std::string &
 
 void flight_safety_system::client_ssl::fss_client::attemptReconnect()
 {
-    /* Phase (a): snapshot servers under the lock to find timed-out entries.
-     * isServerTimedOut() reads server-local atomics — no list access needed. */
-    std::list<std::shared_ptr<fss_server>> servers_snapshot;
+    /* Phase (a): capture each connection while its server is still live.
+     * Reading it later could pair a worker's newly installed connection with
+     * the old liveness state, before reconnect() has reset that state.
+     * Qualified access avoids user virtual callbacks under servers_lock. */
+    std::list<std::pair<std::shared_ptr<fss_server>, std::shared_ptr<transport::fss_connection>>> servers_snapshot;
     {
         std::scoped_lock lock(this->servers_lock);
-        servers_snapshot = this->servers;
-    }
-    std::list<fss_server *> timed_out;
-    for (const auto &server : servers_snapshot)
-    {
-        if (server->isServerTimedOut())
+        for (const auto &server : this->servers)
         {
-            timed_out.push_back(server.get());
+            servers_snapshot.emplace_back(server, server->transport::fss_message_cb::getConnection());
+        }
+    }
+    std::list<std::pair<fss_server *, std::shared_ptr<transport::fss_connection>>> timed_out;
+    for (const auto &[server, connection] : servers_snapshot)
+    {
+        if (connection != nullptr && server->isServerTimedOut())
+        {
+            timed_out.emplace_back(server.get(), connection);
         }
     }
 
-    /* Phase (b): schedule reconnection for timed-out servers.
-     * serverRequiresReconnect() acquires servers_lock internally; we must NOT
-     * hold it here to avoid a self-deadlock (plain std::mutex). */
-    for (auto *server : timed_out)
+    /* Phase (b): validate and schedule under servers_lock, with status
+     * callbacks outside it. The snapshot keeps servers and connections alive. */
+    for (const auto &[server, connection] : timed_out)
     {
-        FSS_LOG_WARN("client", "Server connection timed out, scheduling reconnect");
-        this->serverRequiresReconnect(server);
+        this->requireReconnect(server, connection);
     }
 
     /* Phase (c): snapshot reconnect_servers, refresh configuration outside the
@@ -639,6 +642,12 @@ void flight_safety_system::client_ssl::fss_client::serverAdmitted(flight_safety_
 void flight_safety_system::client_ssl::fss_client::serverRequiresReconnect(
     flight_safety_system::client_ssl::fss_server *server)
 {
+    this->requireReconnect(server, nullptr);
+}
+
+void flight_safety_system::client_ssl::fss_client::requireReconnect(
+    fss_server *server, const std::shared_ptr<transport::fss_connection> &timed_out_connection)
+{
     /* Perform the list mutation under the lock, then derive the connection
      * status from the resulting server count and invoke the virtual callback
      * outside the lock.  connectionStatusChange() may re-enter the client
@@ -647,6 +656,22 @@ void flight_safety_system::client_ssl::fss_client::serverRequiresReconnect(
     size_t count = 0;
     {
         std::scoped_lock lock(this->servers_lock);
+        if (timed_out_connection != nullptr)
+        {
+            /* A server outlives its connections. Validate both membership and
+             * identity under the promotion/scheduling lock before acting on a
+             * timeout observed outside it. A live entry has no dial in flight;
+             * keeping the connection alive also prevents pointer reuse (ABA).
+             * Retry/expired entries must not have their new attempt invalidated. */
+            auto live = std::find_if(this->servers.begin(), this->servers.end(),
+                                     [server](const auto &entry) -> bool { return entry.get() == server; });
+            if (live == this->servers.end() ||
+                server->transport::fss_message_cb::getConnection() != timed_out_connection)
+            {
+                return;
+            }
+            FSS_LOG_WARN("client", "Server connection timed out, scheduling reconnect");
+        }
         for (auto it = this->servers.begin(); it != this->servers.end(); ++it)
         {
             if (it->get() == server)

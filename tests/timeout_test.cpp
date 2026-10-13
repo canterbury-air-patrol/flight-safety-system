@@ -221,6 +221,7 @@ namespace {
  * fss_client's connected-servers list without a real TLS handshake. */
 class AlwaysConnectedServer : public fss::client_ssl::fss_server {
 public:
+    using fss::transport::fss_message_cb::setConnection;
     using fss_server::fss_server;
     AlwaysConnectedServer(const AlwaysConnectedServer &) = delete;
     AlwaysConnectedServer(AlwaysConnectedServer &&) = delete;
@@ -236,6 +237,7 @@ protected:
  * connection, for exercising post-reconnect state. */
 class ReconnectingServer : public fss::client_ssl::fss_server {
 public:
+    using fss::transport::fss_message_cb::setConnection;
     using fss_server::fss_server;
     ReconnectingServer(const ReconnectingServer &) = delete;
     ReconnectingServer(ReconnectingServer &&) = delete;
@@ -318,7 +320,8 @@ TEST_CASE("timeout: attemptReconnect moves timed-out server to reconnect queue")
     auto clock = std::make_shared<FakeClock>();
     server->setClock(clock);
 
-    /* Register the server as "connected" with the client. */
+    /* Timeout recovery validates the connection that was examined. */
+    server->setConnection(std::make_shared<FakeConnection>());
     client->add(server);
 
     /* Start liveness, then let it expire. */
@@ -348,6 +351,7 @@ TEST_CASE("timeout: successful reconnect restores cold-start liveness")
     auto server = std::make_shared<ReconnectingServer>(client.get(), "127.0.0.1", uint16_t{9999}, "", "", "");
     auto clock = std::make_shared<FakeClock>();
     server->setClock(clock);
+    server->setConnection(std::make_shared<FakeConnection>());
     client->add(server);
 
     /* Arm liveness, then let it expire; the reconnect driver tears down and
