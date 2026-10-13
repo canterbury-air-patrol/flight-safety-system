@@ -137,6 +137,20 @@ the promoted entry to retry. The lock order is always `servers_lock` then
 callbacks. The low-level public `queueReconnect()` refreshes configuration itself;
 its callers manage membership, while client maintenance uses the prepared helper.
 
+Timeout decisions also retain the connection captured with each live server
+under `servers_lock` (todo/90). Reading the connection later could capture a
+replacement while the worker still exposes the previous connection's liveness.
+Before acting, maintenance checks both live membership and connection identity
+under that same lock. A live entry has no client-scheduled dial in flight, and
+the retained shared pointer prevents address reuse. Retry and expired entries
+are ignored, so stale timeouts cannot invalidate a replacement attempt either.
+The locked reads explicitly call the base connection accessor: user overrides
+must not run under the list lock. Its connection mutex is held only for the
+snapshot; callbacks and teardown run after locks are released. Timeout recovery
+uses a private validated path rather than the public unconditional
+`serverRequiresReconnect()` virtual hook. Both paths still report accepted
+status changes through `connectionStatusChange()` outside the list lock.
+
 `queueReconnect()` also refuses to queue over an unconsumed success. This covers
 publication between a maintenance pass's unsuccessful harvest and its subsequent
 queue call. Without this guard the worker could retire a healthy connection

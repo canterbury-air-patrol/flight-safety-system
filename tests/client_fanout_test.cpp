@@ -37,6 +37,22 @@ namespace {
 
 namespace fss = flight_safety_system;
 
+/* Pause one clock read with a nested maintenance pass. The dial gates and
+ * send fences below establish ordering without scheduling sleeps. */
+class ReentrantClock : public fss::IClock {
+public:
+    uint64_t now{10000};
+    mutable std::function<void()> on_read{};
+    auto now_ms() const -> uint64_t override
+    {
+        if (auto callback = std::exchange(this->on_read, {}))
+        {
+            callback();
+        }
+        return this->now;
+    }
+};
+
 /* A connection whose send blocks until it is released, standing in for a peer
  * that completes TLS and then stops reading. shutdownSocket() is the release
  * hook — that is exactly what fss_server::disconnect() calls to unblock a
@@ -236,6 +252,9 @@ class GatedDialServer : public InstantDialServer {
     int entered{0};
     int released{0};
     bool stopping{false};
+    bool gate_install{false};
+    int installed{0};
+    int install_released{0};
 public:
     using InstantDialServer::InstantDialServer;
     GatedDialServer(const GatedDialServer &) = delete;
@@ -244,6 +263,23 @@ public:
     auto operator=(GatedDialServer &&) -> GatedDialServer & = delete;
     ~GatedDialServer() override { this->disconnect(); }
 
+    void gateInstallation()
+    {
+        std::scoped_lock guard(this->gate_lock);
+        this->gate_install = true;
+    }
+    auto waitInstalled(int attempt) -> bool
+    {
+        std::unique_lock<std::mutex> guard(this->gate_lock);
+        return this->gate_cv.wait_for(guard, std::chrono::seconds(2),
+                                      [&]() -> bool { return this->installed >= attempt; });
+    }
+    void releaseInstallation(int attempt)
+    {
+        std::scoped_lock guard(this->gate_lock);
+        this->install_released = attempt;
+        this->gate_cv.notify_all();
+    }
     auto waitIdentify(int attempt) -> bool
     {
         std::unique_lock<std::mutex> guard(this->gate_lock);
@@ -274,6 +310,18 @@ public:
             this->gate_cv.notify_all();
         }
         fss_server::disconnect();
+    }
+protected:
+    auto reconnect_to() -> bool override
+    {
+        bool ok = InstantDialServer::reconnect_to();
+        std::unique_lock<std::mutex> guard(this->gate_lock);
+        ++this->installed;
+        this->gate_cv.notify_all();
+        this->gate_cv.wait(guard, [&]() -> bool {
+            return this->stopping || !this->gate_install || this->install_released >= this->installed;
+        });
+        return ok;
     }
 };
 
@@ -692,5 +740,150 @@ TEST_CASE("client: an old close during retirement cannot invalidate the replacem
     client->sendMsgAll(make_position());
     REQUIRE(replacement->waitCount(4));
     REQUIRE(server->dials_entered.load() == 1);
+    client->disconnect();
+}
+
+TEST_CASE("client: a stale timeout cannot redial a healthy replacement (todo/90)", "[reconnect-race]")
+{
+    auto client = std::make_shared<FanoutClient>();
+    auto clock = std::make_shared<ReentrantClock>();
+    auto server = std::make_shared<GatedDialServer>(client.get(), "retry.example", uint16_t{20213}, "", "", "");
+    server->setClock(clock);
+    client->add(server);
+    client->attemptReconnect();
+    REQUIRE(server->waitIdentify(1));
+    auto old_conn = std::dynamic_pointer_cast<RecordingConnection>(server->getConnection());
+    REQUIRE(old_conn != nullptr);
+    server->queueSend(make_position()->getPacked());
+    server->releaseIdentify(1);
+    REQUIRE(old_conn->waitCount(3));
+    client->attemptReconnect();
+    server->processMessage(std::make_shared<fss::transport::fss_message_server_list>());
+    clock->now = 50000;
+
+    std::shared_ptr<RecordingConnection> replacement{};
+    bool admit_before_resume = false;
+    auto replace = [&]() {
+        server->processMessage(std::make_shared<fss::transport::fss_message_closed>());
+        client->attemptReconnect();
+        REQUIRE(server->waitIdentify(2));
+        replacement = std::dynamic_pointer_cast<RecordingConnection>(server->getConnection());
+        REQUIRE(replacement != nullptr);
+        REQUIRE(replacement != old_conn);
+        server->queueSend(make_position()->getPacked());
+        server->releaseIdentify(2);
+        REQUIRE(replacement->waitCount(3));
+        client->attemptReconnect();
+        if (admit_before_resume)
+        {
+            server->processMessage(std::make_shared<fss::transport::fss_message_server_list>());
+        }
+    };
+
+    SECTION("replacement promoted during the old timeout clock read")
+    {
+        clock->on_read = replace;
+    }
+    SECTION("replacement admitted after the timeout decision but before its action")
+    {
+        /* The next live server's clock pauses the scan after the first
+         * server's timeout was already recorded. */
+        admit_before_resume = true;
+        auto probe_clock = std::make_shared<ReentrantClock>();
+        auto probe = std::make_shared<InjectableServer>(client.get(), "probe.example", uint16_t{20214}, "", "", "");
+        probe->setClock(probe_clock);
+        probe->setConnection(std::make_shared<RecordingConnection>());
+        client->add(probe);
+        probe->processMessage(std::make_shared<fss::transport::fss_message_identity_required>());
+        probe_clock->on_read = replace;
+    }
+    client->attemptReconnect();
+    REQUIRE(replacement != nullptr);
+    if (admit_before_resume)
+    {
+        REQUIRE(server->isAdmitted());
+        REQUIRE(client->last_status.load() == fss::client_ssl::CLIENT_CONNECTION_STATUS_CONNECTED_1_SERVER);
+    }
+    else
+    {
+        REQUIRE_FALSE(server->isServerTimedOut());
+        server->processMessage(std::make_shared<fss::transport::fss_message_server_list>());
+    }
+    /* A direct worker fence catches even a queued extra dial; fan-out then
+     * proves that the replacement still belongs to the live list. */
+    server->queueSend(make_position()->getPacked());
+    REQUIRE(replacement->waitCount(4));
+    REQUIRE(server->dials_entered.load() == 2);
+    client->sendMsgAll(make_position());
+    REQUIRE(replacement->waitCount(5));
+    REQUIRE(server->getConnection() == replacement);
+
+    /* A genuine timeout on the current connection must still recover. */
+    clock->now = 90000;
+    client->attemptReconnect();
+    REQUIRE(server->waitIdentify(3));
+    REQUIRE_FALSE(server->isAdmitted());
+    REQUIRE(server->dials_entered.load() == 3);
+    server->releaseIdentify(3);
+    client->disconnect();
+}
+
+TEST_CASE("client: timeout snapshot cannot pair a new connection with old liveness", "[reconnect-race]")
+{
+    auto client = std::make_shared<FanoutClient>();
+    auto probe_clock = std::make_shared<ReentrantClock>();
+    auto probe = std::make_shared<InjectableServer>(client.get(), "probe.example", uint16_t{20215}, "", "", "");
+    probe->setClock(probe_clock);
+    probe->setConnection(std::make_shared<RecordingConnection>());
+    client->add(probe);
+    probe->processMessage(std::make_shared<fss::transport::fss_message_identity_required>());
+
+    auto clock = std::make_shared<ReentrantClock>();
+    auto server = std::make_shared<GatedDialServer>(client.get(), "retry.example", uint16_t{20216}, "", "", "");
+    server->setClock(clock);
+    client->add(server);
+    client->attemptReconnect();
+    REQUIRE(server->waitIdentify(1));
+    auto old_conn = std::dynamic_pointer_cast<RecordingConnection>(server->getConnection());
+    REQUIRE(old_conn != nullptr);
+    server->queueSend(make_position()->getPacked());
+    server->releaseIdentify(1);
+    REQUIRE(old_conn->waitCount(3));
+    client->attemptReconnect();
+    server->processMessage(std::make_shared<fss::transport::fss_message_server_list>());
+    clock->now = 50000;
+    server->gateInstallation();
+
+    std::shared_ptr<RecordingConnection> replacement{};
+    probe_clock->on_read = [&]() {
+        server->processMessage(std::make_shared<fss::transport::fss_message_closed>());
+        client->attemptReconnect();
+        REQUIRE(server->waitInstalled(2));
+        replacement = std::dynamic_pointer_cast<RecordingConnection>(server->getConnection());
+        REQUIRE(replacement != nullptr);
+        REQUIRE(replacement != old_conn);
+        /* Installation is visible, but the worker has not reset old liveness.
+         * The outer pass next examines this server. Finish and promote the
+         * replacement only after that pass observes the old armed flag. */
+        clock->on_read = [&]() {
+            server->releaseInstallation(2);
+            REQUIRE(server->waitIdentify(2));
+            server->queueSend(make_position()->getPacked());
+            server->releaseIdentify(2);
+            REQUIRE(replacement->waitCount(3));
+            client->attemptReconnect();
+        };
+    };
+    client->attemptReconnect();
+    REQUIRE(replacement != nullptr);
+    REQUIRE_FALSE(static_cast<bool>(clock->on_read));
+    server->queueSend(make_position()->getPacked());
+    REQUIRE(replacement->waitCount(4));
+    REQUIRE(server->dials_entered.load() == 2);
+    server->processMessage(std::make_shared<fss::transport::fss_message_server_list>());
+    REQUIRE(client->last_status.load() == fss::client_ssl::CLIENT_CONNECTION_STATUS_CONNECTED_1_SERVER);
+    client->sendMsgAll(make_position());
+    REQUIRE(replacement->waitCount(5));
+    REQUIRE(server->getConnection() == replacement);
     client->disconnect();
 }

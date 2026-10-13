@@ -19,6 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   API and TLS connection layout change. **Consumers must rebuild.**
 
 ### Fixed
+- Bind client timeout decisions to the connection captured while live, so a
+  stale maintenance pass cannot redial a healthy replacement or clear its
+  admission (todo/90).
 - Revalidate retry scheduling after configuration callbacks so overlapping or
   reentrant maintenance cannot redial a promoted connection, and drain the old
   connection before resetting invalidation for its replacement (PR #456).

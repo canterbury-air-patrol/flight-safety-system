@@ -95,6 +95,8 @@ private:
      * Takes servers_lock itself, so callers must not already hold it. */
     void updateConfigured();
     void notifyConnectionStatus();
+    void requireReconnect(fss_server *server,
+                          const std::shared_ptr<flight_safety_system::transport::fss_connection> &timed_out_connection);
     /* How many live servers have actually admitted this client (todo/79).
      * Precondition: servers_lock held. This — not servers.size() — is what
      * connectionStatusChange() reports; see serverAdmitted().
@@ -198,6 +200,9 @@ public:
      * responses. */
     virtual auto getSkewedTimestamp() const -> uint64_t;
     virtual auto isConfigured() const -> bool;
+    /* Unconditional recovery for close/protocol failure. Maintenance timeouts
+     * use a private connection-validated path; observe connectionStatusChange
+     * for status notifications from either path. */
     virtual void serverRequiresReconnect(fss_server *server);
     /* Record that `server` has admitted this client, and report the resulting
      * connection status if that changed the admitted count (todo/79).
