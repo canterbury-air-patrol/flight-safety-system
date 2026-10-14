@@ -14,11 +14,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   failed persistence with its evidence (todo/77).
 
 ### Changed
+- Client maintenance timeouts use connection-validated internal recovery and no
+  longer dispatch `serverRequiresReconnect()` overrides. Close and protocol
+  failures still use that hook. Subclasses observing timeout status should use
+  `connectionStatusChange()`; custom recovery overrides need migration. Client
+  consumers must rebuild for the synchronized liveness state layout.
 - Require fss-web `assets` migration **0017** before deploying this server.
 - Advance all library sonames from `.so.4` to `.so.5` for the transport evidence
   API and TLS connection layout change. **Consumers must rebuild.**
 
 ### Fixed
+- Cancel pending client timeouts when fresh traffic arrives on the same
+  connection before recovery is committed, and avoid unsigned timeout arithmetic
+  underflow when a receive timestamp is newer than the sampled clock (PR #458).
 - Bind client timeout decisions to the connection captured while live, so a
   stale maintenance pass cannot redial a healthy replacement or clear its
   admission (todo/90).
