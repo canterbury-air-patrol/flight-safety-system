@@ -285,6 +285,10 @@ private:
     std::atomic<bool> backoff_reset_requested{false};
     void resetBackoff();
     std::shared_ptr<flight_safety_system::IClock> clock{std::make_shared<flight_safety_system::MonotonicClock>()};
+    /* Serializes message refresh with timeout validation and retry mutation.
+     * Lock order: client servers_lock -> liveness_lock -> outbound_lock.
+     * Clock reads and callbacks must run outside these locks. */
+    std::mutex liveness_lock{};
     std::atomic<bool> liveness_active{false};
     std::atomic<uint64_t> last_message_received_time{0};
     uint64_t server_timeout_ms{30000};

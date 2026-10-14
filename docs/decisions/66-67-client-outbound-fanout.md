@@ -151,6 +151,26 @@ uses a private validated path rather than the public unconditional
 `serverRequiresReconnect()` virtual hook. Both paths still report accepted
 status changes through `connectionStatusChange()` outside the list lock.
 
+Final timeout validation also rechecks liveness (PR #458 review). The clock is
+sampled outside all locks; then `servers_lock` and the server's `liveness_lock`
+serialize validation and retry-list mutation against message timestamp refresh.
+A refresh that wins this lock cancels a still-pending timeout. A timeout that
+wins commits recovery; later traffic cannot undo that decision. The comparison
+rejects receive timestamps equal to or newer than the sampled time, avoiding
+unsigned underflow if a receive happens while the clock read is in progress.
+Message handling releases `liveness_lock` before admission or other callbacks;
+reconnect resets liveness under that lock before installing the handler. The
+nested lock order is `servers_lock` -> `liveness_lock` -> `outbound_lock`.
+
+The hook behavior above is an intentional compatibility change, not transparent
+preservation of existing overrides. Calling the old unconditional hook after
+validation would reopen the lifecycle race; calling arbitrary overrides while
+locked could deadlock. Subclasses observing status should migrate to
+`connectionStatusChange()`, which remains outside all locks for both paths.
+Overrides implementing custom timeout recovery must adapt to internal timeout
+scheduling; close/protocol-failure overrides retain their prior behavior. No
+new overridable recovery hook is introduced without a connection-bound contract.
+
 `queueReconnect()` also refuses to queue over an unconsumed success. This covers
 publication between a maintenance pass's unsuccessful harvest and its subsequent
 queue call. Without this guard the worker could retire a healthy connection

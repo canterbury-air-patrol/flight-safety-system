@@ -45,11 +45,12 @@ public:
     mutable std::function<void()> on_read{};
     auto now_ms() const -> uint64_t override
     {
+        auto sampled = this->now;
         if (auto callback = std::exchange(this->on_read, {}))
         {
             callback();
         }
-        return this->now;
+        return sampled;
     }
 };
 
@@ -885,5 +886,64 @@ TEST_CASE("client: timeout snapshot cannot pair a new connection with old livene
     client->sendMsgAll(make_position());
     REQUIRE(replacement->waitCount(5));
     REQUIRE(server->getConnection() == replacement);
+    client->disconnect();
+}
+
+TEST_CASE("client: fresh traffic cancels a pending timeout on the same connection", "[reconnect-race]")
+{
+    auto client = std::make_shared<FanoutClient>();
+    auto clock = std::make_shared<ReentrantClock>();
+    auto server = std::make_shared<GatedDialServer>(client.get(), "retry.example", uint16_t{20217}, "", "", "");
+    server->setClock(clock);
+    client->add(server);
+    client->attemptReconnect();
+    REQUIRE(server->waitIdentify(1));
+    auto conn = std::dynamic_pointer_cast<RecordingConnection>(server->getConnection());
+    REQUIRE(conn != nullptr);
+    server->queueSend(make_position()->getPacked());
+    server->releaseIdentify(1);
+    REQUIRE(conn->waitCount(3));
+    client->attemptReconnect();
+    server->processMessage(std::make_shared<fss::transport::fss_message_server_list>());
+    clock->now = 50000;
+
+    auto probe_clock = std::make_shared<ReentrantClock>();
+    auto probe = std::make_shared<InjectableServer>(client.get(), "probe.example", uint16_t{20218}, "", "", "");
+    probe->setClock(probe_clock);
+    probe->setConnection(std::make_shared<RecordingConnection>());
+    client->add(probe);
+    probe->processMessage(std::make_shared<fss::transport::fss_message_identity_required>());
+
+    auto refresh = [&]() { server->processMessage(std::make_shared<fss::transport::fss_message_server_list>()); };
+    SECTION("message arrives after detection but before validation")
+    {
+        probe_clock->on_read = refresh;
+    }
+    SECTION("message timestamp is newer than the validation clock sample")
+    {
+        probe_clock->on_read = [&]() {
+            clock->on_read = [&]() {
+                clock->now = 60000;
+                refresh();
+            };
+        };
+    }
+    client->attemptReconnect();
+    REQUIRE_FALSE(static_cast<bool>(probe_clock->on_read));
+    REQUIRE_FALSE(static_cast<bool>(clock->on_read));
+    REQUIRE(server->isAdmitted());
+    REQUIRE(client->last_status.load() == fss::client_ssl::CLIENT_CONNECTION_STATUS_CONNECTED_1_SERVER);
+    server->queueSend(make_position()->getPacked());
+    REQUIRE(conn->waitCount(4));
+    REQUIRE(server->dials_entered.load() == 1);
+    client->sendMsgAll(make_position());
+    REQUIRE(conn->waitCount(5));
+    REQUIRE(server->getConnection() == conn);
+
+    clock->now += 30001;
+    client->attemptReconnect();
+    REQUIRE(server->waitIdentify(2));
+    REQUIRE_FALSE(server->isAdmitted());
+    server->releaseIdentify(2);
     client->disconnect();
 }

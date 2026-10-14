@@ -653,9 +653,13 @@ void flight_safety_system::client_ssl::fss_client::requireReconnect(
      * outside the lock.  connectionStatusChange() may re-enter the client
      * (e.g. call sendMsgAll or attemptReconnect), so the lock must not be
      * held when it is called. */
+    /* Sample the injectable clock before locking: it may re-enter the client.
+     * A later refresh can have a timestamp newer than this sample. */
+    uint64_t now = timed_out_connection != nullptr ? server->clock->now_ms() : 0;
     size_t count = 0;
     {
         std::scoped_lock lock(this->servers_lock);
+        std::unique_lock<std::mutex> liveness_guard;
         if (timed_out_connection != nullptr)
         {
             /* A server outlives its connections. Validate both membership and
@@ -667,6 +671,13 @@ void flight_safety_system::client_ssl::fss_client::requireReconnect(
                                      [server](const auto &entry) -> bool { return entry.get() == server; });
             if (live == this->servers.end() ||
                 server->transport::fss_message_cb::getConnection() != timed_out_connection)
+            {
+                return;
+            }
+            liveness_guard = std::unique_lock<std::mutex>(server->liveness_lock);
+            auto last_received = server->last_message_received_time.load(std::memory_order_relaxed);
+            if (!server->liveness_active.load(std::memory_order_relaxed) || now <= last_received ||
+                now - last_received <= server->server_timeout_ms)
             {
                 return;
             }
@@ -1180,7 +1191,10 @@ auto flight_safety_system::client_ssl::fss_server::reconnect() -> bool
              * flagged as timed out again on the very next tick, forever.
              * Store before setHandler() so a message delivered immediately
              * cannot have its arming overwritten by this reset. */
-            this->liveness_active.store(false, std::memory_order_relaxed);
+            {
+                std::scoped_lock guard(this->liveness_lock);
+                this->liveness_active.store(false, std::memory_order_relaxed);
+            }
             /* Re-arm the outbound worker. Unlike the server-side fss_client,
              * an fss_server outlives its connections: disconnect() stops the
              * worker, but this object can come back up on a new connection and
@@ -1216,8 +1230,9 @@ auto flight_safety_system::client_ssl::fss_server::isServerTimedOut() -> bool
     {
         return false;
     }
-    return (this->clock->now_ms() - this->last_message_received_time.load(std::memory_order_relaxed)) >
-           this->server_timeout_ms;
+    auto now = this->clock->now_ms();
+    auto last_received = this->last_message_received_time.load(std::memory_order_relaxed);
+    return now > last_received && now - last_received > this->server_timeout_ms;
 }
 
 void flight_safety_system::client_ssl::fss_server::processMessage(
@@ -1248,8 +1263,12 @@ void flight_safety_system::client_ssl::fss_server::processMessage(
          * timestamp allowed a window where the flag was set but the
          * timestamp still held its previous (or zero) value — an instant
          * spurious timeout. */
-        this->last_message_received_time.store(this->clock->now_ms(), std::memory_order_relaxed);
-        this->liveness_active.store(true, std::memory_order_release);
+        auto now = this->clock->now_ms();
+        {
+            std::scoped_lock guard(this->liveness_lock);
+            this->last_message_received_time.store(now, std::memory_order_relaxed);
+            this->liveness_active.store(true, std::memory_order_release);
+        }
         /* Before the handlers below run (see admits_client): admission is
          * established the moment the message arrives, and an aircraft acting on
          * a command should have seen comms come back first. */

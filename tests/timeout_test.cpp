@@ -229,8 +229,13 @@ public:
     auto operator=(AlwaysConnectedServer &&) -> AlwaysConnectedServer & = delete;
     ~AlwaysConnectedServer() override = default;
     auto connected() -> bool override { return true; }
+    std::atomic<int> reconnects{0};
 protected:
-    auto reconnect_to() -> bool override { return false; }
+    auto reconnect_to() -> bool override
+    {
+        ++this->reconnects;
+        return false;
+    }
 };
 
 /* A server whose reconnect() succeeds by installing a fresh in-memory
@@ -334,6 +339,7 @@ TEST_CASE("timeout: attemptReconnect moves timed-out server to reconnect queue")
 
     /* connectionStatusChange should have fired with DISCONNECTED since the
      * server moved from servers to reconnect_servers. */
+    REQUIRE(fss_test::wait_for([&]() -> bool { return server->reconnects.load() == 1; }));
     REQUIRE(client->status_changes > 0);
     REQUIRE(client->last_status == fss::client_ssl::CLIENT_CONNECTION_STATUS_DISCONNECTED);
 }
