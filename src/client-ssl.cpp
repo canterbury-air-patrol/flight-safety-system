@@ -395,6 +395,39 @@ auto flight_safety_system::client_ssl::fss_client::getServerCount() const -> siz
     return this->servers.size() + this->reconnect_servers.size();
 }
 
+auto flight_safety_system::client_ssl::fss_client::getServerStats() const -> std::vector<server_stats>
+{
+    /* Snapshot the shared_ptrs and the servers_lock-guarded flags, release, then
+     * read the per-server fields with no lock held: getDroppedSends() takes
+     * outbound_lock, and getAddress()/getPort() are virtual, so nesting either
+     * under servers_lock would add a lock-graph edge for no benefit. */
+    struct entry {
+        std::shared_ptr<fss_server> server;
+        bool learned{false};
+        bool admitted{false};
+    };
+    std::vector<entry> held;
+    {
+        std::scoped_lock lock(this->servers_lock);
+        held.reserve(this->servers.size() + this->reconnect_servers.size());
+        for (const auto *list : {&this->servers, &this->reconnect_servers})
+        {
+            for (const auto &server : *list)
+            {
+                held.push_back({server, server->isLearned(), server->isAdmitted()});
+            }
+        }
+    }
+    std::vector<server_stats> stats;
+    stats.reserve(held.size());
+    for (const auto &item : held)
+    {
+        stats.push_back({item.server->getAddress(), item.server->getPort(), item.learned, item.admitted,
+                         item.server->getDroppedSends()});
+    }
+    return stats;
+}
+
 void flight_safety_system::client_ssl::fss_client::addServer(
     const std::shared_ptr<flight_safety_system::client_ssl::fss_server> &server)
 {
