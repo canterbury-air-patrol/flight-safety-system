@@ -219,6 +219,23 @@ void flight_safety_system::client_ssl::fss_client::connectTo(const std::string &
     this->addServer(server);
 }
 
+namespace {
+/* Depth of fss_server::processMessage() on this thread. Non-zero means we are
+ * inside a receive callback, where tearing a server down can deadlock: the
+ * teardown joins that server's outbound worker, and the worker may be retiring
+ * a connection by waiting for this very callback to return (todo/89). */
+thread_local int receive_callback_depth = 0;
+
+struct receive_callback_scope {
+    receive_callback_scope() { ++receive_callback_depth; }
+    ~receive_callback_scope() { --receive_callback_depth; }
+    receive_callback_scope(const receive_callback_scope &) = delete;
+    receive_callback_scope(receive_callback_scope &&) = delete;
+    auto operator=(const receive_callback_scope &) -> receive_callback_scope & = delete;
+    auto operator=(receive_callback_scope &&) -> receive_callback_scope & = delete;
+};
+} // namespace
+
 void flight_safety_system::client_ssl::fss_client::attemptReconnect()
 {
     /* Phase (a): capture each connection while its server is still live.
@@ -302,7 +319,12 @@ void flight_safety_system::client_ssl::fss_client::attemptReconnect()
      * owns connection lifecycle, and the shared_ptr keeps each object alive
      * until we are done with it. */
     std::list<std::shared_ptr<fss_server>> expired;
+    if (receive_callback_depth == 0)
     {
+        /* From inside a receive callback (a status or configuration hook that
+         * re-entered maintenance) the teardown is left queued for the next
+         * pass on a caller thread: it would join an outbound worker that may
+         * itself be waiting for this callback to return (todo/89). */
         std::scoped_lock lock(this->servers_lock);
         expired.splice(expired.end(), this->expired_servers);
     }
@@ -1293,6 +1315,7 @@ void flight_safety_system::client_ssl::fss_server::processMessage(
     {
         return;
     }
+    receive_callback_scope callback_scope;
 #ifdef DEBUG
     std::cout << "Got message " << msg->getType() << std::endl;
 #endif

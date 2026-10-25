@@ -981,31 +981,59 @@ public:
     }
 };
 
-/* A dial that installs its connection, then holds until the test releases it
- * explicitly -- unlike GatedDialServer, disconnect() does not open the gate,
- * so the success is released strictly after the stop (todo/89). */
-class HeldDialServer : public fss::client_ssl::fss_server {
+/* Holds the outbound worker at one chosen point until the test releases it
+ * explicitly. Unlike GatedDialServer, disconnect() does not open the gate, so
+ * the release lands strictly after the stop (todo/89). */
+class HeldWorkerServer : public fss::client_ssl::fss_server {
+public:
+    enum class hold_point { none, dial, handshake, retirement };
+private:
+    hold_point hold;
+    std::thread::id owner{std::this_thread::get_id()};
     std::mutex held_lock{};
     std::condition_variable held_cv{};
-    bool installed{false};
+    bool reached{false};
     bool released{false};
+    int dials{0};
     std::shared_ptr<StopSignalConnection> marker{};
+
+    /* Blocks the worker only; the test thread (the owner) never waits. */
+    void holdHere(hold_point where)
+    {
+        if (where != this->hold || std::this_thread::get_id() == this->owner)
+        {
+            return;
+        }
+        std::unique_lock<std::mutex> guard(this->held_lock);
+        /* Only the first arrival is the worker; teardown reaches the same
+         * calls later from another thread and must not park behind it. */
+        if (std::exchange(this->reached, true))
+        {
+            return;
+        }
+        this->held_cv.notify_all();
+        this->held_cv.wait(guard, [&]() -> bool { return this->released; });
+    }
 public:
-    using fss_server::fss_server;
-    HeldDialServer(const HeldDialServer &) = delete;
-    HeldDialServer(HeldDialServer &&) = delete;
-    auto operator=(const HeldDialServer &) -> HeldDialServer & = delete;
-    auto operator=(HeldDialServer &&) -> HeldDialServer & = delete;
-    ~HeldDialServer() override
+    HeldWorkerServer(hold_point t_hold, fss::client_ssl::fss_client *t_client, std::string t_address, uint16_t t_port)
+        : fss_server(t_client, std::move(t_address), t_port, "", "", ""), hold(t_hold)
+    {
+    }
+    HeldWorkerServer(const HeldWorkerServer &) = delete;
+    HeldWorkerServer(HeldWorkerServer &&) = delete;
+    auto operator=(const HeldWorkerServer &) -> HeldWorkerServer & = delete;
+    auto operator=(HeldWorkerServer &&) -> HeldWorkerServer & = delete;
+    ~HeldWorkerServer() override
     {
         this->release();
         this->disconnect();
     }
 
-    auto waitInstalled() -> bool
+    void adopt(const std::shared_ptr<fss::transport::fss_connection> &t_conn) { this->setConnection(t_conn); }
+    auto waitReached() -> bool
     {
         std::unique_lock<std::mutex> guard(this->held_lock);
-        return this->held_cv.wait_for(guard, std::chrono::seconds(2), [&]() -> bool { return this->installed; });
+        return this->held_cv.wait_for(guard, std::chrono::seconds(2), [&]() -> bool { return this->reached; });
     }
     void release()
     {
@@ -1018,16 +1046,33 @@ public:
         std::scoped_lock guard(this->held_lock);
         return this->marker;
     }
+    auto dialCount() -> int
+    {
+        std::scoped_lock guard(this->held_lock);
+        return this->dials;
+    }
+    auto getConnection() -> std::shared_ptr<fss::transport::fss_connection> override
+    {
+        auto current = fss_server::getConnection();
+        this->holdHere(hold_point::retirement);
+        return current;
+    }
+    void sendIdentify() override
+    {
+        this->holdHere(hold_point::handshake);
+        fss_server::sendIdentify();
+    }
 protected:
     auto reconnect_to() -> bool override
     {
         auto dialed = std::make_shared<StopSignalConnection>();
         this->setConnection(dialed);
-        std::unique_lock<std::mutex> guard(this->held_lock);
-        this->marker = dialed;
-        this->installed = true;
-        this->held_cv.notify_all();
-        this->held_cv.wait(guard, [&]() -> bool { return this->released; });
+        {
+            std::scoped_lock guard(this->held_lock);
+            this->marker = dialed;
+            this->dials++;
+        }
+        this->holdHere(hold_point::dial);
         return true;
     }
 };
@@ -1037,10 +1082,11 @@ protected:
 TEST_CASE("client: stop during a successful queued dial finishes teardown (todo/89)")
 {
     auto client = std::make_shared<FanoutClient>();
-    auto server = std::make_shared<HeldDialServer>(client.get(), "stop.example", uint16_t{20230}, "", "", "");
+    auto server = std::make_shared<HeldWorkerServer>(HeldWorkerServer::hold_point::dial, client.get(), "stop.example",
+                                                     uint16_t{20230});
     client->add(server);
     client->attemptReconnect();
-    REQUIRE(server->waitInstalled());
+    REQUIRE(server->waitReached());
     auto marker = server->getMarker();
     REQUIRE(marker != nullptr);
 
@@ -1055,4 +1101,65 @@ TEST_CASE("client: stop during a successful queued dial finishes teardown (todo/
     REQUIRE_FALSE(server->takeReconnectSucceeded());
     REQUIRE(marker->count() == 0);
     REQUIRE(server->getConnection() == nullptr);
+}
+
+TEST_CASE("client: stop during the handshake does not publish success (todo/89)")
+{
+    auto client = std::make_shared<FanoutClient>();
+    auto server = std::make_shared<HeldWorkerServer>(HeldWorkerServer::hold_point::handshake, client.get(),
+                                                     "stop.example", uint16_t{20231});
+    client->add(server);
+    client->attemptReconnect();
+    REQUIRE(server->waitReached());
+    auto marker = server->getMarker();
+    REQUIRE(marker != nullptr);
+
+    auto teardown = std::async(std::launch::async, [&]() { server->disconnect(); });
+    REQUIRE(marker->waitShutdown());
+    server->release();
+
+    REQUIRE(teardown.wait_for(std::chrono::seconds(5)) == std::future_status::ready);
+    teardown.get();
+    REQUIRE_FALSE(server->takeReconnectSucceeded());
+    REQUIRE(server->getConnection() == nullptr);
+}
+
+TEST_CASE("client: stop while retiring the previous connection never dials (todo/89)")
+{
+    auto client = std::make_shared<FanoutClient>();
+    auto server = std::make_shared<HeldWorkerServer>(HeldWorkerServer::hold_point::retirement, client.get(),
+                                                     "stop.example", uint16_t{20232});
+    auto previous = std::make_shared<StopSignalConnection>();
+    server->adopt(previous);
+    client->add(server);
+    server->processMessage(std::make_shared<fss::transport::fss_message_closed>());
+    client->attemptReconnect();
+    REQUIRE(server->waitReached());
+
+    auto teardown = std::async(std::launch::async, [&]() { server->disconnect(); });
+    REQUIRE(previous->waitShutdown());
+    server->release();
+
+    REQUIRE(teardown.wait_for(std::chrono::seconds(5)) == std::future_status::ready);
+    teardown.get();
+    REQUIRE(server->dialCount() == 0);
+    REQUIRE_FALSE(server->takeReconnectSucceeded());
+    REQUIRE(server->getConnection() == nullptr);
+}
+
+TEST_CASE("client: a synchronous reconnect after disconnect restarts the server (todo/89)")
+{
+    auto client = std::make_shared<FanoutClient>();
+    auto server = std::make_shared<HeldWorkerServer>(HeldWorkerServer::hold_point::none, client.get(), "stop.example",
+                                                     uint16_t{20233});
+    server->release();
+    server->queueSend(make_position()->getPacked());
+    server->disconnect();
+
+    REQUIRE(server->reconnect());
+    server->queueSend(make_position()->getPacked());
+    auto marker = server->getMarker();
+    REQUIRE(marker != nullptr);
+    /* version + identify from the handshake, then the queued frame. */
+    REQUIRE(marker->waitCount(3));
 }

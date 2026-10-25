@@ -241,3 +241,74 @@ TEST_CASE("client: expiry and cap defaults are the documented ones (todo/67)")
     REQUIRE(client.getLearnedServerExpiryMs() == fss::client_ssl::default_learned_server_expiry_ms);
     REQUIRE(client.getMaxLearnedServers() == fss::client_ssl::default_max_learned_servers);
 }
+
+namespace {
+
+class DisconnectCountingServer : public fss::client_ssl::fss_server {
+public:
+    using fss_server::fss_server;
+    DisconnectCountingServer(const DisconnectCountingServer &) = delete;
+    DisconnectCountingServer(DisconnectCountingServer &&) = delete;
+    auto operator=(const DisconnectCountingServer &) -> DisconnectCountingServer & = delete;
+    auto operator=(DisconnectCountingServer &&) -> DisconnectCountingServer & = delete;
+    ~DisconnectCountingServer() override = default;
+    int disconnects{0};
+    void disconnect() override
+    {
+        ++this->disconnects;
+        fss_server::disconnect();
+    }
+};
+
+/* Re-enters maintenance from the status hook, which fires inside the
+ * receiving server's processMessage(). */
+class ReentrantListClient : public ListClient {
+public:
+    using ListClient::ListClient;
+    ReentrantListClient(const ReentrantListClient &) = delete;
+    ReentrantListClient(ReentrantListClient &&) = delete;
+    auto operator=(const ReentrantListClient &) -> ReentrantListClient & = delete;
+    auto operator=(ReentrantListClient &&) -> ReentrantListClient & = delete;
+    ~ReentrantListClient() override = default;
+    int hook_calls{0};
+    void add(const std::shared_ptr<fss::client_ssl::fss_server> &server) { this->addServer(server); }
+protected:
+    void connectionStatusChange(fss::client_ssl::connection_status) override
+    {
+        ++this->hook_calls;
+        this->attemptReconnect();
+    }
+};
+
+} // namespace
+
+TEST_CASE("client: expired-server teardown is not run from inside a receive callback (todo/89)")
+{
+    auto client = std::make_shared<ReentrantListClient>();
+    auto clock = std::make_shared<FakeClock>();
+    client->setClock(clock);
+    client->setExpiry(expiry_window_ms);
+
+    auto doomed =
+        std::make_shared<DisconnectCountingServer>(client.get(), "doomed.example", uint16_t{20240}, "", "", "");
+    doomed->setLearned(true);
+    doomed->setLastSeenMs(0);
+    client->add(doomed);
+    auto receiver =
+        std::make_shared<fss::client_ssl::fss_server>(client.get(), "recv.example", uint16_t{20241}, "", "", "");
+    client->add(receiver);
+
+    clock->advance(expiry_window_ms + 1000);
+    client->updateServers(make_list({}));
+    REQUIRE(doomed->disconnects == 0);
+
+    /* The first server-list message admits the receiver, so the hook runs
+     * attemptReconnect() inside processMessage(). */
+    receiver->processMessage(make_list({}));
+    REQUIRE(client->hook_calls == 1);
+    REQUIRE(doomed->disconnects == 0);
+
+    /* The next pass on an ordinary thread performs the deferred teardown. */
+    client->attemptReconnect();
+    REQUIRE(doomed->disconnects == 1);
+}
