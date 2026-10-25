@@ -368,6 +368,12 @@ private:
      * Cleared by reconnect(). */
     bool sends_drop_logged{false};
     std::thread outbound_worker{};
+    /* Identity of the running worker, empty when there is none. Guarded by
+     * outbound_lock (unlike outbound_worker itself, which stopOutboundWorker()
+     * joins unlocked). reconnect() uses it to tell a call on the worker, where
+     * a stop is terminal, from a synchronous caller, which may restart the
+     * server only once the previous worker has been joined (todo/89). */
+    std::thread::id outbound_worker_id{};
     /* What the worker should do this wake-up. Returned by waitForOutboundWork()
      * so the worker performs the (blocking) sends with no lock held. */
     struct outbound_work {
@@ -389,6 +395,10 @@ private:
      * owns the stop signal, so disconnect() and stopOutboundWorker() cannot
      * drift apart. */
     void requestOutboundStop();
+    auto outboundStopRequested() -> bool;
+    /* True when called on the outbound worker after a stop was requested. */
+    auto onStoppedWorker() -> bool;
+    void clearOutboundWorkerId();
     /* Idempotent: request the stop (above) and join the worker. Safe to call
      * more than once and from any thread other than the worker itself. The
      * caller must have already shut the connection's socket down if the worker

@@ -779,6 +779,7 @@ void flight_safety_system::client_ssl::fss_server::startOutboundWorkerLocked()
         return;
     }
     this->outbound_worker = std::thread(&fss_server::outboundWorkerRun, this);
+    this->outbound_worker_id = this->outbound_worker.get_id();
 }
 
 auto flight_safety_system::client_ssl::fss_server::waitForOutboundWork()
@@ -841,9 +842,16 @@ void flight_safety_system::client_ssl::fss_server::outboundWorkerRun()
                 /* Close can run inside reconnect(), before it returns true.
                  * Only this worker starts attempts, so invalidation belongs to
                  * this attempt until its result has been published. */
-                this->reconnect_succeeded = ok && !this->reconnect_invalidated;
+                this->reconnect_succeeded = ok && !this->reconnect_invalidated && !this->outbound_stopping;
                 this->reconnect_busy = false;
             }
+        }
+        if (this->outboundStopRequested())
+        {
+            /* Stop landed during the (blocking) reconnect: it is terminal for
+             * this worker, so neither publish live success nor send queued
+             * frames (todo/89). */
+            return;
         }
         for (const auto &packed : work.sends)
         {
@@ -947,6 +955,12 @@ auto flight_safety_system::client_ssl::fss_server::getDroppedSends() -> uint64_t
     return this->sends_dropped;
 }
 
+auto flight_safety_system::client_ssl::fss_server::outboundStopRequested() -> bool
+{
+    std::scoped_lock guard(this->outbound_lock);
+    return this->outbound_stopping;
+}
+
 void flight_safety_system::client_ssl::fss_server::requestOutboundStop()
 {
     {
@@ -979,6 +993,7 @@ void flight_safety_system::client_ssl::fss_server::stopOutboundWorker()
          * the recv-thread guard in fss_connection::disconnect(). */
         this->outbound_worker.detach();
         this->outbound_worker = std::thread();
+        this->clearOutboundWorkerId();
         return;
     }
     try
@@ -991,6 +1006,13 @@ void flight_safety_system::client_ssl::fss_server::stopOutboundWorker()
         this->outbound_worker.detach();
         this->outbound_worker = std::thread();
     }
+    this->clearOutboundWorkerId();
+}
+
+void flight_safety_system::client_ssl::fss_server::clearOutboundWorkerId()
+{
+    std::scoped_lock guard(this->outbound_lock);
+    this->outbound_worker_id = std::thread::id();
 }
 
 void flight_safety_system::client_ssl::fss_server::disconnect()
@@ -1144,6 +1166,12 @@ void flight_safety_system::client_ssl::fss_server::retireConnection()
     }
 }
 
+auto flight_safety_system::client_ssl::fss_server::onStoppedWorker() -> bool
+{
+    std::scoped_lock guard(this->outbound_lock);
+    return this->outbound_stopping && this->outbound_worker_id == std::this_thread::get_id();
+}
+
 auto flight_safety_system::client_ssl::fss_server::reconnect() -> bool
 {
     /* Consume a reset requested by the recv thread (connection closed):
@@ -1153,6 +1181,13 @@ auto flight_safety_system::client_ssl::fss_server::reconnect() -> bool
     if (this->backoff_reset_requested.exchange(false))
     {
         this->resetBackoff();
+    }
+
+    /* A stop is terminal for the worker running this attempt: do not dial for
+     * a server that is being torn down (todo/89). */
+    if (this->onStoppedWorker())
+    {
+        return false;
     }
 
     uint64_t ts = this->clock->now_ms();
@@ -1195,6 +1230,15 @@ auto flight_safety_system::client_ssl::fss_server::reconnect() -> bool
                 std::scoped_lock guard(this->liveness_lock);
                 this->liveness_active.store(false, std::memory_order_relaxed);
             }
+            /* A stop that arrived during the dial wins. disconnect() may have
+             * snapshotted the connection before it was installed, so close it
+             * here rather than leak it; this thread is the only one that
+             * knows about it (todo/89). */
+            if (this->onStoppedWorker())
+            {
+                this->retireConnection();
+                return false;
+            }
             /* Re-arm the outbound worker. Unlike the server-side fss_client,
              * an fss_server outlives its connections: disconnect() stops the
              * worker, but this object can come back up on a new connection and
@@ -1205,7 +1249,14 @@ auto flight_safety_system::client_ssl::fss_server::reconnect() -> bool
              * The worker itself is started lazily by the first queueSend(). */
             {
                 std::scoped_lock guard(this->outbound_lock);
-                this->outbound_stopping = false;
+                /* Restart only when no worker is running. A running worker
+                 * (this one, or one a concurrent disconnect() is still
+                 * joining) must keep seeing the stop, or it parks forever
+                 * and the join never returns (todo/89). */
+                if (this->outbound_worker_id == std::thread::id())
+                {
+                    this->outbound_stopping = false;
+                }
                 this->sends_drop_logged = false;
             }
             this->getConnection()->setHandler(this);

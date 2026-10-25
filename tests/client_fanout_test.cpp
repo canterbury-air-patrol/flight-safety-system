@@ -14,6 +14,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <functional>
+#include <future>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -946,4 +947,112 @@ TEST_CASE("client: fresh traffic cancels a pending timeout on the same connectio
     REQUIRE_FALSE(server->isAdmitted());
     server->releaseIdentify(2);
     client->disconnect();
+}
+
+namespace {
+
+/* Signals when disconnect() reaches the marker connection, i.e. after
+ * outbound_stopping is set and before teardown joins the worker. */
+class StopSignalConnection : public RecordingConnection {
+    std::mutex stop_lock{};
+    std::condition_variable stop_cv{};
+    bool shut{false};
+public:
+    StopSignalConnection() = default;
+    StopSignalConnection(const StopSignalConnection &) = delete;
+    StopSignalConnection(StopSignalConnection &&) = delete;
+    auto operator=(const StopSignalConnection &) -> StopSignalConnection & = delete;
+    auto operator=(StopSignalConnection &&) -> StopSignalConnection & = delete;
+    ~StopSignalConnection() override = default;
+
+    void shutdownSocket() override
+    {
+        {
+            std::scoped_lock guard(this->stop_lock);
+            this->shut = true;
+        }
+        this->stop_cv.notify_all();
+        RecordingConnection::shutdownSocket();
+    }
+    auto waitShutdown() -> bool
+    {
+        std::unique_lock<std::mutex> guard(this->stop_lock);
+        return this->stop_cv.wait_for(guard, std::chrono::seconds(2), [&]() -> bool { return this->shut; });
+    }
+};
+
+/* A dial that installs its connection, then holds until the test releases it
+ * explicitly -- unlike GatedDialServer, disconnect() does not open the gate,
+ * so the success is released strictly after the stop (todo/89). */
+class HeldDialServer : public fss::client_ssl::fss_server {
+    std::mutex held_lock{};
+    std::condition_variable held_cv{};
+    bool installed{false};
+    bool released{false};
+    std::shared_ptr<StopSignalConnection> marker{};
+public:
+    using fss_server::fss_server;
+    HeldDialServer(const HeldDialServer &) = delete;
+    HeldDialServer(HeldDialServer &&) = delete;
+    auto operator=(const HeldDialServer &) -> HeldDialServer & = delete;
+    auto operator=(HeldDialServer &&) -> HeldDialServer & = delete;
+    ~HeldDialServer() override
+    {
+        this->release();
+        this->disconnect();
+    }
+
+    auto waitInstalled() -> bool
+    {
+        std::unique_lock<std::mutex> guard(this->held_lock);
+        return this->held_cv.wait_for(guard, std::chrono::seconds(2), [&]() -> bool { return this->installed; });
+    }
+    void release()
+    {
+        std::scoped_lock guard(this->held_lock);
+        this->released = true;
+        this->held_cv.notify_all();
+    }
+    auto getMarker() -> std::shared_ptr<StopSignalConnection>
+    {
+        std::scoped_lock guard(this->held_lock);
+        return this->marker;
+    }
+protected:
+    auto reconnect_to() -> bool override
+    {
+        auto dialed = std::make_shared<StopSignalConnection>();
+        this->setConnection(dialed);
+        std::unique_lock<std::mutex> guard(this->held_lock);
+        this->marker = dialed;
+        this->installed = true;
+        this->held_cv.notify_all();
+        this->held_cv.wait(guard, [&]() -> bool { return this->released; });
+        return true;
+    }
+};
+
+} // namespace
+
+TEST_CASE("client: stop during a successful queued dial finishes teardown (todo/89)")
+{
+    auto client = std::make_shared<FanoutClient>();
+    auto server = std::make_shared<HeldDialServer>(client.get(), "stop.example", uint16_t{20230}, "", "", "");
+    client->add(server);
+    client->attemptReconnect();
+    REQUIRE(server->waitInstalled());
+    auto marker = server->getMarker();
+    REQUIRE(marker != nullptr);
+
+    auto teardown = std::async(std::launch::async, [&]() { server->disconnect(); });
+    /* Stop is now set and teardown is about to join the worker. */
+    REQUIRE(marker->waitShutdown());
+    server->release();
+
+    REQUIRE(teardown.wait_for(std::chrono::seconds(5)) == std::future_status::ready);
+    teardown.get();
+    /* Stop stayed terminal: nothing was published and nothing sent after it. */
+    REQUIRE_FALSE(server->takeReconnectSucceeded());
+    REQUIRE(marker->count() == 0);
+    REQUIRE(server->getConnection() == nullptr);
 }
