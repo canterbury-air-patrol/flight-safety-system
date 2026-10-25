@@ -1281,6 +1281,31 @@ void fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss
                 this->client_handler->clientDisconnected(this);
                 return;
             }
+            /* getAssetId reports a retired aircraft as 0, the same as a name
+             * nobody registered, so 0 alone does not make this CN a feeder:
+             * a retired aircraft's still-valid certificate would otherwise be
+             * admitted and its positions relayed to other aircraft (todo/85).
+             * Refuse a retired name, and fail closed if that cannot be
+             * established. */
+            auto retired_opt = this->dbc->isAssetNameRetired(client_name);
+            if (this->disconnect_requested.load())
+            {
+                return;
+            }
+            if (!retired_opt.has_value())
+            {
+                FSS_LOG_ERROR("server", "Rejecting non-aircraft client: retirement lookup failed for CN "
+                                            << client_name << " (DB read error)");
+                this->client_handler->clientDisconnected(this);
+                return;
+            }
+            if (*retired_opt)
+            {
+                FSS_LOG_ERROR("server",
+                              "Rejecting non-aircraft client: CN " << client_name << " belongs to a retired aircraft");
+                this->client_handler->clientDisconnected(this);
+                return;
+            }
             {
                 std::scoped_lock guard(this->client_lock);
                 this->name = client_name;

@@ -173,6 +173,21 @@ auto flight_safety_system::server::db_connection::getAssetId(const std::string &
     return asset_id;
 }
 
+auto flight_safety_system::server::db_connection::isAssetNameRetired(const std::string &name) -> std::optional<bool>
+{
+    int fetch_error = 0;
+    int retired = 0;
+    {
+        std::scoped_lock guard(this->read_lock);
+        retired = db_asset_name_retired(read_conn_name, name.c_str(), &fetch_error);
+    }
+    if (fetch_error != 0)
+    {
+        return std::nullopt;
+    }
+    return retired != 0;
+}
+
 void flight_safety_system::server::db_connection::recordRtt(uint64_t asset_id, uint64_t rtt_ms)
 {
     std::scoped_lock guard(this->write_lock);

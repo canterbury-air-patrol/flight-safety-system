@@ -66,6 +66,13 @@ void db_free_schema_problems(struct schema_problem_s **problems);
  * *error_out) convention. */
 unsigned long long db_get_asset_id(const char *conn, const char *asset_name, int *error_out);
 
+/* 1 if an asset by this name exists but is retired (retired_at IS NOT NULL),
+ * else 0. db_get_asset_id reports a retired name as unknown; this is how the
+ * non-aircraft identity path tells it apart from a genuine feeder name
+ * (todo/85). error_out (may be NULL) is set to 1 if the query failed, in which
+ * case the 0 return means nothing and the caller must fail closed. */
+int db_asset_name_retired(const char *conn, const char *asset_name, int *error_out);
+
 /* todo/34: these six writers return 1 on success, 0 if sqlca.sqlcode < 0
  * (e.g. disk-full) -- the caller (db.cpp) throws database_error on 0 so a
  * silent per-INSERT failure isn't indistinguishable from a successful

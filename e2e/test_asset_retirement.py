@@ -164,3 +164,42 @@ def test_retirement_severs_a_live_session_and_reactivation_restores_it(
     assert _position_count(db_conn, asset_id) > settled, (
         "reactivated asset identified but its telemetry is not being stored"
     )
+
+
+@pytest.mark.satisfies("TC-SRV-008")
+@pytest.mark.requires_docker
+def test_retired_aircraft_certificate_is_refused_as_a_feeder(
+    db_conn, reset_db, fake_client, server_proc
+):
+    """A retired aircraft's still-valid certificate must not become a feeder (todo/85).
+
+    The identity lookup hides retired rows, so a retired name looks exactly like
+    an unregistered one -- which the feeder path used to read as "free to
+    identify as non-aircraft". Its positions would then be relayed to every
+    flying aircraft. Here test3 is a retired aircraft that dials in as a feeder:
+    the server must refuse it, and the live aircraft must see nothing from it.
+    """
+    with db_conn.cursor() as cur:
+        cur.execute("INSERT INTO assets_asset (name) VALUES ('test1')")
+        cur.execute("INSERT INTO assets_asset (name, retired_at) VALUES ('test3', NOW())")
+
+    aircraft = fake_client("test1")
+    assert _wait_for_identify_count(server_proc, "test1", 1), (
+        "live aircraft never identified\n" + _server_log_text(server_proc)
+    )
+
+    fake_client(
+        "test3",
+        non_aircraft=True,
+        extra_args=["--icao=0xdead01", "--callsign=RETIRED", "--position-interval-ms=200"],
+    )
+
+    assert _wait_for_text(server_proc, "belongs to a retired aircraft"), (
+        "server never refused the retired certificate as a feeder\n"
+        + _server_log_text(server_proc)
+    )
+    time.sleep(3)  # several feeder send cycles, were it admitted
+    assert "Non-aircraft client identified: test3" not in _server_log_text(server_proc)
+    assert "RCVD_POS: icao=dead01" not in aircraft["log"].read_text(errors="replace"), (
+        "a retired aircraft's positions were relayed to a live aircraft"
+    )
