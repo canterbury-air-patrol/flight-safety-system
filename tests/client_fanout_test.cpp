@@ -483,6 +483,62 @@ TEST_CASE("client: a wedged server's outbound queue drops oldest and counts the 
     client->disconnect();
 }
 
+TEST_CASE("client: getServerStats reports one entry per known server (todo/83)")
+{
+    auto client = std::make_shared<FanoutClient>();
+    REQUIRE(client->getServerStats().empty());
+
+    auto configured = std::make_shared<InjectableServer>(client.get(), "conf.example", uint16_t{20210}, "", "", "");
+    auto learned = std::make_shared<InjectableServer>(client.get(), "learned.example", uint16_t{20211}, "", "", "");
+    learned->setLearned(true);
+    learned->setAdmitted(true);
+    client->add(configured);
+    client->add(learned);
+
+    auto stats = client->getServerStats();
+    REQUIRE(stats.size() == 2);
+    for (const auto &entry : stats)
+    {
+        if (entry.address == "conf.example")
+        {
+            REQUIRE(entry.port == 20210);
+            REQUIRE_FALSE(entry.learned);
+            REQUIRE_FALSE(entry.admitted);
+        }
+        else
+        {
+            REQUIRE(entry.address == "learned.example");
+            REQUIRE(entry.port == 20211);
+            REQUIRE(entry.learned);
+            REQUIRE(entry.admitted);
+        }
+        REQUIRE(entry.dropped_sends == 0);
+    }
+}
+
+TEST_CASE("client: getServerStats carries a server's dropped-send count (todo/83)")
+{
+    auto client = std::make_shared<FanoutClient>();
+    auto wedged_conn = std::make_shared<BlackHoleConnection>();
+    auto wedged = std::make_shared<InjectableServer>(client.get(), "wedged.example", uint16_t{20212}, "", "", "");
+    wedged->setConnection(wedged_conn);
+    client->add(wedged);
+
+    client->sendMsgAll(make_position());
+    REQUIRE(fss_test::wait_for([&]() -> bool { return wedged_conn->sends_entered.load() == 1; }));
+    for (int i = 0; i < 20; i++)
+    {
+        client->sendMsgAll(make_position());
+    }
+
+    auto stats = client->getServerStats();
+    REQUIRE(stats.size() == 1);
+    REQUIRE(stats.at(0).dropped_sends > 0);
+    REQUIRE(stats.at(0).dropped_sends == wedged->getDroppedSends());
+
+    client->disconnect();
+}
+
 TEST_CASE("client: an unreachable server does not delay reconnection to a healthy one (todo/66)")
 {
     /* attemptReconnect() used to dial each entry in reconnect_servers in turn,

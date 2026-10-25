@@ -9,7 +9,9 @@
 #include <memory>
 #include <mutex>
 #include <random>
+#include <string>
 #include <thread>
+#include <vector>
 
 namespace flight_safety_system {
 namespace client_ssl {
@@ -32,6 +34,17 @@ constexpr uint64_t default_learned_server_expiry_ms = 60000;
  * and are never expired: they are the operator's declared intent and must
  * survive an outage that empties every broadcast list. */
 constexpr size_t default_max_learned_servers = 16;
+
+/* One known server as seen by fss_client::getServerStats(). `admitted` is the
+ * same predicate connectionStatusChange() counts (todo/79): a server that
+ * completed TLS and was then refused at admission is not service. */
+struct server_stats {
+    std::string address;
+    uint16_t port;
+    bool learned;
+    bool admitted;
+    uint64_t dropped_sends;
+};
 
 enum connection_status {
     CLIENT_CONNECTION_STATUS_UNKNOWN,
@@ -188,6 +201,14 @@ public:
      * one. */
     auto getServerCount() const -> size_t;
     auto getLearnedServerCount() const -> size_t;
+    /* Point-in-time view of every server the client knows of, live or pending
+     * reconnect (todo/83). Lets a subclass — which cannot reach the private
+     * server lists — see which server is shedding telemetry rather than only
+     * that something is, via the cumulative dropped_sends counter. Servers
+     * already expired and awaiting teardown are not included. Safe to call from
+     * any thread; the counters are monotonic, so entries read a few
+     * microseconds apart are not a meaningful inconsistency. */
+    auto getServerStats() const -> std::vector<server_stats>;
     /* Replace the clock driving learned-server expiry. Call before concurrent
      * use; a null clock is ignored (matching fss_server::setClock). */
     void setClock(std::shared_ptr<flight_safety_system::IClock> t_clock);
