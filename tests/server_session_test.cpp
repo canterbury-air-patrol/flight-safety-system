@@ -380,7 +380,7 @@ TEST_CASE("session: rejects non-aircraft identify when the retirement lookup fai
 {
     /* An unprovable "not a retired aircraft" fails closed, like todo/60. */
     fss_test::MockDatabase mock;
-    mock.retired_name_lookup_fail = true;
+    mock.retired_name_lookup_fail = true; // the state lookup is one query
 
     auto conn = std::make_shared<FakeConnection>();
     conn->cert_names.push_back("ground-station-1");
@@ -393,7 +393,7 @@ TEST_CASE("session: rejects non-aircraft identify when the retirement lookup fai
 
     REQUIRE(handler.disconnects == 1);
     REQUIRE_FALSE(session->isAircraft());
-    REQUIRE(cap.str().find("retirement lookup failed") != std::string::npos);
+    REQUIRE(cap.str().find("DB read error") != std::string::npos);
 }
 
 TEST_CASE("session: accepts non-aircraft identify when cert CN is not a known aircraft")

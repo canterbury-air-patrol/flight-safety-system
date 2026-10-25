@@ -1259,12 +1259,18 @@ void fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss
                 return;
             }
             const auto &client_name = possible_names.front();
-            auto asset_id_opt = this->dbc->getAssetId(client_name);
+            /* One query answers unknown / active aircraft / retired aircraft.
+             * getAssetId alone reports a retired aircraft as 0, the same as a
+             * name nobody registered, which would admit its still-valid
+             * certificate as a feeder and relay its positions to other
+             * aircraft (todo/85); and a second read for retirement could
+             * straddle a retire/reactivate and reach the same result. */
+            auto state_opt = this->dbc->getAssetNameState(client_name);
             if (this->disconnect_requested.load())
             {
                 return;
             }
-            if (!asset_id_opt.has_value())
+            if (!state_opt.has_value())
             {
                 /* Can't prove this CN isn't an aircraft's -- treat the read
                  * failure the same as the aircraft branch above (todo/60),
@@ -1274,32 +1280,14 @@ void fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss
                 this->client_handler->clientDisconnected(this);
                 return;
             }
-            if (*asset_id_opt != 0)
+            if (*state_opt == fss::server::IDatabase::asset_name_state::active)
             {
                 FSS_LOG_ERROR("server",
                               "Rejecting non-aircraft client: CN " << client_name << " belongs to a known aircraft");
                 this->client_handler->clientDisconnected(this);
                 return;
             }
-            /* getAssetId reports a retired aircraft as 0, the same as a name
-             * nobody registered, so 0 alone does not make this CN a feeder:
-             * a retired aircraft's still-valid certificate would otherwise be
-             * admitted and its positions relayed to other aircraft (todo/85).
-             * Refuse a retired name, and fail closed if that cannot be
-             * established. */
-            auto retired_opt = this->dbc->isAssetNameRetired(client_name);
-            if (this->disconnect_requested.load())
-            {
-                return;
-            }
-            if (!retired_opt.has_value())
-            {
-                FSS_LOG_ERROR("server", "Rejecting non-aircraft client: retirement lookup failed for CN "
-                                            << client_name << " (DB read error)");
-                this->client_handler->clientDisconnected(this);
-                return;
-            }
-            if (*retired_opt)
+            if (*state_opt == fss::server::IDatabase::asset_name_state::retired)
             {
                 FSS_LOG_ERROR("server",
                               "Rejecting non-aircraft client: CN " << client_name << " belongs to a retired aircraft");

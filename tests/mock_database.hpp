@@ -102,13 +102,18 @@ public:
         return it == asset_ids.end() ? uint64_t{0} : it->second;
     }
 
-    auto isAssetNameRetired(const std::string &name) -> std::optional<bool> override
+    auto getAssetNameState(const std::string &name) -> std::optional<asset_name_state> override
     {
-        if (retired_name_lookup_fail)
+        if (asset_id_lookup_fail || retired_name_lookup_fail)
         {
             return std::nullopt;
         }
-        return retired_names.count(name) > 0;
+        if (retired_names.count(name) > 0)
+        {
+            return asset_name_state::retired;
+        }
+        auto it = asset_ids.find(name);
+        return (it != asset_ids.end() && it->second != 0) ? asset_name_state::active : asset_name_state::unknown;
     }
 
     void recordPosition(uint64_t asset_id, double latitude, double longitude, uint32_t altitude,
