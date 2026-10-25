@@ -478,6 +478,7 @@ auto main(int argc, char *argv[]) -> int
     constexpr int usec_per_msec = 1000;
     constexpr int ticks_per_sec = 1000 / command_poll_ms;
     constexpr int send_config_period_ticks = 15 * ticks_per_sec;
+    constexpr int config_poll_slice_ms = 100;
     std::atomic<bool> poll_running{true};
     std::thread command_poller([&clients, &dbc, &poll_running, command_poll_ms]() -> void {
         flight_safety_system::exception_guard poll_guard("server", "pollCommands");
@@ -508,11 +509,28 @@ auto main(int argc, char *argv[]) -> int
                 {
                     clients->pollRetiredAssets(dbc.get());
                 }
-                /* Config reads share the poller so the main loop never
-                 * touches the DB. First refresh happens immediately
-                 * (counter 0) so the caches are primed at startup. */
-                if ((poll_counter % send_config_period_ticks) == 0)
-                {
+            });
+            poll_counter++;
+            std::this_thread::sleep_for(std::chrono::milliseconds(command_poll_ms));
+        }
+    });
+
+    /* Config reads (todo/91) get their own thread so the command poller never
+     * waits behind them. refreshSmmSettings is one SELECT per identified
+     * client, so with N aircraft it holds the read connection for ~N round
+     * trips every 15 s; run on the command poller that stalled TERM/DISARM
+     * delivery for the whole refresh. Here it only contends for read_lock one
+     * query at a time, so the poller waits at most about one round trip. The
+     * main loop still never touches the DB. First refresh happens immediately
+     * so the caches are primed at startup. */
+    std::thread config_poller([&clients, &dbc, &poll_running, config_poll_slice_ms]() -> void {
+        flight_safety_system::exception_guard config_guard("server", "refreshConfig");
+        uint64_t slices = 0;
+        while (poll_running.load())
+        {
+            if ((slices % (send_config_period_ticks)) == 0)
+            {
+                config_guard.run([&]() -> void {
                     /* nullptr = the read failed (partial/truncated): keep the
                      * previous good cache and skip this refresh round entirely
                      * — the same both-skipped outcome the old database_error
@@ -522,10 +540,11 @@ auto main(int argc, char *argv[]) -> int
                         clients->setCachedServerList(std::move(server_list));
                         clients->refreshSmmSettings();
                     }
-                }
-            });
-            poll_counter++;
-            std::this_thread::sleep_for(std::chrono::milliseconds(command_poll_ms));
+                });
+            }
+            slices++;
+            /* Short slices so shutdown joins promptly. */
+            std::this_thread::sleep_for(std::chrono::milliseconds(config_poll_slice_ms));
         }
     });
 
@@ -754,6 +773,7 @@ auto main(int argc, char *argv[]) -> int
     listen.reset();
     poll_running.store(false);
     command_poller.join();
+    config_poller.join();
     clients.reset();
     writer->stop();
     writer.reset();
