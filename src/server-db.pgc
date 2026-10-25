@@ -127,6 +127,40 @@ unsigned long long db_get_asset_id(const char *conn_arg, const char *asset_name_
     return asset_id;
 }
 
+int db_asset_name_retired(const char *conn_arg, const char *asset_name_arg, int *error_out)
+{
+    if (error_out != NULL)
+    {
+        *error_out = 0;
+    }
+
+    EXEC SQL BEGIN DECLARE SECTION;
+    const char *conn = conn_arg;
+    const char *asset_name = asset_name_arg;
+    int retired_count = 0;
+    EXEC SQL END DECLARE SECTION;
+
+    /* db_get_asset_id hides retired rows, so a retired aircraft's name looks
+     * the same as a name nobody registered. The non-aircraft (feeder) identity
+     * path needs the difference: "unknown" is a feeder, "retired aircraft" is
+     * not (todo/85). Counts rather than selecting a row so a name that is
+     * (impossibly) duplicated cannot raise a too-many-rows error. */
+    EXEC SQL AT :conn SELECT COUNT(*) INTO :retired_count FROM assets_asset
+        WHERE name = :asset_name AND retired_at IS NOT NULL;
+
+    if (sqlca.sqlcode < 0)
+    {
+        sqlprint();
+        if (error_out != NULL)
+        {
+            *error_out = 1;
+        }
+        return 0;
+    }
+
+    return retired_count > 0 ? 1 : 0;
+}
+
 int db_rtt_create_entry(const char *conn_arg, unsigned long long asset_id_arg, unsigned long long delta)
 {
     EXEC SQL BEGIN DECLARE SECTION;

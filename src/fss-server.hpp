@@ -103,6 +103,11 @@ public:
      * indistinguishable from a fleet of unregistered assets (todo/60,
      * matches the getActiveServers() convention below). */
     virtual auto getAssetId(const std::string &name) -> std::optional<uint64_t> = 0;
+    /* Whether an asset by this name exists but is retired. getAssetId reports
+     * a retired name as 0, the same as an unregistered one; the non-aircraft
+     * identity path uses this to refuse a retired aircraft's certificate as a
+     * feeder (todo/85). nullopt is a failed read -- the caller must refuse. */
+    virtual auto isAssetNameRetired(const std::string &name) -> std::optional<bool> = 0;
     /* gps_fix_valid false marks the coordinates as the autopilot's
      * dead-reckoned estimate rather than a GPS-backed position, so fss-web can
      * label them instead of ageing them as if they were a fix. A NaN latitude
@@ -238,6 +243,7 @@ public:
     auto operator=(db_connection &&) -> db_connection & = delete;
     ~db_connection() override;
     auto getAssetId(const std::string &name) -> std::optional<uint64_t> override;
+    auto isAssetNameRetired(const std::string &name) -> std::optional<bool> override;
     void recordPosition(uint64_t asset_id, double latitude, double longitude, uint32_t altitude,
                         bool gps_fix_valid) override;
     void recordIdentityEvent(const identity_event_write &event) override;

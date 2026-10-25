@@ -346,6 +346,56 @@ TEST_CASE("session: rejects non-aircraft identify with a distinct log when the a
     REQUIRE(out.find("belongs to a known aircraft") == std::string::npos);
 }
 
+TEST_CASE("session: rejects non-aircraft identify for a retired aircraft's certificate (todo/85)")
+{
+    /* getAssetId reports a retired aircraft as 0, exactly like an unregistered
+     * name, so the old "0 means feeder" test admitted it. The retired name must
+     * be refused on both roles and never become identified. */
+    fss_test::MockDatabase mock;
+    mock.retired_names.insert("craft");
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    fss_test::capture_cerr cap;
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity_non_aircraft>());
+
+    REQUIRE(handler.disconnects == 1);
+    REQUIRE_FALSE(session->isAircraft());
+    REQUIRE(cap.str().find("belongs to a retired aircraft") != std::string::npos);
+    REQUIRE(cap.str().find("Non-aircraft client identified") == std::string::npos);
+
+    /* And the aircraft role is still refused for the same certificate. */
+    NullClientHandler handler2;
+    auto session2 = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler2);
+    session2->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+    REQUIRE(handler2.disconnects == 1);
+    REQUIRE(session2->getCachedAssetId() == 0);
+}
+
+TEST_CASE("session: rejects non-aircraft identify when the retirement lookup fails (todo/85)")
+{
+    /* An unprovable "not a retired aircraft" fails closed, like todo/60. */
+    fss_test::MockDatabase mock;
+    mock.retired_name_lookup_fail = true;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("ground-station-1");
+    NullClientHandler handler;
+
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    fss_test::capture_cerr cap;
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity_non_aircraft>());
+
+    REQUIRE(handler.disconnects == 1);
+    REQUIRE_FALSE(session->isAircraft());
+    REQUIRE(cap.str().find("retirement lookup failed") != std::string::npos);
+}
+
 TEST_CASE("session: accepts non-aircraft identify when cert CN is not a known aircraft")
 {
     fss_test::MockDatabase mock;

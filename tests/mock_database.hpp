@@ -36,6 +36,11 @@ public:
      * DB read failure so tests can exercise the todo/60 split from a
      * genuinely unknown asset (which stays a 0 lookup miss). */
     bool asset_id_lookup_fail{false};
+    /* Names of retired aircraft: getAssetId reports them as 0 (the real query
+     * hides retired rows) while isAssetNameRetired reports true (todo/85). */
+    std::set<std::string> retired_names{};
+    /* When set, isAssetNameRetired returns nullopt, simulating a read failure. */
+    bool retired_name_lookup_fail{false};
     /* When set, getSmmSettings returns nullopt, simulating a read failure so
      * tests can exercise the todo/69 split from an asset that genuinely has no
      * settings row (which stays a null pointer inside the optional). */
@@ -95,6 +100,15 @@ public:
         }
         auto it = asset_ids.find(name);
         return it == asset_ids.end() ? uint64_t{0} : it->second;
+    }
+
+    auto isAssetNameRetired(const std::string &name) -> std::optional<bool> override
+    {
+        if (retired_name_lookup_fail)
+        {
+            return std::nullopt;
+        }
+        return retired_names.count(name) > 0;
     }
 
     void recordPosition(uint64_t asset_id, double latitude, double longitude, uint32_t altitude,
