@@ -238,28 +238,21 @@ TEST_CASE("db_connection: getAssetId treats a retired asset as unknown, not as a
     REQUIRE(*retired == 0);       /* and its answer is "unknown" */
 }
 
-TEST_CASE("db_connection: isAssetNameRetired separates retired, active and unknown names (todo/85)")
+TEST_CASE("db_connection: getAssetNameState separates retired, active and unknown names (todo/85)")
 {
+    using state = flight_safety_system::server::IDatabase::asset_name_state;
     LIVE_DB_OR_SKIP(dbc);
 
-    auto retired = dbc->isAssetNameRetired("retired-asset");
-    REQUIRE(retired.has_value());
-    REQUIRE(*retired);
-
-    auto active = dbc->isAssetNameRetired("test-asset");
-    REQUIRE(active.has_value());
-    REQUIRE_FALSE(*active);
-
-    auto unknown = dbc->isAssetNameRetired("no-such-asset-anywhere");
-    REQUIRE(unknown.has_value());
-    REQUIRE_FALSE(*unknown);
+    REQUIRE(dbc->getAssetNameState("retired-asset") == state::retired);
+    REQUIRE(dbc->getAssetNameState("test-asset") == state::active);
+    REQUIRE(dbc->getAssetNameState("no-such-asset-anywhere") == state::unknown);
 }
 
-TEST_CASE("db_connection: isAssetNameRetired returns nullopt when the read connection is down (todo/85)")
+TEST_CASE("db_connection: getAssetNameState returns nullopt when the read connection is down (todo/85)")
 {
     LIVE_DB_OR_SKIP(dbc);
     db_disconnect(flight_safety_system::server::db_connection::read_conn_name);
-    REQUIRE_FALSE(dbc->isAssetNameRetired("retired-asset").has_value());
+    REQUIRE_FALSE(dbc->getAssetNameState("retired-asset").has_value());
 }
 
 TEST_CASE("db_connection: getRetiredAssets short-circuits empty input without a round-trip (todo/80)")
