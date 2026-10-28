@@ -661,6 +661,11 @@ auto flight_safety_system::transport::fss_connection::recvBytes(void *t_bytes, s
         {
             return -2;
         }
+        /* False positive: processMessages() releases msg_lock (its lock_holder
+         * scope ends) before looping back into recvMsg(), but the analyzer
+         * loses track of the lock across waitForDeliveryIdle()/deliverUnlocked(),
+         * which unlock and relock it by reference. */
+        // NOLINTNEXTLINE(clang-analyzer-unix.BlockInCriticalSection)
         ssize_t received = recv(current_fd, t_bytes, t_max_bytes, 0);
         if (received == -1 && errno == EINTR)
         {
