@@ -2939,6 +2939,63 @@ TEST_CASE("session: repeated clock skew escalates WARN -> ERROR and resets on re
     REQUIRE(cap.str().find("clock skew suspected") == std::string::npos);
 }
 
+TEST_CASE("session: a slow stale stream is re-reported by time and counted (todo/99)")
+{
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 1;
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+    auto clock = std::make_shared<FakeClock>();
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    session->setClock(clock);
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+
+    constexpr uint64_t sixty_seconds_ms = 60000;
+    auto stale = [&]() { return make_position_msg(fss::fss_current_timestamp() - sixty_seconds_ms); };
+    fss_test::capture_cerr cap;
+
+    session->processMessage(stale());
+    REQUIRE(cap.str().find("Stale position report") != std::string::npos);
+
+    /* Two more within a minute: still quiet (far below the count thresholds). */
+    cap.clear();
+    clock->advance(1000);
+    session->processMessage(stale());
+    REQUIRE(cap.str().find("clock skew suspected") == std::string::npos);
+
+    /* A minute on, the stream is still being discarded: say so again. */
+    clock->advance(61000);
+    session->processMessage(stale());
+    REQUIRE(cap.str().find("clock skew suspected") != std::string::npos);
+
+    REQUIRE(session->getStalenessDiscarded() == 3);
+    REQUIRE(handler.broadcasts.empty());
+}
+
+TEST_CASE("session: positions resuming after a long stale run are logged (todo/99)")
+{
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 1;
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    NullClientHandler handler;
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+
+    constexpr uint64_t sixty_seconds_ms = 60000;
+    for (int i = 0; i < 10; ++i)
+    {
+        session->processMessage(make_position_msg(fss::fss_current_timestamp() - sixty_seconds_ms));
+    }
+    fss_test::capture_cerr cap;
+    session->processMessage(make_position_msg(fss::fss_current_timestamp()));
+    REQUIRE(cap.str().find("within the staleness window again") != std::string::npos);
+    REQUIRE(session->getStalenessDiscarded() == 10);
+}
+
 TEST_CASE("smm_settings: ctor and accessors")
 {
     fss::server::smm_settings s("https://smm.example", fss::secure_string{"user"}, fss::secure_string{"pass"});

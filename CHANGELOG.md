@@ -32,6 +32,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   API and TLS connection layout change. **Consumers must rebuild.**
 
 ### Fixed
+- Make a staleness-gated position stream visible: count discards per session
+  (`getStalenessDiscarded()`), repeat the clock-skew error at least once a minute
+  regardless of report rate, and log when positions are accepted again
+  (todo/99).
 - Coalesce each client's pending position relays per reported aircraft (latest
   wins) instead of evicting by age across all aircraft, so a busy aircraft can
   no longer push a quiet one's only recent position out of the queue. A report

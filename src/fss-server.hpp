@@ -538,6 +538,14 @@ private:
      * Drives WARN->ERROR escalation so a skewed client is unmistakable without
      * a per-message WARN drip. Recv thread only. */
     uint64_t staleness_discards{0};
+    /* Cumulative reports discarded by the staleness gate (never reset), so a
+     * connected-but-no-positions session is visible from outside the log
+     * (todo/99). Written on the recv thread, readable from anywhere. */
+    std::atomic<uint64_t> staleness_discarded_total{0};
+    /* When the gate last logged for this session; drives the time-based repeat
+     * so a slow reporter is not silent between count-based escalations. Recv
+     * thread only. */
+    uint64_t last_staleness_log_ms{0};
     /* Cumulative duplicate protocol-version messages seen this session
      * (never reset); touched only on the recv thread (processMessage), used
      * to throttle the warning. */
@@ -705,6 +713,8 @@ public:
     void setFeederRateLimits(uint64_t capacity, uint64_t refill_per_s);
     /* Cumulative messages this session lost to the telemetry rate limit. */
     auto getRateLimitDropped() const -> uint64_t { return this->rate_limit_dropped.load(); }
+    /* Cumulative position reports this session lost to the staleness gate. */
+    auto getStalenessDiscarded() const -> uint64_t { return this->staleness_discarded_total.load(); }
     void setRateLimits(uint64_t capacity, uint64_t refill_per_s); // must be called before any messages are processed
     auto isTimedOut() -> bool;
 };
