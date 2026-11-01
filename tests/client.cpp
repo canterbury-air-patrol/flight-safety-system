@@ -1,6 +1,8 @@
 #include <cstdio>
 #include <fstream>
 #include <memory>
+#include <mutex>
+#include <vector>
 #include <string_view>
 #ifdef HAVE_CATCH2_CATCH_ALL_HPP
 #include <catch2/catch_all.hpp>
@@ -49,16 +51,26 @@ public:
  * Mirrors the FakeConnection used in the server-session tests. */
 class CapturingConnection : public fss::transport::fss_connection {
 public:
-    std::vector<std::shared_ptr<fss::transport::fss_message>> sent{};
+    /* Written from the server's outbound worker thread (todo/92), so reads go
+     * through the locked snapshot. */
+    auto sentSnapshot() -> std::vector<std::shared_ptr<fss::transport::fss_message>>
+    {
+        std::scoped_lock guard(this->sent_lock);
+        return this->sent;
+    }
 protected:
     auto sendMsg(const std::shared_ptr<fss::transport::buf_len> &bl) -> bool override
     {
         if (auto decoded = fss::transport::fss_message::decode(bl))
         {
+            std::scoped_lock guard(this->sent_lock);
             sent.push_back(decoded);
         }
         return true;
     }
+private:
+    std::mutex sent_lock{};
+    std::vector<std::shared_ptr<fss::transport::fss_message>> sent{};
 };
 
 /* fss_server with the protected setConnection exposed so a test can inject a
@@ -295,8 +307,9 @@ TEST_CASE("client: rtt_request reply carries our clock when rtt-offset negotiate
 
     server->processMessage(std::make_shared<fss::transport::fss_message_rtt_request>());
 
-    REQUIRE(conn->sent.size() == 1);
-    auto resp = std::dynamic_pointer_cast<fss::transport::fss_message_rtt_response>(conn->sent.front());
+    /* The reply goes out on the server's outbound worker (todo/92). */
+    REQUIRE(fss_test::wait_for([&]() -> bool { return conn->sentSnapshot().size() == 1; }));
+    auto resp = std::dynamic_pointer_cast<fss::transport::fss_message_rtt_response>(conn->sentSnapshot().front());
     REQUIRE(resp != nullptr);
     REQUIRE(resp->getClientTimestamp() != 0); // our wall clock was stamped
 }
@@ -312,8 +325,9 @@ TEST_CASE("client: rtt_request reply omits our clock without the negotiated capa
 
     server->processMessage(std::make_shared<fss::transport::fss_message_rtt_request>());
 
-    REQUIRE(conn->sent.size() == 1);
-    auto resp = std::dynamic_pointer_cast<fss::transport::fss_message_rtt_response>(conn->sent.front());
+    /* The reply goes out on the server's outbound worker (todo/92). */
+    REQUIRE(fss_test::wait_for([&]() -> bool { return conn->sentSnapshot().size() == 1; }));
+    auto resp = std::dynamic_pointer_cast<fss::transport::fss_message_rtt_response>(conn->sentSnapshot().front());
     REQUIRE(resp != nullptr);
     REQUIRE(resp->getClientTimestamp() == 0); // legacy reply, no timestamp
 }
@@ -520,13 +534,13 @@ TEST_CASE("fss_connection::sendPacked stamps a broadcast and refuses credentials
     auto position = std::make_shared<fss::transport::fss_message_position_report>(
         1.0, 2.0, 50U, 0U, 0U, int16_t{0}, 0U, std::string{}, 0U, uint8_t{0}, 0U, uint8_t{0}, uint8_t{0}, uint64_t{0});
     REQUIRE(conn->sendPacked(position->getPacked()));
-    REQUIRE(conn->sent.size() == 1);
-    REQUIRE(conn->sent[0]->getType() == fss::transport::message_type_position_report);
-    REQUIRE(conn->sent[0]->getId() != 0); // a per-connection id was stamped in
+    REQUIRE(conn->sentSnapshot().size() == 1);
+    REQUIRE(conn->sentSnapshot()[0]->getType() == fss::transport::message_type_position_report);
+    REQUIRE(conn->sentSnapshot()[0]->getId() != 0); // a per-connection id was stamped in
 
     auto settings = std::make_shared<fss::transport::fss_message_smm_settings>(
         "https://smm.example/", fss::secure_string(std::string_view{"user"}),
         fss::secure_string(std::string_view{"pass"}));
     REQUIRE_FALSE(conn->sendPacked(settings->getPacked())); // refused
-    REQUIRE(conn->sent.size() == 1);                        // nothing sent
+    REQUIRE(conn->sentSnapshot().size() == 1);              // nothing sent
 }

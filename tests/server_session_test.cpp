@@ -1377,6 +1377,94 @@ TEST_CASE("session: concurrent identify-time and worker-scheduled sendCommand do
     session->disconnect();
 }
 
+TEST_CASE("session: an RTT reply does not park the recv thread behind a stuck send (todo/92)")
+{
+    /* Server->aircraft is stuck (the worker is parked inside a write) while
+     * aircraft->server still flows. Answering the peer's RTT request must not
+     * run on the recv thread, or that thread stops reading positions until
+     * the write times out. */
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 1;
+    NullClientHandler handler;
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+    session->activate();
+
+    auto request = std::make_shared<fss::transport::fss_message_rtt_request>();
+    request->setId(1);
+    auto frame = request->getPacked();
+    REQUIRE(frame != nullptr);
+
+    conn->setBlocked(true);
+    session->queuePositionRelay(frame);
+    REQUIRE(fss_test::wait_for([&]() -> bool { return conn->inFlightMessage() != nullptr; }));
+
+    std::atomic<bool> returned{false};
+    std::thread recv([&]() -> void {
+        auto rtt = std::make_shared<fss::transport::fss_message_rtt_request>();
+        rtt->setId(7);
+        session->processMessage(rtt);
+        returned = true;
+    });
+    bool recv_returned = fss_test::wait_for([&]() -> bool { return returned.load(); }, std::chrono::milliseconds(2000));
+    conn->setBlocked(false);
+    recv.join();
+    REQUIRE(recv_returned);
+
+    /* ...and the reply is still delivered, by the worker, once the write clears. */
+    REQUIRE(fss_test::wait_for([&]() -> bool {
+        auto reply = find_sent<fss::transport::fss_message_rtt_response>(conn->sentSnapshot());
+        return reply != nullptr && reply->getRequestId() == 7;
+    }));
+    session->disconnect();
+}
+
+TEST_CASE("session: a command queued mid-batch is sent after at most one in-flight frame (todo/96)")
+{
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 1;
+    NullClientHandler handler;
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+    session->activate();
+
+    auto request = std::make_shared<fss::transport::fss_message_rtt_request>();
+    request->setId(1);
+    auto frame = request->getPacked();
+    REQUIRE(frame != nullptr);
+
+    const auto sent_before = conn->sentSnapshot().size();
+    conn->setBlocked(true);
+    for (int i = 0; i < 4; ++i)
+    {
+        session->queuePositionRelay(frame);
+    }
+    REQUIRE(fss_test::wait_for([&]() -> bool { return conn->inFlightMessage() != nullptr; }));
+
+    /* The worker is mid-batch: queue a command behind it, then let sends flow. */
+    session->setPendingCommand(
+        std::make_shared<fss::server::asset_command>(/*dbid*/ 9, /*ts*/ 500, "RTL", 0.0, 0.0, 0));
+    session->queueCommandSend();
+    conn->setBlocked(false);
+
+    REQUIRE(fss_test::wait_for([&]() -> bool {
+        return count_sent<fss::transport::fss_message_asset_command>(conn->sentSnapshot()) == 1 &&
+               count_sent<fss::transport::fss_message_rtt_request>(conn->sentSnapshot()) >= 4;
+    }));
+    auto sent = conn->sentSnapshot();
+    /* Exactly the one frame that was already on the wire precedes the command. */
+    REQUIRE(sent.size() > sent_before + 1);
+    REQUIRE(std::dynamic_pointer_cast<fss::transport::fss_message_rtt_request>(sent[sent_before]) != nullptr);
+    REQUIRE(std::dynamic_pointer_cast<fss::transport::fss_message_asset_command>(sent[sent_before + 1]) != nullptr);
+    session->disconnect();
+}
+
 TEST_CASE("session: queueRTTRequest sends an RTT request on the outbound worker thread")
 {
     /* todo/21: RTT requests are scheduled on the writer thread too, each client
@@ -2943,7 +3031,7 @@ TEST_CASE("session: system_status message is forwarded to db writer")
     REQUIRE(statuses.front().bat_percent == 80);
 }
 
-TEST_CASE("session: fast command ACK waits for successful dispatch publication")
+TEST_CASE("session: fast command ACK neither blocks the recv thread nor outruns dispatch publication (todo/92)")
 {
     bool fail_send = false;
     SECTION("successful send records dispatch before terminal ACK") {}
@@ -2982,8 +3070,9 @@ TEST_CASE("session: fast command ACK waits for successful dispatch publication")
         ack_done = true;
     });
     bool started = fss_test::wait_for([&]() -> bool { return ack_started.load(); });
-    bool ack_overtook_send =
-        fss_test::wait_for([&]() -> bool { return ack_done.load(); }, std::chrono::milliseconds(100));
+    /* todo/92: the recv thread must not park behind the stalled write. */
+    bool ack_returned_while_send_stuck =
+        fss_test::wait_for([&]() -> bool { return ack_done.load(); }, std::chrono::milliseconds(2000));
     // Always release and join before assertions, including on a regression.
     conn->setBlocked(false);
     sender.join();
@@ -2991,7 +3080,7 @@ TEST_CASE("session: fast command ACK waits for successful dispatch publication")
     writer->stop();
     REQUIRE(reached_send);
     REQUIRE(started);
-    REQUIRE_FALSE(ack_overtook_send);
+    REQUIRE(ack_returned_while_send_stuck);
     if (fail_send)
     {
         REQUIRE(writes.empty());

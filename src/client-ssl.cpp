@@ -1430,7 +1430,12 @@ void flight_safety_system::client_ssl::fss_server::processMessage(
                         ? std::make_shared<flight_safety_system::transport::fss_message_rtt_response>(msg->getId(),
                                                                                                       skewed_timestamp)
                         : std::make_shared<flight_safety_system::transport::fss_message_rtt_response>(msg->getId());
-                this->sendMsg(reply_msg);
+                /* todo/92: reply through the outbound worker. An inline send
+                 * would park this recv thread behind a stalled write and stop
+                 * it reading commands from a server whose inbound direction
+                 * still works. queueSend stamps the id per connection at send
+                 * time, like every other queued frame. */
+                this->queueSend(reply_msg->getPacked());
                 /* Notify after replying: the reply is the time-critical
                  * half, the hook only observes (see fss-client-ssl.hpp). */
                 auto rtt_req_msg =
