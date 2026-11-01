@@ -478,6 +478,15 @@ private:
     fss_client_handler *client_handler;
     std::shared_ptr<IClock> clock{std::make_shared<MonotonicClock>()};
     rate_limiter msg_rate{100, 20};
+    /* Limits swapped in when this session identifies as non-aircraft (todo/97).
+     * A feeder relays many ICAO addresses over one connection, so the
+     * per-aircraft default would silently shed its positions. Set before
+     * activation, read only on the recv thread afterwards. */
+    uint64_t feeder_rate_capacity{1000};
+    uint64_t feeder_rate_refill_per_s{200};
+    /* Cumulative messages dropped by the telemetry rate limit (never reset).
+     * Written on the recv thread, readable from anywhere. */
+    std::atomic<uint64_t> rate_limit_dropped{0};
     uint64_t rate_limit_rejects{0};
     uint64_t last_rate_limit_log_ms{0};
     /* todo/37: command_ack gets its own bucket rather than sharing msg_rate
@@ -691,6 +700,11 @@ public:
     void setTimeoutMs(uint64_t ms);
     void setIdentifyTimeoutMs(uint64_t ms);
     void setStalenessMs(uint64_t ms);
+    /* Limits applied instead of the above once the session identifies as a
+     * non-aircraft client (todo/97). Must also be called before activation. */
+    void setFeederRateLimits(uint64_t capacity, uint64_t refill_per_s);
+    /* Cumulative messages this session lost to the telemetry rate limit. */
+    auto getRateLimitDropped() const -> uint64_t { return this->rate_limit_dropped.load(); }
     void setRateLimits(uint64_t capacity, uint64_t refill_per_s); // must be called before any messages are processed
     auto isTimedOut() -> bool;
 };

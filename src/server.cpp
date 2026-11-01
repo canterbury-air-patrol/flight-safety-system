@@ -86,6 +86,8 @@ auto main(int argc, char *argv[]) -> int
     constexpr uint64_t default_position_staleness_ms = flight_safety_system::server::default_position_staleness_ms;
     constexpr uint64_t default_rate_capacity = 100;
     constexpr uint64_t default_rate_refill_per_s = 20;
+    constexpr uint64_t default_feeder_rate_capacity = 1000;
+    constexpr uint64_t default_feeder_rate_refill_per_s = 200;
     constexpr auto default_duplicate_identity_policy = flight_safety_system::server::duplicate_identity_reject_newcomer;
     /* todo/34: default 5s age for a sustained DB-write-failure incident
      * (see server-failsafe.hpp) before the fail-safe trips: every connected
@@ -124,6 +126,8 @@ auto main(int argc, char *argv[]) -> int
     uint64_t position_staleness_ms = default_position_staleness_ms;
     uint64_t rate_capacity = default_rate_capacity;
     uint64_t rate_refill = default_rate_refill_per_s;
+    uint64_t feeder_rate_capacity = default_feeder_rate_capacity;
+    uint64_t feeder_rate_refill = default_feeder_rate_refill_per_s;
     auto duplicate_identity_policy = default_duplicate_identity_policy;
     uint64_t db_write_failure_disconnect_secs = default_db_write_failure_disconnect_secs;
     uint64_t db_write_failure_recovery_grace_secs = default_db_write_failure_recovery_grace_secs;
@@ -259,6 +263,31 @@ auto main(int argc, char *argv[]) -> int
                                    "once it empties); using default "
                                        << default_rate_refill_per_s);
             rate_refill = default_rate_refill_per_s;
+        }
+        /* todo/97: separate, higher limits for non-aircraft clients, which relay
+         * many aircraft over one connection. Zero is rejected for the same
+         * reasons as the aircraft limits above. */
+        if (config.isMember("feeder_message_rate_capacity"))
+        {
+            feeder_rate_capacity = config["feeder_message_rate_capacity"].asUInt64();
+        }
+        if (feeder_rate_capacity == 0)
+        {
+            FSS_LOG_WARN("server", "feeder_message_rate_capacity must be > 0 (0 drops every feeder message forever); "
+                                   "using default "
+                                       << default_feeder_rate_capacity);
+            feeder_rate_capacity = default_feeder_rate_capacity;
+        }
+        if (config.isMember("feeder_message_rate_refill"))
+        {
+            feeder_rate_refill = config["feeder_message_rate_refill"].asUInt64();
+        }
+        if (feeder_rate_refill == 0)
+        {
+            FSS_LOG_WARN("server", "feeder_message_rate_refill must be > 0 (0 permanently drains the feeder bucket "
+                                   "once it empties); using default "
+                                       << default_feeder_rate_refill_per_s);
+            feeder_rate_refill = default_feeder_rate_refill_per_s;
         }
         if (config.isMember("duplicate_identity_policy"))
         {
@@ -433,6 +462,7 @@ auto main(int argc, char *argv[]) -> int
     clients->setClientIdentifyTimeoutMs(identify_timeout_sec * msec_per_sec);
     clients->setClientStalenessMs(position_staleness_ms);
     clients->setClientRateLimits(rate_capacity, rate_refill);
+    clients->setClientFeederRateLimits(feeder_rate_capacity, feeder_rate_refill);
     clients->setDuplicateIdentityPolicy(duplicate_identity_policy);
 
     std::shared_ptr<flight_safety_system::transport::fss_listen> listen;

@@ -1784,6 +1784,49 @@ TEST_CASE("rate limiter: drops messages beyond burst capacity without disconnect
     REQUIRE(handler.broadcasts.size() == 100);
 }
 
+TEST_CASE("rate limiter: a non-aircraft client gets its own, larger limits (todo/97)")
+{
+    bool feeder = true;
+    SECTION("feeder: a burst past the aircraft limit is relayed in full") {}
+    SECTION("aircraft: the same burst is capped by the aircraft limit")
+    {
+        feeder = false;
+    }
+
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 1;
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back(feeder ? "ground-station-1" : "craft");
+    NullClientHandler handler;
+    auto clock = std::make_shared<FakeClock>();
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    session->setClock(clock);
+    session->setRateLimits(100, 0);
+    session->setFeederRateLimits(1000, 0);
+
+    if (feeder)
+    {
+        session->processMessage(std::make_shared<fss::transport::fss_message_identity_non_aircraft>());
+    }
+    else
+    {
+        session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+    }
+
+    auto pos = std::make_shared<fss::transport::fss_message_position_report>(
+        0.0, 0.0, 0U, 0U, 0U, int16_t{0}, 0U, std::string{}, 0U, uint8_t{0}, 0U, uint8_t{0}, uint8_t{0}, uint64_t{0});
+    for (int i = 0; i < 300; ++i)
+    {
+        session->processMessage(pos);
+    }
+
+    REQUIRE(handler.disconnects == 0);
+    REQUIRE(handler.broadcasts.size() == (feeder ? 300U : 100U));
+    /* The loss is counted, not just logged. */
+    REQUIRE(session->getRateLimitDropped() == (feeder ? 0U : 200U));
+}
+
 TEST_CASE("rate limiter: refill allows messages after bucket drains")
 {
     fss_test::MockDatabase mock;

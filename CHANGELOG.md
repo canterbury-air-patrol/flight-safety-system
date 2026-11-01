@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Add `feeder_message_rate_capacity` / `feeder_message_rate_refill` (default
+  1000 / 200 per s): non-aircraft clients, which relay many aircraft over one
+  connection, no longer share the per-aircraft telemetry limit. Messages lost to
+  the rate limit are counted per session (`getRateLimitDropped()`) (todo/97).
 - Add `identity_accepted` and feature flag `FSS_FEATURE_IDENTITY_ACCEPTED`
   (0x20): the server confirms an accepted non-aircraft identify, so a healthy
   feeder is reported as connected instead of `DISCONNECTED` indefinitely

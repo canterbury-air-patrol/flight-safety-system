@@ -94,6 +94,7 @@ void server_clients::clientConnected(std::shared_ptr<flight_safety_system::serve
     client->setIdentifyTimeoutMs(this->identify_timeout_ms);
     client->setStalenessMs(this->position_staleness_ms);
     client->setRateLimits(this->rate_capacity, this->rate_refill_per_s);
+    client->setFeederRateLimits(this->feeder_rate_capacity, this->feeder_rate_refill_per_s);
     auto *raw = client.get();
     bool refused = false;
     {
