@@ -35,6 +35,8 @@ private:
     uint64_t position_staleness_ms{flight_safety_system::server::default_position_staleness_ms};
     uint64_t rate_capacity{100};
     uint64_t rate_refill_per_s{20};
+    uint64_t feeder_rate_capacity{1000};
+    uint64_t feeder_rate_refill_per_s{200};
     flight_safety_system::server::duplicate_identity_policy duplicate_identity_policy_{
         flight_safety_system::server::duplicate_identity_reject_newcomer};
     /* todo/45+47: while the DB fail-safe is degraded, new sessions are
@@ -93,6 +95,11 @@ public:
     {
         this->rate_capacity = capacity;
         this->rate_refill_per_s = refill_per_s;
+    }
+    void setClientFeederRateLimits(uint64_t capacity, uint64_t refill_per_s)
+    {
+        this->feeder_rate_capacity = capacity;
+        this->feeder_rate_refill_per_s = refill_per_s;
     }
     void setDuplicateIdentityPolicy(flight_safety_system::server::duplicate_identity_policy policy)
     {

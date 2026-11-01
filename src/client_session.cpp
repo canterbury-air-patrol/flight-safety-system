@@ -851,6 +851,14 @@ void fss::server::fss_client::setStalenessMs(uint64_t ms)
     this->position_staleness_ms = ms;
 }
 
+// NOLINTBEGIN(bugprone-easily-swappable-parameters)
+void fss::server::fss_client::setFeederRateLimits(uint64_t capacity, uint64_t refill_per_s)
+{
+    this->feeder_rate_capacity = capacity;
+    this->feeder_rate_refill_per_s = refill_per_s;
+}
+// NOLINTEND(bugprone-easily-swappable-parameters)
+
 void fss::server::fss_client::setRateLimits(uint64_t capacity, uint64_t refill_per_s)
 {
     this->msg_rate = rate_limiter(capacity, refill_per_s);
@@ -1450,6 +1458,9 @@ void fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss
             }
             this->aircraft = false;
             this->identified = true;
+            /* todo/97: a feeder is sized for many aircraft, not one. Swapped on
+             * the recv thread, the only thread that touches msg_rate. */
+            this->msg_rate = rate_limiter(this->feeder_rate_capacity, this->feeder_rate_refill_per_s);
             FSS_LOG_INFO("server", "Non-aircraft client identified: " << client_name);
             /* todo/87: the one thing a non-aircraft session is otherwise never
              * sent, so its library has no way to tell an admitted session from
@@ -1518,6 +1529,7 @@ void fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss
                 return;
             }
             ++this->rate_limit_rejects;
+            this->rate_limit_dropped.fetch_add(1);
             FSS_LOG_DEBUG("server",
                           "Rate-limiting client " << this->name << " (rejects=" << this->rate_limit_rejects << ")");
             if (this->last_rate_limit_log_ms == 0)
