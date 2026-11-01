@@ -915,6 +915,22 @@ TEST_CASE("messages: identity_required round-trip")
     REQUIRE(decoded_generic->getId() == msg_id);
 }
 
+TEST_CASE("messages: identity_accepted round-trip")
+{
+    auto msg_id = static_cast<uint64_t>(random());
+
+    auto msg = std::make_shared<flight_safety_system::transport::fss_message_identity_accepted>();
+    REQUIRE(msg->getType() == flight_safety_system::transport::message_type_identity_accepted);
+    msg->setId(msg_id);
+    auto bl = msg->getPacked();
+    REQUIRE(bl != nullptr);
+
+    auto decoded_generic = flight_safety_system::transport::fss_message::decode(bl);
+    REQUIRE(decoded_generic != nullptr);
+    REQUIRE(decoded_generic->getType() == flight_safety_system::transport::message_type_identity_accepted);
+    REQUIRE(decoded_generic->getId() == msg_id);
+}
+
 /* Framed message header: declared_length (uint16_t) + type (uint16_t) + msg_id (uint64_t). */
 constexpr size_t framed_header_len = sizeof(uint16_t) + sizeof(uint16_t) + sizeof(uint64_t);
 

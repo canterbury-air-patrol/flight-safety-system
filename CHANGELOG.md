@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Add `identity_accepted` and feature flag `FSS_FEATURE_IDENTITY_ACCEPTED`
+  (0x20): the server confirms an accepted non-aircraft identify, so a healthy
+  feeder is reported as connected instead of `DISCONNECTED` indefinitely
+  (todo/87).
 - Record duplicate-identity rejections and evictions through the async writer
   for fss-web operator warnings, including both sessions' certificate and peer
   evidence. Protect queued events from telemetry pressure and report each
@@ -24,6 +28,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   API and TLS connection layout change. **Consumers must rebuild.**
 
 ### Fixed
+- Report a server's admission before the command callback that arrives during
+  its own dial, and withdraw an admission whose dial then fails (todo/86).
+- Keep the receive thread off the send path: RTT replies go through the
+  outbound worker, the command delivery lock is no longer held across the
+  blocking write, and a queued command is sent after at most one in-flight
+  frame (todo/92, todo/96).
 - Cancel pending client timeouts when fresh traffic arrives on the same
   connection before recovery is committed, and avoid unsigned timeout arithmetic
   underflow when a receive timestamp is newer than the sampled clock (PR #458).

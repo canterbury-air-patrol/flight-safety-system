@@ -306,6 +306,30 @@ TEST_CASE("client: SMM settings admit the connection (todo/79)")
     REQUIRE(client->at(0) == fss::client_ssl::CLIENT_CONNECTION_STATUS_CONNECTED_1_SERVER);
 }
 
+TEST_CASE("client: identity_accepted admits a feeder connection and does not survive it (todo/87)")
+{
+    auto client = std::make_shared<AdmissionClient>();
+    auto server = make_connected_server(client.get(), uint16_t{20316});
+    client->add(server);
+
+    /* Nothing the server sends a feeder before acceptance may admit it. */
+    server->processMessage(std::make_shared<fss::transport::fss_message_rtt_request>());
+    REQUIRE(client->count() == 0);
+
+    server->processMessage(std::make_shared<fss::transport::fss_message_identity_accepted>());
+    REQUIRE(client->count() == 1);
+    REQUIRE(client->at(0) == fss::client_ssl::CLIENT_CONNECTION_STATUS_CONNECTED_1_SERVER);
+
+    server->processMessage(std::make_shared<fss::transport::fss_message_closed>());
+    REQUIRE(client->at(1) == fss::client_ssl::CLIENT_CONNECTION_STATUS_DISCONNECTED);
+
+    /* Earned again on the next connection, not inherited. */
+    server->setConnection(std::make_shared<SilentConnection>());
+    server->processMessage(std::make_shared<fss::transport::fss_message_identity_accepted>());
+    REQUIRE(client->count() == 3);
+    REQUIRE(client->at(2) == fss::client_ssl::CLIENT_CONNECTION_STATUS_CONNECTED_1_SERVER);
+}
+
 TEST_CASE("client: an RTT request alone does not admit the connection (todo/79)")
 {
     /* Deliberate, and the reason the signal is not simply "any message". The
