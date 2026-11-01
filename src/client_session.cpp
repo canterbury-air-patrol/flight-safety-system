@@ -28,6 +28,10 @@ constexpr uint64_t rtt_retry_interval = 10 * sec_to_msec;
  * persistently skewed client is unmistakable without a per-message WARN drip. */
 constexpr uint64_t staleness_escalation_threshold = 10;
 constexpr uint64_t staleness_escalation_interval = 100;
+/* While discarding continues, repeat the ERROR at least this often regardless
+ * of report rate, so a slow reporter's connected-but-no-positions state stays
+ * visible (todo/99). */
+constexpr uint64_t staleness_repeat_log_ms = 60000;
 /* How often to repeat the "still no GPS fix" warning while an outage lasts.
  * The edges are always logged; this only stops a long outage from going silent
  * between them. */
@@ -1645,13 +1649,22 @@ void fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss
                     if (magnitude > static_cast<int64_t>(this->position_staleness_ms))
                     {
                         uint64_t discards = ++this->staleness_discards;
+                        this->staleness_discarded_total.fetch_add(1);
+                        const uint64_t log_now_ms = this->clock->now_ms();
+                        const bool repeat_due =
+                            discards > 1 && log_now_ms - this->last_staleness_log_ms >= staleness_repeat_log_ms;
+                        if (discards == 1 || discards == staleness_escalation_threshold ||
+                            discards % staleness_escalation_interval == 0 || repeat_due)
+                        {
+                            this->last_staleness_log_ms = log_now_ms;
+                        }
                         if (discards == 1)
                         {
                             FSS_LOG_WARN("server", "Stale position report from " << this->name << " (skew=" << skew
                                                                                  << "ms), discarding");
                         }
                         else if (discards == staleness_escalation_threshold ||
-                                 discards % staleness_escalation_interval == 0)
+                                 discards % staleness_escalation_interval == 0 || repeat_due)
                         {
                             FSS_LOG_ERROR("server", "Client " << this->name << " clock skew suspected (skew=" << skew
                                                               << "ms, " << discards
@@ -1661,6 +1674,13 @@ void fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss
                     }
                     /* In-window: the clock is fine, so clear the skew streak
                      * even if the coordinate below is later rejected. */
+                    if (this->staleness_discards >= staleness_escalation_threshold)
+                    {
+                        FSS_LOG_INFO("server", "Client "
+                                                   << this->name
+                                                   << " position reports are within the staleness window again after "
+                                                   << this->staleness_discards << " consecutive discards");
+                    }
                     this->staleness_discards = 0;
                 }
                 /* NaN coordinates are the wire sentinel for "no GPS fix" (see
