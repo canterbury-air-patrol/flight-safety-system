@@ -347,11 +347,20 @@ private:
     std::shared_ptr<smm_settings> cached_smm_settings{nullptr};
     std::string name{};
     std::mutex client_lock{};
-    /* Serializes command sends through dispatch publication and DB enqueue
-     * with ACK processing. Always acquired before client_lock. Unlike
-     * client_lock, this may span socket I/O: main-loop liveness checks never
-     * acquire it. Socket shutdown releases a blocked sender during teardown. */
+    /* Orders dispatch publication and its DB enqueue against ACK processing
+     * (todo/92). Held only for those short, non-blocking steps — never across
+     * the socket write — so a stalled outbound send cannot wedge the recv
+     * thread that processes the aircraft's acks. Always acquired before
+     * client_lock. */
     std::mutex command_delivery_lock{};
+    /* Command sends between claiming the resend window and publishing the
+     * dispatch mapping. An ack can arrive in that gap (the id is only stamped
+     * inside sendMsg), so while this is non-zero an unmatched ack is parked in
+     * early_command_acks and settled by the sender once it has published.
+     * Guarded by command_delivery_lock. */
+    uint32_t commands_in_flight{0};
+    static constexpr size_t max_early_command_acks = 8;
+    std::deque<std::shared_ptr<transport::fss_message_command_ack>> early_command_acks{};
     /* Only activation and blocking teardown acquire this mutex. Activation
      * may synchronously flush an identification callback that reads the DB. */
     std::mutex lifecycle_lock{};
@@ -434,6 +443,10 @@ private:
     /* The command row dispatch_id delivered, or 0 if this session never
      * dispatched it (or it has aged out of the FIFO). Takes client_lock. */
     auto lookupDispatchedCommand(uint64_t dispatch_id) -> uint64_t;
+    /* todo/92 ack settlement. All three require command_delivery_lock. */
+    auto applyCommandAck(transport::fss_message_command_ack &ack_msg) -> bool;
+    void settleEarlyAcks();
+    void discardEarlyAcksIfIdle();
     bool liveness_active{false};
     uint64_t last_rtt_response_time{0};
     uint64_t client_timeout_ms{30000};
@@ -535,6 +548,13 @@ private:
      * rather than it being silent, mirroring fss_connection::
      * getDroppedMessages() for the transport-level inbound queue. */
     uint64_t position_relay_dropped{0};
+    /* RTT replies owed to the peer (todo/92): request ids answered by the
+     * worker instead of inline on the recv thread, so a peer whose inbound
+     * direction is stuck cannot wedge the thread that is still reading its
+     * positions. Bounded, drop-oldest — a lost reply only costs the peer one
+     * RTT sample. Guarded by outbound_lock. */
+    static constexpr size_t max_pending_rtt_replies = 16;
+    std::deque<uint64_t> pending_rtt_replies{};
     std::thread outbound_worker{};
     /* What the worker should do this wake-up. Returned by waitForOutboundWork so
      * the worker performs the (blocking) sends with no lock held. */
@@ -543,12 +563,17 @@ private:
         bool command{false};
         bool rtt{false};
         bool smm{false};
+        std::deque<uint64_t> rtt_replies{};
         std::shared_ptr<const transport::buf_len> server_list_broadcast{nullptr};
         std::vector<std::shared_ptr<const transport::buf_len>> position_relay{};
     };
     /* Block until there is work or a stop request, then atomically take and clear
      * the pending flags. */
     auto waitForOutboundWork() -> outbound_work;
+    /* todo/96: called by the worker between sends. If a command was queued
+     * while an earlier send was in flight, claim it and send it now so it waits
+     * for at most one frame rather than the rest of the batch. */
+    void sendQueuedCommandNow();
     /* The worker loop: waits for work, then performs the blocking send(s) off the
      * main loop. */
     void outboundWorkerRun();
@@ -601,6 +626,10 @@ public:
      * never shared across connections, so the per-connection id stamp cannot
      * race (the C8 invariant). Returns immediately; no-op once disconnecting. */
     void queueRTTRequest();
+    /* Answer a peer's RTT request from the outbound worker (todo/92) instead of
+     * blocking the recv thread on the send. Falls back to an inline send when
+     * no worker is running (never activated), so the reply is not lost. */
+    void queueRTTReply(uint64_t request_id);
     /* Schedule a cached-SMM-settings send on this client's outbound worker
      * thread (todo/21). Returns immediately; no-op once disconnecting. */
     void queueSMMSettings();

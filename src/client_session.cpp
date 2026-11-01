@@ -221,7 +221,8 @@ auto fss::server::fss_client::waitForOutboundWork() -> fss::server::fss_client::
     std::unique_lock<std::mutex> lock(this->outbound_lock);
     this->outbound_cv.wait(lock, [this]() -> bool {
         return this->outbound_stopping || this->out_command_pending || this->out_rtt_pending || this->out_smm_pending ||
-               this->pending_server_list_broadcast != nullptr || !this->pending_position_relay.empty();
+               this->pending_server_list_broadcast != nullptr || !this->pending_position_relay.empty() ||
+               !this->pending_rtt_replies.empty();
     });
     outbound_work work;
     if (this->outbound_stopping)
@@ -235,6 +236,8 @@ auto fss::server::fss_client::waitForOutboundWork() -> fss::server::fss_client::
     this->out_command_pending = false;
     this->out_rtt_pending = false;
     this->out_smm_pending = false;
+    work.rtt_replies = std::move(this->pending_rtt_replies);
+    this->pending_rtt_replies.clear();
     work.server_list_broadcast = std::move(this->pending_server_list_broadcast);
     this->pending_server_list_broadcast = nullptr;
     work.position_relay.assign(std::make_move_iterator(this->pending_position_relay.begin()),
@@ -262,15 +265,24 @@ void fss::server::fss_client::outboundWorkerRun()
         {
             this->sendCommand();
         }
+        /* todo/96: after each send below, a command queued meanwhile goes out
+         * before the next frame, so it waits for at most one in-flight send. */
+        for (const auto request_id : work.rtt_replies)
+        {
+            this->sendMsg(std::make_shared<fss::transport::fss_message_rtt_response>(request_id));
+            this->sendQueuedCommandNow();
+        }
         if (work.rtt)
         {
             /* A fresh request per client: never a shared instance (see the C8
              * invariant on fss_connection::sendMsg). */
             this->sendRTTRequest(std::make_shared<fss::transport::fss_message_rtt_request>());
+            this->sendQueuedCommandNow();
         }
         if (work.smm)
         {
             this->sendSMMSettings();
+            this->sendQueuedCommandNow();
         }
         if (work.server_list_broadcast != nullptr)
         {
@@ -278,12 +290,50 @@ void fss::server::fss_client::outboundWorkerRun()
              * recipients; sendPacked copies and stamps this connection's id
              * (todo/55) rather than re-packing a decoded clone. */
             this->getConnection()->sendPacked(work.server_list_broadcast);
+            this->sendQueuedCommandNow();
         }
         for (const auto &relay_msg : work.position_relay)
         {
             this->getConnection()->sendPacked(relay_msg);
+            this->sendQueuedCommandNow();
         }
     }
+}
+
+void fss::server::fss_client::sendQueuedCommandNow()
+{
+    {
+        std::scoped_lock guard(this->outbound_lock);
+        if (this->outbound_stopping || !this->out_command_pending)
+        {
+            return;
+        }
+        this->out_command_pending = false;
+    }
+    this->sendCommand();
+}
+
+void fss::server::fss_client::queueRTTReply(uint64_t request_id)
+{
+    {
+        std::scoped_lock guard(this->outbound_lock);
+        if (this->outbound_stopping)
+        {
+            return;
+        }
+        if (this->outbound_started)
+        {
+            if (this->pending_rtt_replies.size() >= max_pending_rtt_replies)
+            {
+                this->pending_rtt_replies.pop_front();
+            }
+            this->pending_rtt_replies.push_back(request_id);
+            this->outbound_cv.notify_one();
+            return;
+        }
+    }
+    /* No worker (never activated): reply inline rather than lose it. */
+    this->sendMsg(std::make_shared<fss::transport::fss_message_rtt_response>(request_id));
 }
 
 void fss::server::fss_client::queueCommandSend()
@@ -465,7 +515,6 @@ void fss::server::fss_client::setPendingCommand(std::shared_ptr<fss::server::ass
 
 void fss::server::fss_client::sendCommand()
 {
-    std::scoped_lock delivery_guard(this->command_delivery_lock);
     /* todo/35: the dbid/resend-window checks and validation run under
      * client_lock, but the send itself must not — a black-holed peer can
      * block sendMsg() for up to TCP_USER_TIMEOUT, and isTimedOut() (called
@@ -590,12 +639,26 @@ void fss::server::fss_client::sendCommand()
         this->last_command_dbid = dbid;
     } // client_lock released before the blocking send
 
+    /* todo/92: command_delivery_lock is NOT held across the send below, so a
+     * stalled write cannot wedge the recv thread that handles acks. Instead
+     * the send is registered as in flight: an ack that arrives before the
+     * mapping is published is parked, and settled once it is. */
+    {
+        std::scoped_lock delivery_guard(this->command_delivery_lock);
+        ++this->commands_in_flight;
+    }
+
     /* Null-safe base-class sendMsg: sendCommand() is called from the identify
      * path, which can lose its connection to a concurrent evict_oldest
      * teardown (see the pinned-connection note in processMessage); a cleared
      * connection reads as a failed send, taking the retry branch below. */
     if (!this->sendMsg(msg))
     {
+        {
+            std::scoped_lock delivery_guard(this->command_delivery_lock);
+            --this->commands_in_flight;
+            this->discardEarlyAcksIfIdle();
+        }
         /* The socket write failed, so the command never reached the aircraft.
          * Undo the claim above so the command is retried on the next send tick
          * rather than appearing in the DB as dispatched — but only if nobody
@@ -620,6 +683,8 @@ void fss::server::fss_client::sendCommand()
      * reconstructed from (asset_id, dispatch_id) in SQL. Every delivery is
      * remembered, including a resend — the aircraft acks whichever frame it
      * actually received. */
+    std::scoped_lock delivery_guard(this->command_delivery_lock);
+    --this->commands_in_flight;
     if (this->recordDispatchedCommand(msg->getId(), dbid))
     {
         /* First delivery of this command on this connection, so record the
@@ -639,7 +704,70 @@ void fss::server::fss_client::sendCommand()
          * reconnects and a new session dispatches afresh. */
         this->writer->enqueue(command_dispatch_write{dbid, msg->getId()});
     }
+    /* Acks that raced the publication above. The dispatch write is already
+     * queued, so these land after it, as they would have had the ack arrived
+     * a moment later. */
+    this->settleEarlyAcks();
     FSS_LOG_INFO("server", "dispatched command dbid=" << dbid << " to " << client_name);
+}
+
+auto fss::server::fss_client::applyCommandAck(fss::transport::fss_message_command_ack &ack_msg) -> bool
+{
+    /* Resolve the acked id against what this session actually dispatched
+     * (todo/68). The wire id is only per-connection unique, so it names a row
+     * only in combination with the session that sent it; translating here
+     * means the write that reaches the database names one row outright, and an
+     * ack for a dispatch this session never sent is dropped rather than being
+     * turned into a plausible-looking update to somebody else's row. */
+    uint64_t acked_dbid = this->lookupDispatchedCommand(ack_msg.getAckedCommandId());
+    if (acked_dbid == 0)
+    {
+        return false;
+    }
+    this->writer->enqueue(command_ack_write{acked_dbid, static_cast<uint8_t>(ack_msg.getOutcome()),
+                                            ack_msg.getTimeStamp(), static_cast<uint8_t>(ack_msg.getReason())});
+    /* A terminal outcome ends the redelivery of that command on this
+     * connection (todo/68). "received" is not terminal — it means the frame
+     * arrived, not that the aircraft acted — so the resend must keep running
+     * until it says what it did. Matches db_command_record_ack's writable set,
+     * which treats NULL and received as unsettled. */
+    if (ack_msg.getOutcome() != fss::transport::command_ack_received)
+    {
+        this->markCommandTerminallyAcked(acked_dbid);
+    }
+    return true;
+}
+
+void fss::server::fss_client::settleEarlyAcks()
+{
+    for (auto it = this->early_command_acks.begin(); it != this->early_command_acks.end();)
+    {
+        if (this->applyCommandAck(**it))
+        {
+            it = this->early_command_acks.erase(it);
+        }
+        else
+        {
+            ++it;
+        }
+    }
+    this->discardEarlyAcksIfIdle();
+}
+
+void fss::server::fss_client::discardEarlyAcksIfIdle()
+{
+    if (this->commands_in_flight != 0 || this->early_command_acks.empty())
+    {
+        return;
+    }
+    /* Nothing is left that could publish a mapping for them. */
+    for (const auto &ack : this->early_command_acks)
+    {
+        FSS_LOG_WARN("server", "Dropping command-ack for acked-command "
+                                   << ack->getAckedCommandId() << " from " << this->getName()
+                                   << ": no matching dispatch on this connection");
+    }
+    this->early_command_acks.clear();
 }
 
 auto fss::server::fss_client::recordDispatchedCommand(uint64_t dispatch_id, uint64_t command_dbid) -> bool
@@ -1392,8 +1520,9 @@ void fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss
             case fss::transport::message_type_identity_required:
             case fss::transport::message_type_version: break;
             case fss::transport::message_type_rtt_request: {
-                auto reply_msg = std::make_shared<fss::transport::fss_message_rtt_response>(msg->getId());
-                active_conn->sendMsg(reply_msg);
+                /* todo/92: reply from the outbound worker; an inline send here
+                 * would park the recv thread behind a stalled outbound write. */
+                this->queueRTTReply(msg->getId());
             }
             break;
             case fss::transport::message_type_rtt_response: {
@@ -1572,46 +1701,33 @@ void fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss
                 {
                     break;
                 }
-                /* A reply can arrive before sendMsg returns. Wait until the
-                 * successful send has published its mapping AND queued the
-                 * dispatch reset before accepting any ACK for it. */
+                /* A reply can arrive before sendMsg returns (todo/92: the lock
+                 * is only held for the short publish steps, not the write). */
                 std::scoped_lock delivery_guard(this->command_delivery_lock);
                 auto ack_msg = std::dynamic_pointer_cast<fss::transport::fss_message_command_ack>(msg);
-                /* Resolve the acked id against what this session actually
-                 * dispatched (todo/68). The wire id is only per-connection
-                 * unique, so it names a row only in combination with the session
-                 * that sent it; translating here means the write that reaches the
-                 * database names one row outright, and an ack for a dispatch this
-                 * session never sent is dropped rather than being turned into a
-                 * plausible-looking update to somebody else's row. */
-                uint64_t acked_dbid =
-                    ack_msg == nullptr ? 0 : this->lookupDispatchedCommand(ack_msg->getAckedCommandId());
-                if (ack_msg != nullptr && acked_dbid != 0)
+                if (ack_msg != nullptr && !this->applyCommandAck(*ack_msg))
                 {
-                    this->writer->enqueue(command_ack_write{acked_dbid, static_cast<uint8_t>(ack_msg->getOutcome()),
-                                                            ack_msg->getTimeStamp(),
-                                                            static_cast<uint8_t>(ack_msg->getReason())});
-                    /* A terminal outcome ends the redelivery of that command on
-                     * this connection (todo/68). "received" is not terminal —
-                     * it means the frame arrived, not that the aircraft acted —
-                     * so the resend must keep running until it says what it
-                     * did. Matches db_command_record_ack's writable set, which
-                     * treats NULL and received as unsettled. */
-                    if (ack_msg->getOutcome() != fss::transport::command_ack_received)
+                    if (this->commands_in_flight != 0)
                     {
-                        this->markCommandTerminallyAcked(acked_dbid);
+                        /* The send that this ack answers may not have
+                         * published its mapping yet; sendCommand() settles it. */
+                        if (this->early_command_acks.size() >= max_early_command_acks)
+                        {
+                            this->early_command_acks.pop_front();
+                        }
+                        this->early_command_acks.push_back(std::move(ack_msg));
                     }
-                }
-                else if (ack_msg != nullptr)
-                {
-                    /* Either the connection has no identified asset (so it can
-                     * never have been sent a command), or the id does not match
-                     * any dispatch this session made. A conforming client only
-                     * acks a command it was just sent, so log it rather than
-                     * letting it vanish. */
-                    FSS_LOG_WARN("server", "Dropping command-ack for acked-command "
-                                               << ack_msg->getAckedCommandId() << " from " << this->name
-                                               << ": no matching dispatch on this connection");
+                    else
+                    {
+                        /* Either the connection has no identified asset (so it
+                         * can never have been sent a command), or the id does
+                         * not match any dispatch this session made. A
+                         * conforming client only acks a command it was just
+                         * sent, so log it rather than letting it vanish. */
+                        FSS_LOG_WARN("server", "Dropping command-ack for acked-command "
+                                                   << ack_msg->getAckedCommandId() << " from " << this->name
+                                                   << ": no matching dispatch on this connection");
+                    }
                 }
             }
             break;
