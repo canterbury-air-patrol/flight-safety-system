@@ -379,7 +379,7 @@ TEST_CASE("server_clients: broadcastMsg does not block on one black-holed client
 TEST_CASE("server_clients: position relay drops oldest and counts drops once the queue is full (todo/36)")
 {
     /* Position relay is a bounded, drop-oldest queue (max_pending_position_relay
-     * = 8 in fss-server.hpp, private so hard-coded here) — loss-tolerant
+     * = 64 in fss-server.hpp, private so hard-coded here) — loss-tolerant
      * telemetry, but the loss must be observable. Push directly via
      * queuePositionRelay() without ever starting the outbound worker (skip
      * activate()/clientConnected()), so nothing drains the queue between
@@ -398,8 +398,8 @@ TEST_CASE("server_clients: position relay drops oldest and counts drops once the
     auto stuck_client = std::make_shared<fss::server::fss_client>(stuck_conn, &mock, stuck_writer, &sc);
     stuck_client->processMessage(std::make_shared<fss::transport::fss_message_identity>("stuck"));
 
-    constexpr int reports_sent = 10;
-    constexpr uint64_t queue_cap = 8;
+    constexpr int reports_sent = 70;
+    constexpr uint64_t queue_cap = 64;
     for (int i = 0; i < reports_sent; ++i)
     {
         auto position = std::make_shared<fss::transport::fss_message_position_report>(
@@ -411,6 +411,66 @@ TEST_CASE("server_clients: position relay drops oldest and counts drops once the
     }
 
     REQUIRE(stuck_client->getPositionRelayDropped() == reports_sent - queue_cap);
+}
+
+TEST_CASE("server_clients: broadcast relays coalesce per reported aircraft, not across them (todo/95)")
+{
+    server_clients sc;
+    fss_test::MockDatabase mock;
+    mock.asset_ids["rx"] = 1;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("rx");
+    auto writer = make_null_writer();
+    auto client = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &sc);
+    sc.clientConnected(client);
+    client->processMessage(std::make_shared<fss::transport::fss_message_identity>("rx"));
+
+    auto make_report = [](uint32_t icao, uint32_t altitude) {
+        return std::make_shared<fss::transport::fss_message_position_report>(0.0, 0.0, altitude, 0U, 0U, int16_t{0},
+                                                                             icao, std::string{"X"}, 0U, uint8_t{0}, 0U,
+                                                                             uint8_t{0}, uint8_t{0}, uint64_t{0});
+    };
+    constexpr uint32_t icao_a = 0xAAAAAA;
+    constexpr uint32_t icao_b = 0xBBBBBB;
+    constexpr uint32_t flood = 100;
+
+    /* A stuck recipient: everything queues behind a parked send. */
+    conn->setBlocked(true);
+    sc.broadcastMsg(make_report(icao_a, 1));
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    sc.broadcastMsg(make_report(icao_b, 777));
+    for (uint32_t i = 2; i <= flood; ++i)
+    {
+        sc.broadcastMsg(make_report(icao_a, i));
+    }
+    conn->setBlocked(false);
+
+    REQUIRE(fss_test::wait_for([&]() -> bool {
+        for (const auto &m : conn->sentSnapshot())
+        {
+            auto r = std::dynamic_pointer_cast<fss::transport::fss_message_position_report>(m);
+            if (r != nullptr && r->getICAOAddress() == icao_a && r->getAltitude() == flood)
+            {
+                return true;
+            }
+        }
+        return false;
+    }));
+    std::size_t a_count = 0;
+    bool saw_b = false;
+    for (const auto &m : conn->sentSnapshot())
+    {
+        if (auto r = std::dynamic_pointer_cast<fss::transport::fss_message_position_report>(m))
+        {
+            a_count += r->getICAOAddress() == icao_a ? 1U : 0U;
+            saw_b = saw_b || r->getICAOAddress() == icao_b;
+        }
+    }
+    /* The one parked in flight, plus the latest: not the flood. */
+    REQUIRE(a_count <= 2);
+    REQUIRE(saw_b);
+    client->disconnect();
 }
 
 TEST_CASE("server_clients: broadcastMsg skips the 'except' client")

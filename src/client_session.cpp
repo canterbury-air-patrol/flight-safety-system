@@ -240,8 +240,11 @@ auto fss::server::fss_client::waitForOutboundWork() -> fss::server::fss_client::
     this->pending_rtt_replies.clear();
     work.server_list_broadcast = std::move(this->pending_server_list_broadcast);
     this->pending_server_list_broadcast = nullptr;
-    work.position_relay.assign(std::make_move_iterator(this->pending_position_relay.begin()),
-                               std::make_move_iterator(this->pending_position_relay.end()));
+    work.position_relay.reserve(this->pending_position_relay.size());
+    for (auto &entry : this->pending_position_relay)
+    {
+        work.position_relay.push_back(std::move(entry.frame));
+    }
     this->pending_position_relay.clear();
     return work;
 }
@@ -388,7 +391,8 @@ void fss::server::fss_client::queueServerListBroadcast(std::shared_ptr<const fss
     this->outbound_cv.notify_one();
 }
 
-void fss::server::fss_client::queuePositionRelay(std::shared_ptr<const fss::transport::buf_len> packed)
+void fss::server::fss_client::queuePositionRelay(std::shared_ptr<const fss::transport::buf_len> packed,
+                                                 uint32_t subject_key)
 {
     uint64_t dropped = 0;
     {
@@ -397,12 +401,24 @@ void fss::server::fss_client::queuePositionRelay(std::shared_ptr<const fss::tran
         {
             return;
         }
+        if (subject_key != 0)
+        {
+            /* Latest wins: a newer report for the same subject supersedes the
+             * queued one. That is not loss (nothing newer is missing), so it is
+             * not counted as a drop. */
+            auto stale = std::find_if(this->pending_position_relay.begin(), this->pending_position_relay.end(),
+                                      [subject_key](const pending_relay &e) -> bool { return e.key == subject_key; });
+            if (stale != this->pending_position_relay.end())
+            {
+                this->pending_position_relay.erase(stale);
+            }
+        }
         if (this->pending_position_relay.size() >= max_pending_position_relay)
         {
             this->pending_position_relay.pop_front();
             dropped = ++this->position_relay_dropped;
         }
-        this->pending_position_relay.push_back(std::move(packed));
+        this->pending_position_relay.push_back({subject_key, std::move(packed)});
     }
     this->outbound_cv.notify_one();
     /* Logged outside outbound_lock: getName() takes client_lock, and name is
