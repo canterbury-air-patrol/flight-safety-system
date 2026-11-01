@@ -1435,6 +1435,14 @@ void fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss
             this->aircraft = false;
             this->identified = true;
             FSS_LOG_INFO("server", "Non-aircraft client identified: " << client_name);
+            /* todo/87: the one thing a non-aircraft session is otherwise never
+             * sent, so its library has no way to tell an admitted session from
+             * a TLS-only or refused one. Only to peers that negotiated it; an
+             * older client would not know the type. */
+            if ((active_conn->getNegotiatedFeatureFlags() & fss::transport::FSS_FEATURE_IDENTITY_ACCEPTED) != 0)
+            {
+                active_conn->sendMsg(std::make_shared<fss::transport::fss_message_identity_accepted>());
+            }
         }
         else
         {
@@ -1518,6 +1526,7 @@ void fss::server::fss_client::processMessage(std::shared_ptr<fss::transport::fss
             case fss::transport::message_type_identity:
             case fss::transport::message_type_identity_non_aircraft:
             case fss::transport::message_type_identity_required:
+            case fss::transport::message_type_identity_accepted:
             case fss::transport::message_type_version: break;
             case fss::transport::message_type_rtt_request: {
                 /* todo/92: reply from the outbound worker; an inline send here

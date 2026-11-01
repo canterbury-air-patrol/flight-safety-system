@@ -50,13 +50,15 @@ static constexpr uint16_t FSS_PROTOCOL_MIN_VERSION = 1;
  * cannot force on a capability we do not implement: the AND with
  * FSS_SUPPORTED_FEATURES masks any bit we have not enabled. Each bit is added
  * to FSS_SUPPORTED_FEATURES only once this build actually implements it. */
-static constexpr uint32_t FSS_FEATURE_RTT_OFFSET = 0x1U;        /* todo/17 item 3 */
-static constexpr uint32_t FSS_FEATURE_COMMAND_ACK = 0x2U;       /* todo/17 item 1 */
-static constexpr uint32_t FSS_FEATURE_SYSTEM_HEALTH = 0x4U;     /* todo/17 item 2 */
-static constexpr uint32_t FSS_FEATURE_SERVER_COMMAND_ID = 0x8U; /* todo/49 */
-static constexpr uint32_t FSS_FEATURE_POSITION_FLAGS = 0x10U;   /* todo/76 */
-static constexpr uint32_t FSS_SUPPORTED_FEATURES =
-    FSS_FEATURE_RTT_OFFSET | FSS_FEATURE_COMMAND_ACK | FSS_FEATURE_SERVER_COMMAND_ID | FSS_FEATURE_POSITION_FLAGS;
+static constexpr uint32_t FSS_FEATURE_RTT_OFFSET = 0x1U;         /* todo/17 item 3 */
+static constexpr uint32_t FSS_FEATURE_COMMAND_ACK = 0x2U;        /* todo/17 item 1 */
+static constexpr uint32_t FSS_FEATURE_SYSTEM_HEALTH = 0x4U;      /* todo/17 item 2 */
+static constexpr uint32_t FSS_FEATURE_SERVER_COMMAND_ID = 0x8U;  /* todo/49 */
+static constexpr uint32_t FSS_FEATURE_POSITION_FLAGS = 0x10U;    /* todo/76 */
+static constexpr uint32_t FSS_FEATURE_IDENTITY_ACCEPTED = 0x20U; /* todo/87 */
+static constexpr uint32_t FSS_SUPPORTED_FEATURES = FSS_FEATURE_RTT_OFFSET | FSS_FEATURE_COMMAND_ACK |
+                                                   FSS_FEATURE_SERVER_COMMAND_ID | FSS_FEATURE_POSITION_FLAGS |
+                                                   FSS_FEATURE_IDENTITY_ACCEPTED;
 
 /* The capability set to adopt for a peer that advertised peer_flags: the
  * intersection with what this build implements, so a peer can never enable a
@@ -152,6 +154,12 @@ using fss_message_type = enum fss_message_type_e {
      * appended last so existing type numbering is unchanged for legacy peers.
      * See todo/17 item 1. */
     message_type_command_ack,
+
+    /* Sent by the server to a non-aircraft client once its identity has been
+     * accepted, gated by FSS_FEATURE_IDENTITY_ACCEPTED. The explicit admission
+     * signal for sessions the server otherwise never sends anything to
+     * (todo/87). Appended last so existing type numbering is unchanged. */
+    message_type_identity_accepted,
 };
 
 /* Outcome carried by a command ack. A command may produce up to two acks with
@@ -822,6 +830,15 @@ protected:
 public:
     fss_message_identity_required();
     fss_message_identity_required(uint64_t t_id, const std::shared_ptr<buf_len> &bl);
+};
+
+class fss_message_identity_accepted : public fss_message {
+private:
+protected:
+    void packData(std::shared_ptr<buf_len> bl) override;
+public:
+    fss_message_identity_accepted();
+    fss_message_identity_accepted(uint64_t t_id, const std::shared_ptr<buf_len> &bl);
 };
 
 class fss_message_version : public fss_message {

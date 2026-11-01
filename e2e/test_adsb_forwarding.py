@@ -119,3 +119,44 @@ def test_rate_limited_per_connection(db_conn, fake_client):
         f"expected the per-connection rate limiter to cap delivery well under "
         f"the ~200 attempted sends, got {received}\n" + _log_text(aircraft)
     )
+
+
+def _statuses(client: dict) -> list[str]:
+    return [
+        line.split("STATUS: ", 1)[1].strip()
+        for line in _log_text(client).splitlines()
+        if "STATUS: " in line
+    ]
+
+
+@pytest.mark.requires_docker
+def test_feeder_reports_connected_once_admitted(db_conn, fake_client):
+    """todo/87: a healthy non-aircraft client is reported as connected. The
+    server sends it nothing else (no commands, settings or server list), so
+    without identity_accepted the library kept it DISCONNECTED forever."""
+    feeder = fake_client(
+        "test3", non_aircraft=True,
+        extra_args=["--icao=0xabc124", "--callsign=FEEDER", "--position-interval-ms=500"],
+    )
+
+    deadline = time.monotonic() + 20.0
+    while time.monotonic() < deadline and "CONNECTED_1" not in _statuses(feeder):
+        time.sleep(0.1)
+    assert "CONNECTED_1" in _statuses(feeder), "feeder never reported connected\n" + _log_text(feeder)
+
+
+@pytest.mark.requires_docker
+def test_refused_feeder_never_reports_connected(db_conn, fake_client):
+    """A non-aircraft identify under an aircraft's CN is refused; refusal must
+    not look like service (todo/79 + todo/87)."""
+    with db_conn.cursor() as cur:
+        cur.execute("INSERT INTO assets_asset (name) VALUES ('test3') RETURNING id")
+
+    feeder = fake_client(
+        "test3", non_aircraft=True,
+        extra_args=["--icao=0xabc125", "--callsign=FEEDER", "--position-interval-ms=500"],
+    )
+    time.sleep(8)
+    assert "CONNECTED_1" not in _statuses(feeder), (
+        "a refused feeder was reported as connected\n" + _log_text(feeder)
+    )

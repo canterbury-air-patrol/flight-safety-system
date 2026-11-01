@@ -621,6 +621,11 @@ void flight_safety_system::client_ssl::fss_client::updateServers(
  * server sends *only* to a client it has identified and admitted, so the first
  * of them to arrive is proof — no new message type, and nothing to negotiate.
  *
+ * identity_accepted (todo/87) is the explicit signal for non-aircraft sessions,
+ * which are sent none of the other three; it is only sent after a successful
+ * identify, and only to peers that negotiated FSS_FEATURE_IDENTITY_ACCEPTED, so
+ * a feeder on an older server stays DISCONNECTED (the conservative direction).
+ *
  * Deliberately not keyed on the server list alone, as todo/79 proposed: the
  * identify path skips that send when the active-server read fails
  * (client_session.cpp) and leaves the client to the 15 s periodic broadcast, so
@@ -649,7 +654,8 @@ static auto admits_client(flight_safety_system::transport::fss_message_type type
     {
         case flight_safety_system::transport::message_type_command:
         case flight_safety_system::transport::message_type_server_list:
-        case flight_safety_system::transport::message_type_smm_settings: return true;
+        case flight_safety_system::transport::message_type_smm_settings:
+        case flight_safety_system::transport::message_type_identity_accepted: return true;
         case flight_safety_system::transport::message_type_unknown:
         case flight_safety_system::transport::message_type_closed:
         case flight_safety_system::transport::message_type_identity:
@@ -1519,6 +1525,7 @@ void flight_safety_system::client_ssl::fss_server::processMessage(
                 }
             }
             break;
+            case flight_safety_system::transport::message_type_identity_accepted:
             case flight_safety_system::transport::message_type_command_ack:
                 /* Command acks flow FMU -> server (todo/17 item 1). The bundled
                  * client is the command sender, not a recipient, so it never

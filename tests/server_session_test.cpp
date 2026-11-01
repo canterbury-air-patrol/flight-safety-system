@@ -415,6 +415,46 @@ TEST_CASE("session: accepts non-aircraft identify when cert CN is not a known ai
     REQUIRE(cap.str().find("Non-aircraft client identified: ground-station-1") != std::string::npos);
 }
 
+TEST_CASE("session: an accepted non-aircraft identify is announced only to a peer that negotiated it (todo/87)")
+{
+    bool negotiated = true;
+    SECTION("negotiated: identity_accepted follows the identify") {}
+    SECTION("legacy peer: nothing is sent")
+    {
+        negotiated = false;
+    }
+
+    fss_test::MockDatabase mock;
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("ground-station-1");
+    if (negotiated)
+    {
+        conn->setNegotiatedFeatureFlags(fss::transport::FSS_FEATURE_IDENTITY_ACCEPTED);
+    }
+    NullClientHandler handler;
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity_non_aircraft>());
+
+    REQUIRE(count_sent<fss::transport::fss_message_identity_accepted>(conn->sentSnapshot()) == (negotiated ? 1U : 0U));
+}
+
+TEST_CASE("session: a rejected non-aircraft identify is never announced as accepted (todo/87)")
+{
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 1; /* the CN belongs to an aircraft: refused */
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    conn->setNegotiatedFeatureFlags(fss::transport::FSS_FEATURE_IDENTITY_ACCEPTED);
+    NullClientHandler handler;
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity_non_aircraft>());
+
+    REQUIRE(handler.disconnects == 1);
+    REQUIRE(count_sent<fss::transport::fss_message_identity_accepted>(conn->sentSnapshot()) == 0);
+}
+
 TEST_CASE("session: identified non-aircraft client times out on liveness loss")
 {
     /* A non-aircraft client must be reaped on RTT timeout just like an

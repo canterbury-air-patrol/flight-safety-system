@@ -143,6 +143,7 @@ static auto decode_message_type(uint16_t type_n) -> flight_safety_system::transp
         case static_cast<uint16_t>(message_type_identity_required): return message_type_identity_required;
         case static_cast<uint16_t>(message_type_version): return message_type_version;
         case static_cast<uint16_t>(message_type_command_ack): return message_type_command_ack;
+        case static_cast<uint16_t>(message_type_identity_accepted): return message_type_identity_accepted;
         default: return message_type_unknown;
     }
 }
@@ -1372,6 +1373,22 @@ flight_safety_system::transport::fss_message_identity_required::fss_message_iden
 {
 }
 
+void flight_safety_system::transport::fss_message_identity_accepted::packData(std::shared_ptr<buf_len> bl
+                                                                              __attribute__((unused)))
+{
+}
+
+flight_safety_system::transport::fss_message_identity_accepted::fss_message_identity_accepted()
+    : fss_message(message_type_identity_accepted)
+{
+}
+
+flight_safety_system::transport::fss_message_identity_accepted::fss_message_identity_accepted(
+    uint64_t t_id, const std::shared_ptr<buf_len> &bl __attribute__((unused)))
+    : fss_message(t_id, message_type_identity_accepted)
+{
+}
+
 flight_safety_system::transport::fss_message_version::fss_message_version() : fss_message(message_type_version) {}
 
 // NOLINTBEGIN(bugprone-easily-swappable-parameters)
@@ -1447,6 +1464,7 @@ auto flight_safety_system::transport::fss_message::decode(const std::shared_ptr<
         case message_type_identity_required: msg = std::make_shared<fss_message_identity_required>(msg_id, bl); break;
         case message_type_version: msg = std::make_shared<fss_message_version>(msg_id, bl); break;
         case message_type_command_ack: msg = std::make_shared<fss_message_command_ack>(msg_id, bl); break;
+        case message_type_identity_accepted: msg = std::make_shared<fss_message_identity_accepted>(msg_id, bl); break;
     }
 
     if (msg != nullptr && msg->getType() != type)

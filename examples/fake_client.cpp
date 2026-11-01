@@ -60,6 +60,16 @@ public:
     {
         std::cout << "RCVD_RTT_REQ: id=" << msg->getId() << std::endl;
     }
+    /* Grep-able connection-status edges, so e2e can assert a client (feeders
+     * included, todo/87) is reported as connected only once the server has
+     * admitted it. */
+    void connectionStatusChange(fss::client_ssl::connection_status status) override
+    {
+        const char *name = status == fss::client_ssl::CLIENT_CONNECTION_STATUS_DISCONNECTED         ? "DISCONNECTED"
+                           : status == fss::client_ssl::CLIENT_CONNECTION_STATUS_CONNECTED_1_SERVER ? "CONNECTED_1"
+                                                                                                    : "CONNECTED_2PLUS";
+        std::cout << "STATUS: " << name << std::endl;
+    }
     void handleCommandFrom(const std::shared_ptr<fss::transport::fss_message_asset_command> &msg,
                            fss::client_ssl::fss_server *origin) override
     {
