@@ -286,6 +286,7 @@ void flight_safety_system::client_ssl::fss_client::attemptReconnect()
         reconnect_snapshot = this->reconnect_servers;
     }
     bool any_connected = false;
+    bool admission_lost = false;
     for (auto const &server : reconnect_snapshot)
     {
         /* Configuration virtuals may re-enter maintenance and promote or expire
@@ -302,11 +303,22 @@ void flight_safety_system::client_ssl::fss_client::attemptReconnect()
          * check and queueing. Lock order: servers_lock -> outbound_lock. */
         if (server->takeReconnectSucceeded())
         {
+            /* Already counted if it was admitted mid-dial (todo/86): that
+             * edge was reported by serverAdmitted(), so promotion changes no
+             * count and must not repeat the notification. */
+            any_connected = any_connected || !server->isAdmitted();
             this->servers.splice(this->servers.end(), this->reconnect_servers, found);
-            any_connected = true;
         }
         else
         {
+            if (server->takeReconnectFailed() && server->isAdmitted())
+            {
+                /* The dial that earned admission ended without success and
+                 * without a close (e.g. the identify send failed), so the
+                 * admission has no connection behind it (todo/86). */
+                server->setAdmitted(false);
+                admission_lost = true;
+            }
             server->queueReconnectPrepared();
         }
     }
@@ -335,7 +347,7 @@ void flight_safety_system::client_ssl::fss_client::attemptReconnect()
 
     /* Phase (e): notify outside the lock — connectionStatusChange() is a
      * virtual user callback that may re-enter the client. */
-    if (any_connected || !expired.empty())
+    if (any_connected || admission_lost || !expired.empty())
     {
         this->notifyConnectionStatus();
     }
@@ -666,8 +678,20 @@ static auto status_for_server_count(size_t count) -> flight_safety_system::clien
 
 auto flight_safety_system::client_ssl::fss_client::countAdmittedLocked() const -> size_t
 {
-    return static_cast<size_t>(std::count_if(this->servers.begin(), this->servers.end(),
-                                             [](const auto &server) -> bool { return server->isAdmitted(); }));
+    /* Both lists, not just the live one (todo/86). A server admits the client
+     * from inside its own dial — the first command can arrive during the
+     * identify send, before the worker publishes success and
+     * attemptReconnect() harvests it into `servers`. Counting only `servers`
+     * reported DISCONNECTED to the command callback that followed. `admitted`
+     * is only ever true for a connection that has earned it: it is cleared
+     * when that connection closes (requireReconnect) and when its dial turns
+     * out to have failed (attemptReconnect), so a server waiting in
+     * reconnect_servers does not inherit admission it no longer has. */
+    auto admitted = [](const auto &list) -> size_t {
+        return static_cast<size_t>(
+            std::count_if(list.begin(), list.end(), [](const auto &server) -> bool { return server->isAdmitted(); }));
+    };
+    return admitted(this->servers) + admitted(this->reconnect_servers);
 }
 
 void flight_safety_system::client_ssl::fss_client::serverAdmitted(flight_safety_system::client_ssl::fss_server *server)
@@ -898,6 +922,7 @@ void flight_safety_system::client_ssl::fss_server::outboundWorkerRun()
                  * Only this worker starts attempts, so invalidation belongs to
                  * this attempt until its result has been published. */
                 this->reconnect_succeeded = ok && !this->reconnect_invalidated && !this->outbound_stopping;
+                this->reconnect_failed = !ok;
                 this->reconnect_busy = false;
             }
         }
