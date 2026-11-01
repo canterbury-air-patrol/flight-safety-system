@@ -11,6 +11,7 @@
 #include <random>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace flight_safety_system {
@@ -369,6 +370,10 @@ private:
      * and sending the handshake, during which sendMsgAll() could put telemetry
      * ahead of the mandatory version message. */
     bool reconnect_succeeded{false};
+    /* Set by the worker when a dial ends without success, so attemptReconnect()
+     * can withdraw an admission that arrived mid-dial (todo/86). Guarded by
+     * outbound_lock. */
+    bool reconnect_failed{false};
     /* Close invalidates both an in-flight attempt and an unconsumed success.
      * Only the single worker resets this, after draining the old connection
      * and before starting its next attempt.
@@ -512,6 +517,18 @@ public:
      * above: fss_client::serverAdmitted() and the paths that end a connection
      * are the only callers, and each holds servers_lock. */
     auto isAdmitted() const -> bool { return this->admitted; }
+    /* True while a queued or running dial has not yet published its result. */
+    auto isReconnectBusy() -> bool
+    {
+        std::scoped_lock guard(this->outbound_lock);
+        return this->reconnect_busy;
+    }
+    /* Consume the record that the last dial ended without success (todo/86). */
+    auto takeReconnectFailed() -> bool
+    {
+        std::scoped_lock guard(this->outbound_lock);
+        return std::exchange(this->reconnect_failed, false);
+    }
     void setAdmitted(bool t_admitted) { this->admitted = t_admitted; }
     auto getLastSeenMs() const -> uint64_t { return this->last_seen_ms; }
     void setLastSeenMs(uint64_t t_now_ms) { this->last_seen_ms = t_now_ms; }

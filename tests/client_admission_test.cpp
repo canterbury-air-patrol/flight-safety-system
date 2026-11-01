@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <vector>
 
 #include "fss-client-ssl.hpp"
@@ -148,6 +149,77 @@ auto make_smm_settings() -> std::shared_ptr<fss::transport::fss_message>
 {
     return std::make_shared<fss::transport::fss_message_smm_settings>("smm.example", fss::secure_string{"user"},
                                                                       fss::secure_string{"pass"});
+}
+
+/* Records statuses and commands in one ordered log, so a case can assert what
+ * the application had been told at the moment a command callback ran. */
+class OrderingClient : public fss::client_ssl::fss_client {
+    mutable std::mutex log_lock{};
+    std::vector<std::string> log{};
+public:
+    using fss_client::fss_client;
+    OrderingClient(const OrderingClient &) = delete;
+    OrderingClient(OrderingClient &&) = delete;
+    auto operator=(const OrderingClient &) -> OrderingClient & = delete;
+    auto operator=(OrderingClient &&) -> OrderingClient & = delete;
+    ~OrderingClient() override = default;
+
+    void add(const std::shared_ptr<fss::client_ssl::fss_server> &server) { this->addServer(server); }
+    auto events() const -> std::vector<std::string>
+    {
+        std::scoped_lock guard(this->log_lock);
+        return this->log;
+    }
+private:
+    void connectionStatusChange(fss::client_ssl::connection_status status) override
+    {
+        const char *name = status == fss::client_ssl::CLIENT_CONNECTION_STATUS_DISCONNECTED         ? "disconnected"
+                           : status == fss::client_ssl::CLIENT_CONNECTION_STATUS_CONNECTED_1_SERVER ? "connected-1"
+                                                                                                    : "connected-2+";
+        std::scoped_lock guard(this->log_lock);
+        this->log.emplace_back(name);
+    }
+    void handleCommand(const std::shared_ptr<fss::transport::fss_message_asset_command> &) override
+    {
+        std::scoped_lock guard(this->log_lock);
+        this->log.emplace_back("command");
+    }
+};
+
+/* A dial during which the server speaks before the worker has published
+ * success: the first command arrives while the server is still in
+ * reconnect_servers (todo/86). */
+class AdmittingDialServer : public fss::client_ssl::fss_server {
+public:
+    using fss_server::fss_server;
+    AdmittingDialServer(const AdmittingDialServer &) = delete;
+    AdmittingDialServer(AdmittingDialServer &&) = delete;
+    auto operator=(const AdmittingDialServer &) -> AdmittingDialServer & = delete;
+    auto operator=(AdmittingDialServer &&) -> AdmittingDialServer & = delete;
+    ~AdmittingDialServer() override = default;
+
+    bool dial_succeeds{true};
+protected:
+    auto reconnect_to() -> bool override
+    {
+        this->setConnection(std::make_shared<SilentConnection>());
+        this->processMessage(make_command());
+        return this->dial_succeeds;
+    }
+};
+
+auto make_connected_server_for(fss::client_ssl::fss_client *client, uint16_t port) -> std::shared_ptr<AdmissionServer>
+{
+    auto server = std::make_shared<AdmissionServer>(client, "server.example", port, "", "", "");
+    server->setConnection(std::make_shared<SilentConnection>());
+    return server;
+}
+
+/* Dial once and wait for the worker to finish, without harvesting. */
+void dial_and_wait(fss::client_ssl::fss_client &client, AdmittingDialServer &server)
+{
+    client.attemptReconnect();
+    REQUIRE(fss_test::wait_for([&]() -> bool { return server.isAdmitted() && !server.isReconnectBusy(); }));
 }
 
 } // namespace
@@ -312,4 +384,67 @@ TEST_CASE("client: admission does not survive the connection that earned it (tod
     {
         REQUIRE(client->at(i) == fss::client_ssl::CLIENT_CONNECTION_STATUS_DISCONNECTED);
     }
+}
+
+TEST_CASE("client: connected status is reported before a command that arrives during the dial (todo/86)")
+{
+    auto client = std::make_shared<OrderingClient>();
+    auto server = std::make_shared<AdmittingDialServer>(client.get(), "server.example", uint16_t{20311}, "", "", "");
+    client->add(server);
+
+    dial_and_wait(*client, *server);
+    /* Not yet harvested into the live list: the command callback has already run. */
+    REQUIRE(client->events() == std::vector<std::string>{"connected-1", "command"});
+
+    /* Harvesting changes no count, so it must not repeat the notification. */
+    client->attemptReconnect();
+    REQUIRE(server->connected());
+    REQUIRE(client->events() == std::vector<std::string>{"connected-1", "command"});
+}
+
+TEST_CASE("client: a second server admitted mid-dial reports the right count first (todo/86)")
+{
+    auto client = std::make_shared<OrderingClient>();
+    auto live = make_connected_server_for(client.get(), uint16_t{20312});
+    client->add(live);
+    live->processMessage(make_server_list());
+    REQUIRE(client->events() == std::vector<std::string>{"connected-1"});
+
+    auto joining = std::make_shared<AdmittingDialServer>(client.get(), "other.example", uint16_t{20313}, "", "", "");
+    client->add(joining);
+    dial_and_wait(*client, *joining);
+
+    REQUIRE(client->events() == std::vector<std::string>{"connected-1", "connected-2+", "command"});
+}
+
+TEST_CASE("client: an admission whose dial then fails is withdrawn, not left counted (todo/86)")
+{
+    auto client = std::make_shared<OrderingClient>();
+    auto server = std::make_shared<AdmittingDialServer>(client.get(), "server.example", uint16_t{20314}, "", "", "");
+    server->dial_succeeds = false;
+    client->add(server);
+
+    client->attemptReconnect();
+    REQUIRE(fss_test::wait_for([&]() -> bool { return server->isAdmitted() && !server->isReconnectBusy(); }));
+    REQUIRE(client->events() == std::vector<std::string>{"connected-1", "command"});
+
+    /* The dial ended without success and without a close message. */
+    client->attemptReconnect();
+    REQUIRE_FALSE(server->isAdmitted());
+    REQUIRE(client->events().back() == "disconnected");
+}
+
+TEST_CASE("client: a close during the dial withdraws a mid-dial admission (todo/86)")
+{
+    auto client = std::make_shared<OrderingClient>();
+    auto server = std::make_shared<AdmittingDialServer>(client.get(), "server.example", uint16_t{20315}, "", "", "");
+    client->add(server);
+    dial_and_wait(*client, *server);
+
+    server->processMessage(std::make_shared<fss::transport::fss_message_closed>());
+    REQUIRE_FALSE(server->isAdmitted());
+    REQUIRE(client->events().back() == "disconnected");
+    /* The stale success must not resurrect it on the next pass. */
+    client->attemptReconnect();
+    REQUIRE_FALSE(server->isAdmitted());
 }
