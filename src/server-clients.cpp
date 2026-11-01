@@ -185,6 +185,13 @@ void server_clients::broadcastMsg(const std::shared_ptr<flight_safety_system::tr
                                                                  << " did not pack into a valid frame; dropping");
         return;
     }
+    /* todo/95: key the relay by the aircraft the report is about, so a
+     * recipient's queue keeps the latest position per aircraft. */
+    uint32_t subject_key = 0;
+    if (auto position = std::dynamic_pointer_cast<flight_safety_system::transport::fss_message_position_report>(msg))
+    {
+        subject_key = position->getICAOAddress();
+    }
     for (const auto &client : this->snapshotClients())
     {
         if (client->isAircraft() && client.get() != except)
@@ -195,7 +202,7 @@ void server_clients::broadcastMsg(const std::shared_ptr<flight_safety_system::tr
             }
             else
             {
-                client->queuePositionRelay(packed);
+                client->queuePositionRelay(packed, subject_key);
             }
         }
     }

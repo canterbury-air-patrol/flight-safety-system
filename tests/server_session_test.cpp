@@ -1505,6 +1505,65 @@ TEST_CASE("session: a command queued mid-batch is sent after at most one in-flig
     session->disconnect();
 }
 
+TEST_CASE("session: a flooding source cannot evict a quiet source's relayed position (todo/95)")
+{
+    fss_test::MockDatabase mock;
+    mock.asset_ids["craft"] = 1;
+    NullClientHandler handler;
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("craft");
+    auto writer = make_mock_writer(mock);
+    auto session = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &handler);
+    session->processMessage(std::make_shared<fss::transport::fss_message_identity>("craft"));
+    session->activate();
+
+    auto make_frame = [](uint32_t icao, uint32_t altitude) {
+        return std::make_shared<fss::transport::fss_message_position_report>(0.0, 0.0, altitude, 0U, 0U, int16_t{0},
+                                                                             icao, std::string{"X"}, 0U, uint8_t{0}, 0U,
+                                                                             uint8_t{0}, uint8_t{0}, uint64_t{0})
+            ->getPacked();
+    };
+    constexpr uint32_t icao_a = 0xAAAAAA;
+    constexpr uint32_t icao_b = 0xBBBBBB;
+
+    /* Park the worker inside a send so nothing drains while we queue. */
+    conn->setBlocked(true);
+    session->queuePositionRelay(make_frame(0xCCCCCC, 1), 0xCCCCCC);
+    REQUIRE(fss_test::wait_for([&]() -> bool { return conn->inFlightMessage() != nullptr; }));
+
+    constexpr uint32_t flood = 200;
+    session->queuePositionRelay(make_frame(icao_b, 777), icao_b);
+    for (uint32_t i = 1; i <= flood; ++i)
+    {
+        session->queuePositionRelay(make_frame(icao_a, i), icao_a);
+    }
+    conn->setBlocked(false);
+
+    REQUIRE(fss_test::wait_for(
+        [&]() -> bool { return count_sent<fss::transport::fss_message_position_report>(conn->sentSnapshot()) >= 3; }));
+    std::vector<std::shared_ptr<fss::transport::fss_message_position_report>> a_reports;
+    std::vector<std::shared_ptr<fss::transport::fss_message_position_report>> b_reports;
+    for (const auto &m : conn->sentSnapshot())
+    {
+        if (auto r = std::dynamic_pointer_cast<fss::transport::fss_message_position_report>(m))
+        {
+            (r->getICAOAddress() == icao_a ? a_reports : b_reports).push_back(r);
+        }
+    }
+    /* A is reduced to its latest; B's single report survived the flood. */
+    REQUIRE(a_reports.size() == 1);
+    REQUIRE(a_reports.front()->getAltitude() == flood);
+    bool saw_b = false;
+    for (const auto &r : b_reports)
+    {
+        saw_b = saw_b || (r->getICAOAddress() == icao_b && r->getAltitude() == 777);
+    }
+    REQUIRE(saw_b);
+    /* Superseded frames are not loss. */
+    REQUIRE(session->getPositionRelayDropped() == 0);
+    session->disconnect();
+}
+
 TEST_CASE("session: queueRTTRequest sends an RTT request on the outbound worker thread")
 {
     /* todo/21: RTT requests are scheduled on the writer thread too, each client
