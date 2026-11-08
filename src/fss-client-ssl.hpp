@@ -328,8 +328,9 @@ private:
      * servers_lock, like `learned` above. Cleared whenever the connection ends,
      * so each new connection has to earn it again — a reconnect into a server
      * that refuses the client must not inherit the previous session's
-     * admission. */
-    bool admitted{false};
+     * admission. Atomic because the dial worker sets it while a caller may
+     * poll it without servers_lock. */
+    std::atomic<bool> admitted{false};
     /* Per-server outbound writer
      * (docs/decisions/66-67-client-outbound-fanout.md). The caller's thread
      * schedules *what* to send; this worker performs the blocking socket
@@ -516,7 +517,7 @@ public:
     /* Admission state (todo/79). Same locking rule as the learned accessors
      * above: fss_client::serverAdmitted() and the paths that end a connection
      * are the only callers, and each holds servers_lock. */
-    auto isAdmitted() const -> bool { return this->admitted; }
+    auto isAdmitted() const -> bool { return this->admitted.load(); }
     /* True while a queued or running dial has not yet published its result. */
     auto isReconnectBusy() -> bool
     {
@@ -529,7 +530,7 @@ public:
         std::scoped_lock guard(this->outbound_lock);
         return std::exchange(this->reconnect_failed, false);
     }
-    void setAdmitted(bool t_admitted) { this->admitted = t_admitted; }
+    void setAdmitted(bool t_admitted) { this->admitted.store(t_admitted); }
     auto getLastSeenMs() const -> uint64_t { return this->last_seen_ms; }
     void setLastSeenMs(uint64_t t_now_ms) { this->last_seen_ms = t_now_ms; }
     void setServerTimeoutMs(uint64_t ms) { this->server_timeout_ms = ms; }
