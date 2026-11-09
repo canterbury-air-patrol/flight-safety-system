@@ -58,7 +58,7 @@ public:
     CountingServer(CountingServer&&) = delete;
     auto operator=(const CountingServer&) -> CountingServer& = delete;
     auto operator=(CountingServer&&) -> CountingServer& = delete;
-    ~CountingServer() override = default;
+    ~CountingServer() override { this->disconnect(); }
     int attempts{0};
 protected:
     auto reconnect_to() -> bool override
@@ -91,7 +91,7 @@ public:
     SwapServer(SwapServer&&) = delete;
     auto operator=(const SwapServer&) -> SwapServer& = delete;
     auto operator=(SwapServer&&) -> SwapServer& = delete;
-    ~SwapServer() override = default;
+    ~SwapServer() override { this->disconnect(); }
     auto connected() -> bool override { return true; }
     void adopt(const std::shared_ptr<flight_safety_system::transport::fss_connection>& t_conn)
     {

@@ -67,7 +67,7 @@ public:
     AdmissionServer(AdmissionServer &&) = delete;
     auto operator=(const AdmissionServer &) -> AdmissionServer & = delete;
     auto operator=(AdmissionServer &&) -> AdmissionServer & = delete;
-    ~AdmissionServer() override = default;
+    ~AdmissionServer() override { this->disconnect(); }
 };
 
 /* Records every status the client reports, in order, so a case can assert the
@@ -123,7 +123,7 @@ public:
     DiallingServer(DiallingServer &&) = delete;
     auto operator=(const DiallingServer &) -> DiallingServer & = delete;
     auto operator=(DiallingServer &&) -> DiallingServer & = delete;
-    ~DiallingServer() override = default;
+    ~DiallingServer() override { this->disconnect(); }
 
     std::atomic<int> dials{0};
 protected:
@@ -196,7 +196,7 @@ public:
     AdmittingDialServer(AdmittingDialServer &&) = delete;
     auto operator=(const AdmittingDialServer &) -> AdmittingDialServer & = delete;
     auto operator=(AdmittingDialServer &&) -> AdmittingDialServer & = delete;
-    ~AdmittingDialServer() override = default;
+    ~AdmittingDialServer() override { this->disconnect(); }
 
     bool dial_succeeds{true};
 protected:

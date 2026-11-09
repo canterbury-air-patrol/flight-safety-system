@@ -152,7 +152,7 @@ public:
     InjectableServer(InjectableServer &&) = delete;
     auto operator=(const InjectableServer &) -> InjectableServer & = delete;
     auto operator=(InjectableServer &&) -> InjectableServer & = delete;
-    ~InjectableServer() override = default;
+    ~InjectableServer() override { this->disconnect(); }
 };
 
 /* fss_client with the protected addServer exposed. */
@@ -234,7 +234,7 @@ public:
     InstantDialServer(InstantDialServer &&) = delete;
     auto operator=(const InstantDialServer &) -> InstantDialServer & = delete;
     auto operator=(InstantDialServer &&) -> InstantDialServer & = delete;
-    ~InstantDialServer() override = default;
+    ~InstantDialServer() override { this->disconnect(); }
 
     std::atomic<int> dials_entered{0};
 protected:
