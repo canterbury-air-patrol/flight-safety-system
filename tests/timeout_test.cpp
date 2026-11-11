@@ -227,7 +227,10 @@ public:
     AlwaysConnectedServer(AlwaysConnectedServer &&) = delete;
     auto operator=(const AlwaysConnectedServer &) -> AlwaysConnectedServer & = delete;
     auto operator=(AlwaysConnectedServer &&) -> AlwaysConnectedServer & = delete;
-    ~AlwaysConnectedServer() override = default;
+    /* Stop the outbound worker while this class's vtable is still live: the base
+     * destructor would join it only after the vptr is reset, racing the
+     * worker's virtual reconnect() call. */
+    ~AlwaysConnectedServer() override { fss_server::disconnect(); }
     auto connected() -> bool override { return true; }
     std::atomic<int> reconnects{0};
 protected:
@@ -248,7 +251,7 @@ public:
     ReconnectingServer(ReconnectingServer &&) = delete;
     auto operator=(const ReconnectingServer &) -> ReconnectingServer & = delete;
     auto operator=(ReconnectingServer &&) -> ReconnectingServer & = delete;
-    ~ReconnectingServer() override = default;
+    ~ReconnectingServer() override { fss_server::disconnect(); }
     auto connected() -> bool override { return true; }
     /* Incremented on the outbound worker thread and read by the test thread
      * since todo/66 moved the dial off the caller's thread. */
