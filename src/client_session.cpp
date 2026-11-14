@@ -392,7 +392,7 @@ void fss::server::fss_client::queueServerListBroadcast(std::shared_ptr<const fss
 }
 
 void fss::server::fss_client::queuePositionRelay(std::shared_ptr<const fss::transport::buf_len> packed,
-                                                 uint32_t subject_key)
+                                                 relay_key subject_key)
 {
     uint64_t dropped = 0;
     {
@@ -401,7 +401,7 @@ void fss::server::fss_client::queuePositionRelay(std::shared_ptr<const fss::tran
         {
             return;
         }
-        if (subject_key != 0)
+        if (subject_key.named())
         {
             /* Latest wins: a newer report for the same subject supersedes the
              * queued one. That is not loss (nothing newer is missing), so it is

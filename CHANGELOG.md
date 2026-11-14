@@ -30,7 +30,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Coalesce each client's pending position relays per reported aircraft (latest
   wins) instead of evicting by age across all aircraft, so a busy aircraft can
-  no longer push a quiet one's only recent position out of the queue (todo/95).
+  no longer push a quiet one's only recent position out of the queue. A report
+  with no ICAO address, which is every aircraft's own position, is keyed by the
+  session that reported it (todo/95).
 - Report a server's admission before the command callback that arrives during
   its own dial, and withdraw an admission whose dial then fails (todo/86).
 - Keep the receive thread off the send path: RTT replies go through the
