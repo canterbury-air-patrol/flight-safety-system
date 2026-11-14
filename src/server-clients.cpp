@@ -186,11 +186,17 @@ void server_clients::broadcastMsg(const std::shared_ptr<flight_safety_system::tr
         return;
     }
     /* todo/95: key the relay by the aircraft the report is about, so a
-     * recipient's queue keeps the latest position per aircraft. */
-    uint32_t subject_key = 0;
+     * recipient's queue keeps the latest position per aircraft. An aircraft's
+     * own report carries no ICAO address, so it is keyed by the session that
+     * sent it. */
+    flight_safety_system::server::relay_key subject_key{};
     if (auto position = std::dynamic_pointer_cast<flight_safety_system::transport::fss_message_position_report>(msg))
     {
-        subject_key = position->getICAOAddress();
+        subject_key.icao = position->getICAOAddress();
+        if (subject_key.icao == 0)
+        {
+            subject_key.source = except;
+        }
     }
     for (const auto &client : this->snapshotClients())
     {

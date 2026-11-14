@@ -1528,14 +1528,14 @@ TEST_CASE("session: a flooding source cannot evict a quiet source's relayed posi
 
     /* Park the worker inside a send so nothing drains while we queue. */
     conn->setBlocked(true);
-    session->queuePositionRelay(make_frame(0xCCCCCC, 1), 0xCCCCCC);
+    session->queuePositionRelay(make_frame(0xCCCCCC, 1), fss::server::relay_key{0xCCCCCC});
     REQUIRE(fss_test::wait_for([&]() -> bool { return conn->inFlightMessage() != nullptr; }));
 
     constexpr uint32_t flood = 200;
-    session->queuePositionRelay(make_frame(icao_b, 777), icao_b);
+    session->queuePositionRelay(make_frame(icao_b, 777), fss::server::relay_key{icao_b});
     for (uint32_t i = 1; i <= flood; ++i)
     {
-        session->queuePositionRelay(make_frame(icao_a, i), icao_a);
+        session->queuePositionRelay(make_frame(icao_a, i), fss::server::relay_key{icao_a});
     }
     conn->setBlocked(false);
 

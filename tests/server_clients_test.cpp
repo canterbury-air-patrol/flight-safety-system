@@ -473,6 +473,76 @@ TEST_CASE("server_clients: broadcast relays coalesce per reported aircraft, not 
     client->disconnect();
 }
 
+TEST_CASE("server_clients: own-position relays with no ICAO address coalesce per reporting aircraft (todo/95)")
+{
+    /* An aircraft reporting its own position has no ICAO address (cap-fmu
+     * sends 0), so the relay must be keyed by who reported it: keyed on the
+     * address alone, every such report is "no subject", nothing coalesces, and
+     * a busy aircraft evicts a quiet one's only position by age again. */
+    server_clients sc;
+    fss_test::MockDatabase mock;
+    mock.asset_ids["rx"] = 1;
+
+    auto conn = std::make_shared<FakeConnection>();
+    conn->cert_names.push_back("rx");
+    auto writer = make_null_writer();
+    auto client = std::make_shared<fss::server::fss_client>(conn, &mock, writer, &sc);
+    sc.clientConnected(client);
+    client->processMessage(std::make_shared<fss::transport::fss_message_identity>("rx"));
+
+    auto busy = make_aircraft_client("busy", mock, sc);
+    auto quiet = make_aircraft_client("quiet", mock, sc);
+
+    auto make_report = [](const std::string &callsign, uint32_t altitude) {
+        return std::make_shared<fss::transport::fss_message_position_report>(0.0, 0.0, altitude, 0U, 0U, int16_t{0}, 0U,
+                                                                             callsign, 0U, uint8_t{0}, 0U, uint8_t{0},
+                                                                             uint8_t{0}, uint64_t{0});
+    };
+    /* More than the queue holds (64), so without coalescing the quiet
+     * aircraft's report is the oldest queued frame and is evicted. */
+    constexpr uint32_t flood = 200;
+
+    /* A stuck recipient: everything queues behind a parked send. */
+    conn->setBlocked(true);
+    sc.broadcastMsg(make_report("busy", 1), busy.get());
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    sc.broadcastMsg(make_report("quiet", 777), quiet.get());
+    for (uint32_t i = 2; i <= flood; ++i)
+    {
+        sc.broadcastMsg(make_report("busy", i), busy.get());
+    }
+    conn->setBlocked(false);
+
+    REQUIRE(fss_test::wait_for([&]() -> bool {
+        for (const auto &m : conn->sentSnapshot())
+        {
+            auto r = std::dynamic_pointer_cast<fss::transport::fss_message_position_report>(m);
+            if (r != nullptr && r->getCallSign() == "busy" && r->getAltitude() == flood)
+            {
+                return true;
+            }
+        }
+        return false;
+    }));
+    std::size_t busy_count = 0;
+    bool saw_quiet = false;
+    for (const auto &m : conn->sentSnapshot())
+    {
+        if (auto r = std::dynamic_pointer_cast<fss::transport::fss_message_position_report>(m))
+        {
+            busy_count += r->getCallSign() == "busy" ? 1U : 0U;
+            saw_quiet = saw_quiet || (r->getCallSign() == "quiet" && r->getAltitude() == 777);
+        }
+    }
+    /* The one parked in flight, plus the latest: not the flood. */
+    REQUIRE(busy_count <= 2);
+    REQUIRE(saw_quiet);
+    REQUIRE(client->getPositionRelayDropped() == 0);
+    client->disconnect();
+    busy->disconnect();
+    quiet->disconnect();
+}
+
 TEST_CASE("server_clients: broadcastMsg skips the 'except' client")
 {
     server_clients sc;

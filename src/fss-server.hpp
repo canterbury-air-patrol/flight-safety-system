@@ -292,6 +292,24 @@ public:
 
 class fss_client;
 
+/* What a queued position relay is "about" (todo/95), so a recipient's queue can
+ * keep the latest frame per aircraft. A report carrying a real ICAO address is
+ * keyed by that address, whoever relayed it. An aircraft reporting its own
+ * position has no address to give (cap-fmu sends ICAO 0), so those are keyed by
+ * the session that reported them instead: keying on ICAO alone would leave
+ * every such report uncoalesced. The two are separate fields so a session can
+ * never collide with an address. `source` is only ever compared, never
+ * dereferenced. A default-constructed key names nothing and never coalesces. */
+struct relay_key {
+    uint32_t icao{0};
+    const fss_client *source{nullptr};
+    [[nodiscard]] auto named() const -> bool { return this->icao != 0 || this->source != nullptr; }
+    auto operator==(const relay_key &other) const -> bool
+    {
+        return this->icao == other.icao && this->source == other.source;
+    }
+};
+
 /* Server policy when a second connection identifies as an asset that
  * already has a live session (todo/31). mTLS proves the client cert, so a
  * duplicate is far more likely to be a stale reconnect than a stolen-key
@@ -540,15 +558,15 @@ private:
      * command/telemetry distinction), so under sustained backlog the oldest
      * queued report is dropped rather than growing unboundedly. Guarded by
      * outbound_lock. */
-    /* Coalesced per subject (todo/95): a queued frame is keyed by the ICAO
-     * address of the aircraft it reports, and a newer frame for the same key
-     * replaces the older one, so the queue is bounded by the number of distinct
-     * subjects rather than by frame count. Eviction by age across subjects used
-     * to drop a quiet aircraft's only recent position whenever a busy one
-     * flooded the queue. Key 0 means "no subject" and is never coalesced. */
+    /* Coalesced per subject (todo/95): a queued frame is keyed by the aircraft
+     * it reports (see relay_key), and a newer frame for the same key replaces
+     * the older one, so the queue is bounded by the number of distinct subjects
+     * rather than by frame count. Eviction by age across subjects used to drop
+     * a quiet aircraft's only recent position whenever a busy one flooded the
+     * queue. A key that names nothing is never coalesced. */
     static constexpr size_t max_pending_position_relay = 64;
     struct pending_relay {
-        uint32_t key{0};
+        relay_key key{};
         std::shared_ptr<const transport::buf_len> frame{nullptr};
     };
     std::deque<pending_relay> pending_position_relay{};
@@ -659,7 +677,7 @@ public:
      * `packed` is a getPacked() frame shared read-only across recipients; the
      * worker copies it and stamps the id per connection (sendPacked, todo/55).
      * Returns immediately; no-op once disconnecting. */
-    void queuePositionRelay(std::shared_ptr<const transport::buf_len> packed, uint32_t subject_key = 0);
+    void queuePositionRelay(std::shared_ptr<const transport::buf_len> packed, relay_key subject_key = {});
     /* Cumulative position reports dropped from this client's relay queue by
      * the bounded-cap policy above. 0 unless the queue has ever overflowed. */
     auto getPositionRelayDropped() -> uint64_t;
