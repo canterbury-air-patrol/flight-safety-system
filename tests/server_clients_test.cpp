@@ -398,12 +398,14 @@ TEST_CASE("server_clients: position relay drops oldest and counts drops once the
     auto stuck_client = std::make_shared<fss::server::fss_client>(stuck_conn, &mock, stuck_writer, &sc);
     stuck_client->processMessage(std::make_shared<fss::transport::fss_message_identity>("stuck"));
 
-    constexpr int reports_sent = 70;
-    constexpr uint64_t queue_cap = 64;
-    for (int i = 0; i < reports_sent; ++i)
+    constexpr uint32_t reports_sent = 70;
+    constexpr uint32_t queue_cap = 64;
+    for (uint32_t i = 0; i < reports_sent; ++i)
     {
+        /* The altitude numbers each report, so the survivors can be told
+         * apart below. */
         auto position = std::make_shared<fss::transport::fss_message_position_report>(
-            0.0, 0.0, 0U, 0U, 0U, int16_t{0}, 0U, std::string{}, 0U, uint8_t{0}, 0U, uint8_t{0}, uint8_t{0},
+            0.0, 0.0, i, 0U, 0U, int16_t{0}, 0U, std::string{}, 0U, uint8_t{0}, 0U, uint8_t{0}, uint8_t{0},
             uint64_t{0});
         /* todo/55: the relay queue now carries the packed frame, shared across
          * recipients, not a decoded message clone. */
@@ -411,6 +413,30 @@ TEST_CASE("server_clients: position relay drops oldest and counts drops once the
     }
 
     REQUIRE(stuck_client->getPositionRelayDropped() == reports_sent - queue_cap);
+
+    /* The count alone would also pass if the newest report were the one
+     * dropped. Start the worker now and check what it drains: the oldest
+     * reports are gone, and the newest queue_cap remain, in order. */
+    stuck_client->activate();
+    auto relayed_altitudes = [&]() -> std::vector<uint32_t> {
+        std::vector<uint32_t> altitudes;
+        for (const auto &m : stuck_conn->sentSnapshot())
+        {
+            if (auto r = std::dynamic_pointer_cast<fss::transport::fss_message_position_report>(m))
+            {
+                altitudes.push_back(r->getAltitude());
+            }
+        }
+        return altitudes;
+    };
+    REQUIRE(fss_test::wait_for([&]() -> bool { return relayed_altitudes().size() >= queue_cap; }));
+    std::vector<uint32_t> expected;
+    for (uint32_t i = reports_sent - queue_cap; i < reports_sent; ++i)
+    {
+        expected.push_back(i);
+    }
+    REQUIRE(relayed_altitudes() == expected);
+    stuck_client->disconnect();
 }
 
 TEST_CASE("server_clients: broadcast relays coalesce per reported aircraft, not across them (todo/95)")
